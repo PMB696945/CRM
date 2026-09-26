@@ -8,6 +8,10 @@ header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: same-origin');
 
+if (!is_file(APP_ROOT . '/config.php')) {
+    redirect('install.php');
+}
+
 start_session();
 
 $page = query('page', 'dashboard');

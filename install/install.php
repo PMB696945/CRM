@@ -16,6 +16,7 @@ if (PHP_SAPI !== 'cli') {
 }
 
 require dirname(__DIR__) . '/src/bootstrap.php';
+require APP_ROOT . '/src/installer.php';
 
 $opts = getopt('', ['email:', 'password:', 'name::', 'demo']);
 
@@ -26,10 +27,7 @@ try {
     exit(1);
 }
 
-$schema = file_get_contents(__DIR__ . '/schema.sql');
-foreach (array_filter(array_map('trim', explode(';', preg_replace('/^--.*$/m', '', $schema)))) as $statement) {
-    db()->exec($statement);
-}
+install_schema();
 echo "✔ Schema installed\n";
 
 if (!empty($opts['email'])) {
@@ -38,17 +36,9 @@ if (!empty($opts['email'])) {
         fwrite(STDERR, "Password must be at least 8 characters.\n");
         exit(1);
     }
-    $email = strtolower($opts['email']);
-    $name = $opts['name'] ?? 'Administrator';
-    $existing = db_value('SELECT id FROM users WHERE email = ?', [$email]);
-    if ($existing) {
-        db_exec("UPDATE users SET password_hash = ?, role = 'admin', active = 1 WHERE id = ?", [password_hash($password, PASSWORD_DEFAULT), $existing]);
-        echo "✔ Updated admin user $email\n";
-    } else {
-        db_exec("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')", [$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
-        echo "✔ Created admin user $email\n";
-    }
-} elseif (!db_value('SELECT COUNT(*) FROM users')) {
+    $created = create_admin($opts['name'] ?? 'Administrator', $opts['email'], $password);
+    echo ($created ? '✔ Created' : '✔ Updated') . " admin user {$opts['email']}\n";
+} elseif (!is_installed()) {
     echo "! No users exist yet. Re-run with --email=... --password=... to create an admin.\n";
 }
 

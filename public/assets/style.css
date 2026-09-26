@@ -228,3 +228,10 @@ input[type=checkbox] { width: auto; accent-color: var(--primary); }
   .details dd { margin-bottom: .5rem; }
   .bar-row { grid-template-columns: 110px 1fr 80px; }
 }
+
+/* Web installer */
+.install-card { max-width: 460px; }
+.install-card p { margin: 0; }
+.install-card label.check { flex-direction: row; align-items: center; gap: .5rem; font-weight: 500; }
+.install-card textarea.code { width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .75rem; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; background: var(--surface-2); padding: .05rem .3rem; border-radius: 4px; }

@@ -1,0 +1,14 @@
+# Only used when the whole CRM folder is uploaded inside the web root
+# (e.g. public_html/crm/). Visitors are sent to public/, and everything
+# else (config, source code, installer scripts) is blocked.
+Options -Indexes
+DirectoryIndex index.php
+
+<FilesMatch "^(config(\.sample)?\.php|README\.md|\.gitignore|.*\.sql)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(src|templates|install|tests|\.git)(/|$) - [F,L]
+</IfModule>

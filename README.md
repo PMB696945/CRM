@@ -22,28 +22,49 @@ Security: prepared statements throughout, CSRF tokens on every form, output esca
 
 ## Installation
 
-1. **Create a database and user**
-   ```sql
-   CREATE DATABASE telecom_crm CHARACTER SET utf8mb4;
-   CREATE USER 'crm'@'localhost' IDENTIFIED BY 'choose-a-password';
-   GRANT ALL ON telecom_crm.* TO 'crm'@'localhost';
-   ```
+You don't need root or SSH access. Pick whichever of these fits your hosting.
 
-2. **Configure**
-   ```bash
-   cp config.sample.php config.php   # then edit the DB details
-   ```
-   You can also set `CRM_DB_HOST`, `CRM_DB_NAME`, `CRM_DB_USER` and `CRM_DB_PASS` as environment variables.
+### Option A: shared hosting (cPanel, Plesk, DirectAdmin…), no SSH needed
 
-3. **Install the schema and create an admin user**
-   ```bash
-   php install/install.php --email=you@example.com --password='a-strong-password' --name="Your Name"
-   # add --demo to load sample customers, lines, tickets and deals
-   ```
+1. **Check your PHP version.** You need PHP 8.1 or newer, with the `pdo_mysql` extension (it's on by default almost everywhere). In cPanel, check under *MultiPHP Manager* or *Select PHP Version*.
+2. **Create a database.** In cPanel open *MySQL® Databases* (or use the *MySQL Database Wizard*). Create a database and a user, then add the user to the database with **All Privileges**. Write down the full names, which cPanel prefixes with your account name (e.g. `myaccount_crm`), and the password.
+3. **Upload the files.** Download the code as a ZIP from GitHub (*Code → Download ZIP*). In cPanel *File Manager*, upload it into `public_html` and extract it. Rename the extracted folder to something like `crm`, so you end up with `public_html/crm/`.
+   - The `.htaccess` files included in the download block web access to everything except `public/`, including `config.php` and the source code.
+   - If your host lets you point a domain or subdomain at a folder (cPanel → *Domains*), you can use `crm/public` as its document root. Then only the `public/` folder is web-reachable at all.
+4. **Run the web installer.** Visit `https://yourdomain/crm/` (or `https://crm.yourdomain/` if you used a subdomain). You'll be taken to the installer, which asks for:
+   1. **The database details** from step 2. It tests the connection and writes `config.php` for you. If the folder isn't writable, it shows you the file's contents to copy into a new `config.php` via File Manager instead.
+   2. **Your admin name, email and password.** Tick *Load demo data* to try it out with sample customers.
+5. Sign in. The installer locks itself once an admin account exists. You can also delete `public/install.php` for extra peace of mind.
 
-4. **Serve the `public/` directory**
-   - Quick local run: `php -S localhost:8080 -t public`, then open http://localhost:8080
-   - Apache/Nginx: point the document root at `public/`. Only that folder should be web-accessible, because `config.php`, `src/` and `install/` sit outside it.
+> Run the installer straight after uploading. Until it's finished, anyone who finds the URL could complete it.
+
+### Option B: Linux server or VPS without sudo, over SSH
+
+This needs PHP 8.1+ on the command line and a MySQL/MariaDB database you can log in to (ask your admin for one if you don't have one).
+
+```bash
+git clone <repo-url> ~/crm && cd ~/crm
+cp config.sample.php config.php          # edit the DB details
+php install/install.php --email=you@example.com --password='a-strong-password' --name="Your Name" [--demo]
+```
+
+Then either:
+- point your existing web server's document root (or a symlink in `~/public_html`) at `~/crm/public`; or
+- run it with PHP's built-in server: `php -S 0.0.0.0:8080 -t public`. This is fine for trying it out or for a small internal team. For anything public-facing, put it behind a proper web server with HTTPS.
+
+The web installer from Option A works here too: skip the `install/install.php` step and just open the site.
+
+### Option C: you do have root
+
+Create the database and user yourself, then follow Option B:
+
+```sql
+CREATE DATABASE telecom_crm CHARACTER SET utf8mb4;
+CREATE USER 'crm'@'localhost' IDENTIFIED BY 'choose-a-password';
+GRANT ALL ON telecom_crm.* TO 'crm'@'localhost';
+```
+
+For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM). With Apache, allow `.htaccess` overrides (`AllowOverride All`).
 
 ## Configuration
 
@@ -65,7 +86,7 @@ The tests run against a throwaway `<db_name>_test` database, which is created an
 ## Project layout
 
 ```
-public/            web root: index.php (front controller), assets/
+public/            web root: index.php (front controller), install.php (web installer), assets/
 src/
   bootstrap.php    config + includes
   db.php           PDO helpers
@@ -73,9 +94,11 @@ src/
   entities.php     field definitions + business rules (SLA, contract dates, numbering…)
   repository.php   generic validation, CRUD, listing, formatting
   controllers.php  page handlers
+  installer.php    shared install logic (CLI + web)
 templates/         PHP view templates
 install/           schema.sql, installer, demo data
 tests/             integration tests
+.htaccess, index.php  protection + redirect for installs inside public_html
 ```
 
 ### Adding a field
