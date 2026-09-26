@@ -31,7 +31,7 @@ You don't need root or SSH access. Pick whichever of these fits your hosting.
 3. **Upload the files.** Download the code as a ZIP from GitHub (*Code → Download ZIP*). In cPanel *File Manager*, upload it into `public_html` and extract it. Rename the extracted folder to something like `crm`, so you end up with `public_html/crm/`.
    - The `.htaccess` files included in the download block web access to everything except `public/`, including `config.php` and the source code.
    - If your host lets you point a domain or subdomain at a folder (cPanel → *Domains*), you can use `crm/public` as its document root. Then only the `public/` folder is web-reachable at all.
-4. **Run the web installer.** Visit `https://yourdomain/crm/` (or `https://crm.yourdomain/` if you used a subdomain). You'll be taken to the installer, which asks for:
+4. **Run the web installer.** Visit `https://yourdomain/crm/` (or `https://crm.yourdomain/` if you used a subdomain). You'll be taken to the installer at `crm/public/install.php`. Don't open `crm/install/`: that folder holds the command-line installer and is deliberately blocked (403). The installer, which asks for:
    1. **The database details** from step 2. It tests the connection and writes `config.php` for you. If the folder isn't writable, it shows you the file's contents to copy into a new `config.php` via File Manager instead.
    2. **Your admin name, email and password.** Tick *Load demo data* to try it out with sample customers.
 5. Sign in. The installer locks itself once an admin account exists. You can also delete `public/install.php` for extra peace of mind.
