@@ -22,6 +22,13 @@
     <span class="kpi-value"><?= h(money($stats['pipeline'])) ?></span>
     <span class="kpi-sub">Weighted <?= h(money($stats['weighted'])) ?> · won this month <?= h(money($stats['won_mrr_month'])) ?></span>
   </a>
+  <?php if (isset($stats['xero_overdue'])): ?>
+  <a class="kpi <?= $stats['xero_overdue'] > 0 ? 'kpi-alert' : '' ?>" href="<?= h(url('accounts', ['preset' => 'arrears'])) ?>">
+    <span class="kpi-label">Overdue debt (Xero)</span>
+    <span class="kpi-value"><?= h(money($stats['xero_overdue'])) ?></span>
+    <span class="kpi-sub"><?= number_format($stats['xero_debtors']) ?> in arrears · <?= h(money($stats['xero_outstanding'])) ?> outstanding</span>
+  </a>
+  <?php endif; ?>
   <a class="kpi <?= $stats['expiring'] ? 'kpi-warn' : '' ?>" href="<?= h(url('services', ['preset' => 'expiring'])) ?>">
     <span class="kpi-label">Up for renewal</span>
     <span class="kpi-value"><?= number_format($stats['expiring']) ?></span>
@@ -69,6 +76,31 @@
     </div>
   </section>
 </div>
+
+<?php if ($debtors): ?>
+<section class="card">
+  <div class="card-head"><h2>Customers in arrears</h2>
+    <span class="muted"><?php $last = setting('xero_last_sync_at'); ?>Xero synced <?= h($last ? fmt_datetime($last) : 'never') ?>
+      <form method="post" action="<?= h(url('xero', ['action' => 'sync'])) ?>" class="inline"><?= csrf_field() ?><input type="hidden" name="_return" value="<?= h(url('dashboard')) ?>"><button class="btn btn-sm">Sync now</button></form>
+      <a href="<?= h(url('accounts', ['preset' => 'arrears'])) ?>">All →</a></span></div>
+  <div class="table-wrap">
+  <table class="table compact">
+    <thead><tr><th>Customer</th><th>Status</th><th class="num">Overdue</th><th class="num">Balance</th><th>Oldest overdue</th></tr></thead>
+    <tbody>
+    <?php foreach ($debtors as $d): ?>
+      <tr>
+        <td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $d['id']])) ?>"><?= h($d['name']) ?></a></td>
+        <td><?= badge($d['status']) ?></td>
+        <td class="num text-danger"><?= h(money($d['overdue'])) ?></td>
+        <td class="num"><?= h(money($d['outstanding'])) ?><?= $d['credit_limit'] !== null && (float)$d['outstanding'] > (float)$d['credit_limit'] ? ' <span class="badge badge-p1">Over limit</span>' : '' ?></td>
+        <td><?= h(fmt_date($d['oldest_due_date'])) ?> <small class="muted">(<?= -days_until($d['oldest_due_date']) ?>d)</small></td>
+      </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table>
+  </div>
+</section>
+<?php endif; ?>
 
 <div class="grid-2">
   <section class="card">

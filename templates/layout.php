@@ -14,6 +14,7 @@ $nav = [
 ];
 if (is_admin()) {
     $nav['users'] = ['🔑', 'Users'];
+    $nav['xero'] = ['🔗', 'Xero'];
 }
 $flash = flash();
 ?><!doctype html>

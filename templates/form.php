@@ -12,7 +12,7 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
   <?= csrf_field() ?>
   <?php if ($return): ?><input type="hidden" name="_return" value="<?= h($return) ?>"><?php endif; ?>
   <?php foreach ($entity['fields'] as $field => $def):
-      if (!empty($def['readonly'])) continue;
+      if (!empty($def['readonly']) || !field_enabled($def)) continue;
       $value = $values[$field] ?? null;
       $err = $errors[$field] ?? null;
       $wide = in_array($def['type'], ['textarea'], true);

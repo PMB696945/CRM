@@ -20,6 +20,28 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
   <div class="kpi"><span class="kpi-label">Active services</span><span class="kpi-value"><?= (int)$activeCount ?></span></div>
   <div class="kpi <?= $openTickets ? 'kpi-warn' : '' ?>"><span class="kpi-label">Open tickets</span><span class="kpi-value"><?= (int)$openTickets ?></span></div>
   <div class="kpi"><span class="kpi-label">Account manager</span><span class="kpi-value kpi-text"><?= h($account['owner_id__label'] ?? '—') ?></span></div>
+  <?php if (xero_connected()): ?>
+    <?php if ($xero):
+        $overLimit = $account['credit_limit'] !== null && (float)$xero['outstanding'] > (float)$account['credit_limit'];
+        $inCredit = (float)$xero['outstanding'] < 0; ?>
+      <a class="kpi <?= (float)$xero['overdue'] > 0 ? 'kpi-alert' : '' ?>" href="<?= h(xero_contact_url($xero['contact_id'])) ?>" target="_blank" rel="noopener" title="Open in Xero">
+        <span class="kpi-label">Xero balance ↗</span>
+        <span class="kpi-value"><?= $inCredit ? h(money(-$xero['outstanding'])) . ' <small>credit</small>' : h(money($xero['outstanding'])) ?></span>
+        <span class="kpi-sub">
+          <?php if ((float)$xero['overdue'] > 0): ?><span class="text-danger"><?= h(money($xero['overdue'])) ?> overdue</span> · since <?= h(fmt_date($xero['oldest_due_date'])) ?><?php else: ?>Nothing overdue<?php endif; ?>
+          · <?= (int)$xero['open_invoices'] ?> unpaid invoice<?= (int)$xero['open_invoices'] === 1 ? '' : 's' ?>
+          <?php if ($overLimit): ?><br><span class="text-danger">Over credit limit (<?= h(money($account['credit_limit'])) ?>)</span><?php endif; ?>
+          <br><small>Synced <?= h(fmt_datetime($xero['synced_at'])) ?></small>
+        </span>
+      </a>
+    <?php else: ?>
+      <a class="kpi" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">
+        <span class="kpi-label">Xero balance</span>
+        <span class="kpi-value kpi-text muted">Not linked</span>
+        <span class="kpi-sub">Edit the customer to choose their Xero contact</span>
+      </a>
+    <?php endif; ?>
+  <?php endif; ?>
 </div>
 
 <div class="grid-side">

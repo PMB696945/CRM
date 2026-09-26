@@ -13,7 +13,7 @@
 </div>
 <div class="card">
   <dl class="details">
-    <?php foreach ($entity['fields'] + ($entity['computed'] ?? []) as $field => $def): ?>
+    <?php foreach ($entity['fields'] + ($entity['computed'] ?? []) as $field => $def): if (!field_enabled($def)) continue; ?>
       <dt><?= h($def['label']) ?></dt>
       <dd><?= display_value($entity, $field, $row) ?: '<span class="muted">—</span>' ?></dd>
     <?php endforeach; ?>

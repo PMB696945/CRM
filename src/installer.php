@@ -3,12 +3,54 @@ declare(strict_types=1);
 
 /* Shared by the CLI installer (install/install.php) and the web installer (public/install.php). */
 
+/** Create the base tables (if missing) and apply all migrations. */
 function install_schema(): void
 {
     $schema = file_get_contents(APP_ROOT . '/install/schema.sql');
     foreach (array_filter(array_map('trim', explode(';', preg_replace('/^--.*$/m', '', $schema)))) as $statement) {
         db()->exec($statement);
     }
+    migrate();
+}
+
+function latest_schema_version(): int
+{
+    return max(array_keys(require APP_ROOT . '/install/migrations.php'));
+}
+
+function schema_version(): int
+{
+    try {
+        return (int)(db_value("SELECT value FROM settings WHERE name = 'schema_version'") ?? 1);
+    } catch (PDOException) {
+        return 1; // settings table arrives in version 2
+    }
+}
+
+/** Apply any pending migrations. Returns the versions applied. */
+function migrate(): array
+{
+    $applied = [];
+    $current = schema_version();
+    foreach (require APP_ROOT . '/install/migrations.php' as $version => $migration) {
+        if ($version <= $current) {
+            continue;
+        }
+        $migration();
+        set_setting('schema_version', (string)$version);
+        $applied[] = $version;
+    }
+    return $applied;
+}
+
+function column_exists(string $table, string $column): bool
+{
+    return (bool)db_value('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?', [$table, $column]);
+}
+
+function constraint_exists(string $table, string $name): bool
+{
+    return (bool)db_value('SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?', [$table, $name]);
 }
 
 /** Create an admin, or promote and reset the password of an existing user. Returns true if created. */

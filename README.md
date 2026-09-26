@@ -16,6 +16,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Products & tariffs** | A catalogue of products. Picking a product on a service fills in the price, setup fee, term, type and carrier |
 | **Activities** | Calls, emails, meetings, notes and tasks with due dates |
 | **Everywhere** | Global search (names, postcodes, phone numbers, circuit IDs, ticket refs), filters, sorting, pagination and CSV export on every list. Works on mobile and supports dark mode |
+| **Xero balances** | Connect Xero read-only to see each customer's outstanding and overdue balance and number of unpaid invoices. Adds an "In arrears" and "Over credit limit" filter, an overdue-debt total on the dashboard, and a link to the contact in Xero. Syncs on demand or by cron |
 | **Users** | Admin and agent roles. Only admins manage users and the product catalogue |
 
 Security: prepared statements throughout, CSRF tokens on every form, output escaping, bcrypt password hashing, session fixation protection, protection against open redirects and CSV formula injection, and security headers.
@@ -79,6 +80,37 @@ For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM
 - `renewal_window_days`: how far ahead a contract counts as "up for renewal" (default 90)
 - `sla_hours`: SLA targets per ticket priority (default P1 4h, P2 8h, P3 24h, P4 72h)
 
+## Xero integration
+
+The CRM can show each customer's balance from Xero. It only **reads** from Xero and never changes anything there.
+
+**Setup (admin, about 5 minutes):**
+1. In the CRM, open **Xero** in the sidebar. It shows the exact *Redirect URI* to use.
+2. At [developer.xero.com/app/manage](https://developer.xero.com/app/manage), click **New app**, choose **Web app**, and paste that Redirect URI. Xero requires `https://` except for localhost.
+3. Copy the app's **Client ID** and a generated **Client secret** into the CRM, then click **Save**.
+4. Click **Connect to Xero** and approve access for your organisation. The first sync runs straight away.
+
+**How balances work:**
+- **Balance** is all unpaid (authorised) sales invoices, minus any unused credit notes, converted into your base currency.
+- **Overdue** is the part of that balance where the due date has passed.
+- **Not included:** overpayments and prepayments. Picking those up would need the extra `accounting.payments.read` scope.
+
+**Linking customers to Xero contacts:**
+- On each sync, customers are matched to Xero contacts automatically, but only when a match is unambiguous. The CRM tries the Xero contact's **Account number** first (set it to the CRM number, e.g. `ACC-10001`), then **email**, then **company name**.
+- Anything it can't match is listed on the Xero page, and you can choose the contact by editing the customer.
+- Links you set by hand are never overwritten.
+
+**Keeping balances up to date:**
+- Press **Sync now** on the dashboard or the Xero page, or schedule it with a cPanel cron job:
+  ```
+  php /home/youraccount/path/to/crm/cron/xero-sync.php
+  ```
+  Hourly is plenty. Running it at least every few weeks also stops Xero expiring the connection, which happens after 60 days without use.
+
+**Scopes:** the CRM requests `offline_access accounting.contacts.read accounting.invoices.read`, the granular scopes Xero requires for apps created from March 2026. If an older app hasn't moved to granular scopes yet, change this under *Advanced* on the Xero page.
+
+**Upgrading an existing install:** new versions update the database automatically the first time you load a page. This needs the database user to have `CREATE`, `ALTER`, `INDEX` and `REFERENCES`. If it doesn't, the CRM shows a page saying so.
+
 ## Tests
 
 ```bash
@@ -98,10 +130,13 @@ src/
   entities.php     field definitions + business rules (SLA, contract dates, numbering…)
   repository.php   generic validation, CRUD, listing, formatting
   controllers.php  page handlers
+  xero.php         Xero OAuth, API client and balance sync
+  settings.php     key/value settings stored in the database
   installer.php    shared install logic (CLI + web)
 templates/         PHP view templates
-install/           schema.sql, installer, demo data
-tests/             integration tests
+install/           schema.sql, migrations.php (upgrades), installer, demo data
+cron/              scheduled jobs (xero-sync.php)
+tests/             integration tests (+ xero_mock.php, a local stand-in for Xero's API)
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

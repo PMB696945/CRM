@@ -31,6 +31,7 @@ const REF_LABELS = [
     'services' => 'identifier',
     'contacts' => 'name',
     'users'    => 'name',
+    'xero_contacts' => 'name',
 ];
 
 function opts(array $values): array
@@ -48,9 +49,11 @@ function opts(array $values): array
 
 function entities(): array
 {
-    static $entities = null;
-    if ($entities !== null) {
-        return $entities;
+    // Cached per request, keyed on the features that change the definitions.
+    static $cache = [];
+    $key = xero_connected() ? 'xero' : 'base';
+    if (isset($cache[$key])) {
+        return $cache[$key];
     }
 
     $entities = [
@@ -70,6 +73,8 @@ function entities(): array
                 'postcode'       => ['label' => 'Postcode', 'type' => 'text'],
                 'owner_id'       => ['label' => 'Account manager', 'type' => 'ref', 'ref' => 'users'],
                 'credit_limit'   => ['label' => 'Credit limit', 'type' => 'money'],
+                'xero_contact_id' => ['label' => 'Xero contact', 'type' => 'ref', 'ref' => 'xero_contacts', 'if' => 'xero_connected',
+                    'help' => 'Linked automatically on sync when the account number, email or name matches'],
                 'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
             ],
             'list'    => ['account_number', 'name', 'type', 'status', 'city', 'owner_id', '_mrr'],
@@ -224,7 +229,29 @@ function entities(): array
         ],
     ];
 
-    return $entities;
+    // Xero balances, once connected.
+    if (xero_connected()) {
+        $balance = '(SELECT %s FROM xero_contacts x WHERE x.id = t.xero_contact_id)';
+        $entities['accounts']['computed'] += [
+            '_balance' => ['label' => 'Balance', 'type' => 'money', 'sql' => sprintf($balance, 'x.outstanding')],
+            '_overdue' => ['label' => 'Overdue', 'type' => 'money', 'sql' => sprintf($balance, 'x.overdue')],
+        ];
+        $entities['accounts']['list'][] = '_balance';
+        $entities['accounts']['list'][] = '_overdue';
+        $entities['accounts']['presets'] = [
+            'arrears'   => ['label' => 'In arrears', 'sql' => 'EXISTS (SELECT 1 FROM xero_contacts x WHERE x.id = t.xero_contact_id AND x.overdue > 0)'],
+            'over_limit' => ['label' => 'Over credit limit', 'sql' => 't.credit_limit IS NOT NULL AND EXISTS (SELECT 1 FROM xero_contacts x WHERE x.id = t.xero_contact_id AND x.outstanding > t.credit_limit)'],
+            'no_xero'   => ['label' => 'Not linked to Xero', 'sql' => "t.xero_contact_id IS NULL AND t.status IN ('active','suspended')"],
+        ];
+    }
+
+    return $cache[$key] = $entities;
+}
+
+/** Whether a field is available (fields can depend on a feature, e.g. Xero). */
+function field_enabled(array $def): bool
+{
+    return !isset($def['if']) || ($def['if'])();
 }
 
 function entity(string $name): ?array

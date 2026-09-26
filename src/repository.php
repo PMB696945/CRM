@@ -19,7 +19,7 @@ function validate(array $entity, array $input): array
     $errors = [];
 
     foreach ($entity['fields'] as $field => $def) {
-        if (!empty($def['readonly'])) {
+        if (!empty($def['readonly']) || !field_enabled($def)) {
             continue;
         }
         $raw = $input[$field] ?? null;
@@ -133,6 +133,9 @@ function select_parts(array $entity): array
         $alias = 'r' . $i++;
         $label = REF_LABELS[$def['ref']];
         $cols[] = "$alias.$label AS `{$field}__label`";
+        if ($def['ref'] === 'xero_contacts') {
+            $cols[] = "$alias.contact_id AS `{$field}__xero`";
+        }
         $joins[] = "LEFT JOIN {$def['ref']} $alias ON $alias.id = t.$field";
     }
     foreach ($entity['computed'] ?? [] as $name => $def) {
@@ -279,7 +282,10 @@ function display_value(array $entity, string $column, array $row, bool $link = t
             if ($label === null) {
                 return '<span class="muted">—</span>';
             }
-            if ($link && $def['ref'] !== 'users') {
+            if ($def['ref'] === 'xero_contacts' && !empty($row[$column . '__xero'])) {
+                return '<a href="' . h(xero_contact_url($row[$column . '__xero'])) . '" target="_blank" rel="noopener">' . h($label) . ' ↗</a>';
+            }
+            if ($link && entity($def['ref']) !== null) {
                 return '<a href="' . h(url($def['ref'], ['action' => 'view', 'id' => $value])) . '">' . h($label) . '</a>';
             }
             return h($label);

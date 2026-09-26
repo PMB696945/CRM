@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . '/src/bootstrap.php';
 require APP_ROOT . '/src/controllers.php';
+require APP_ROOT . '/src/installer.php';
 
 $testDb = getenv('CRM_TEST_DB_NAME') ?: config('db_name') . '_test';
 $pdo = new PDO(sprintf('mysql:host=%s;port=%s;charset=utf8mb4', config('db_host'), config('db_port')),
@@ -60,6 +61,18 @@ function create(string $name, array $input): int
     }
     return insert_row($name, $data);
 }
+
+echo "Database upgrades\n";
+test('upgrades a version 1 database and is safe to re-run', function () {
+    eq(1, schema_version());
+    eq([2], migrate());
+    eq(latest_schema_version(), schema_version());
+    ok(column_exists('accounts', 'xero_contact_id'));
+    ok(constraint_exists('accounts', 'fk_accounts_xero'));
+    eq([], migrate(), 'nothing left to apply');
+    set_setting('schema_version', '1');
+    eq([2], migrate(), 're-running a migration is harmless');
+});
 
 db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Tester', 'test@example.com', ?, 'admin')", [password_hash('password123', PASSWORD_DEFAULT)]);
 $_SESSION['user_id'] = 1;
@@ -231,6 +244,135 @@ test('deleting a customer cascades to its records', function () use (&$acc) {
     eq(0, (int)db_value('SELECT COUNT(*) FROM tickets WHERE account_id = ?', [$acc]));
     eq(0, (int)db_value('SELECT COUNT(*) FROM opportunities WHERE account_id = ?', [$acc]));
 });
+
+echo "Xero\n";
+test('parses Xero date formats', function () {
+    eq('2018-02-15', xero_date('/Date(1518652800000+0000)/'));
+    eq('2026-09-10', xero_date('2026-09-10T00:00:00'));
+    eq(null, xero_date(null));
+});
+test('normalises company names for matching', function () {
+    eq('copper kettle cafe', xero_match_name('The Copper Kettle Café'));
+    eq('fenwick and rowe solicitors', xero_match_name('Fenwick & Rowe Solicitors LLP'));
+    eq('acme telecom', xero_match_name('ACME Telecom Ltd.'));
+});
+test('calculates outstanding, overdue, credit and currency', function () {
+    $c = fn($id) => ['ContactID' => $id];
+    $b = xero_calculate_balances([
+        ['Type' => 'ACCREC', 'Status' => 'AUTHORISED', 'Contact' => $c('A'), 'AmountDue' => 100, 'DueDateString' => '2026-01-01T00:00:00'],
+        ['Type' => 'ACCREC', 'Status' => 'AUTHORISED', 'Contact' => $c('A'), 'AmountDue' => 50, 'DueDate' => '/Date(1893456000000+0000)/'], // 2030
+        ['Type' => 'ACCREC', 'Status' => 'AUTHORISED', 'Contact' => $c('B'), 'AmountDue' => 120, 'CurrencyRate' => 1.2, 'DueDateString' => '2026-02-01T00:00:00'],
+        ['Type' => 'ACCPAY', 'Status' => 'AUTHORISED', 'Contact' => $c('A'), 'AmountDue' => 999],
+        ['Type' => 'ACCREC', 'Status' => 'DRAFT', 'Contact' => $c('A'), 'AmountDue' => 999],
+    ], [
+        ['Type' => 'ACCRECCREDIT', 'Status' => 'AUTHORISED', 'Contact' => $c('A'), 'RemainingCredit' => 30],
+        ['Type' => 'ACCRECCREDIT', 'Status' => 'AUTHORISED', 'Contact' => $c('C'), 'RemainingCredit' => 15],
+    ], '2026-09-26');
+    eq(120.0, $b['A']['outstanding']);
+    eq(100.0, $b['A']['overdue']);
+    eq(2, $b['A']['open_invoices']);
+    eq('2026-01-01', $b['A']['oldest_due_date']);
+    eq(100.0, $b['B']['outstanding'], 'converted to base currency');
+    eq(-15.0, $b['C']['outstanding'], 'customer in credit');
+    eq(0.0, $b['C']['overdue']);
+});
+
+$mockState = sys_get_temp_dir() . '/crm_xero_mock_' . getmypid() . '.json';
+$mockPort = 18000 + getmypid() % 1000;
+$mock = proc_open([PHP_BINARY, '-S', "127.0.0.1:$mockPort", APP_ROOT . '/tests/xero_mock.php'],
+    [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, null, ['MOCK_STATE' => $mockState] + getenv());
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $mockPort); $i++) {
+    usleep(100000);
+}
+$mockBase = "http://127.0.0.1:$mockPort";
+$cfg = &config_ref();
+$cfg['xero_urls'] = [
+    'authorize' => "$mockBase/identity/connect/authorize", 'token' => "$mockBase/connect/token",
+    'revoke' => "$mockBase/connect/revocation", 'connections' => "$mockBase/connections", 'api' => "$mockBase/api.xro/2.0",
+];
+function mock_state(): array { global $mockState; return json_decode(file_get_contents($mockState), true); }
+
+test('connects with the OAuth code flow', function () use ($mockBase) {
+    set_setting('xero_client_id', 'MOCKCLIENTID0000000000000000000A');
+    set_setting('xero_client_secret', 'mock-secret');
+    ok(xero_configured() && !xero_connected());
+    $redirect = 'https://crm.example.com/crm/xero-callback.php';
+    $url = xero_authorize_url('state123', $redirect);
+    ok(str_contains($url, 'scope=offline_access%20accounting.contacts.read%20accounting.invoices.read'), 'granular scopes requested');
+    [$status, , $headers] = xero_http('GET', $url);
+    eq(302, $status);
+    parse_str(parse_url($headers['location'], PHP_URL_QUERY), $back);
+    eq('state123', $back['state']);
+    xero_exchange_code($back['code'], $redirect);
+    $orgs = xero_connections();
+    eq('Mock Telecom Ltd', $orgs[0]['tenantName']);
+    set_setting('xero_tenant_id', $orgs[0]['tenantId']);
+    set_setting('xero_tenant_name', $orgs[0]['tenantName']);
+    ok(xero_connected());
+});
+
+test('syncs balances, paging, 429 retry and auto-links customers', function () {
+    db_exec('DELETE FROM accounts');
+    $mk = fn($name, $extra = []) => create('accounts', ['name' => $name, 'type' => 'business', 'status' => 'active'] + $extra);
+    $harbour = $mk('Harbour View Dental', ['email' => 'accounts@harbour.example.co.uk']);  // by email
+    $kestrel = $mk('Kestrel Logistics', ['account_number' => 'ACC-KESTREL']);             // by account number
+    $kettle  = $mk('The Copper Kettle Café');                                             // by name
+    $north   = $mk('Northgate Motors');                                                   // ambiguous: 2 Xero contacts
+    $s = xero_sync();
+    eq(150, $s['contacts'], 'both pages of contacts fetched');
+    eq(7, $s['invoices']);
+    eq(3, $s['linked']);
+    $bal = fn($id) => db_one('SELECT x.* FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id WHERE a.id = ?', [$id]);
+    eq(180.0, (float)$bal($harbour)['outstanding'], '120 + 80 - 20 credit');
+    eq(120.0, (float)$bal($harbour)['overdue']);
+    eq(80.0, (float)$bal($kestrel)['overdue'], 'USD 100 / 1.25');
+    eq(0.0, (float)$bal($kettle)['outstanding'], 'draft invoice ignored');
+    eq(null, db_value('SELECT xero_contact_id FROM accounts WHERE id = ?', [$north]), 'ambiguous name not linked');
+    eq(50.0, (float)db_value("SELECT outstanding FROM xero_contacts WHERE contact_id = 'e0000000-0000-0000-0000-000000000009'"), 'archived contact kept');
+    ok(count(array_filter(mock_state()['calls'], fn($c) => str_starts_with($c, 'GET /api.xro/2.0/Invoices'))) >= 2, 'rate-limited request retried');
+    eq(null, setting('xero_last_sync_error'));
+});
+
+test('balances appear in customer lists and presets', function () {
+    ok(isset(entities()['accounts']['computed']['_balance']), 'balance column added once connected');
+    $arrears = list_rows('accounts', ['preset' => 'arrears']);
+    eq(2, $arrears['total'], 'Harbour and Kestrel are overdue');
+    db_exec("UPDATE accounts SET credit_limit = 100 WHERE name = 'Harbour View Dental'");
+    eq(1, list_rows('accounts', ['preset' => 'over_limit'])['total']);
+});
+
+test('manual links survive re-sync; refresh token rotates; expired access token recovers', function () {
+    $north = (int)db_value("SELECT id FROM accounts WHERE name = 'Northgate Motors'");
+    $contact = (int)db_value("SELECT id FROM xero_contacts WHERE contact_id = 'c1000000-0000-0000-0000-000000000005'");
+    db_exec('UPDATE accounts SET xero_contact_id = ? WHERE id = ?', [$contact, $north]);
+    $oldRefresh = setting('xero_refresh_token');
+    set_setting('xero_expires_at', '0'); // access token expired → refresh first
+    xero_sync();
+    ok(setting('xero_refresh_token') !== $oldRefresh, 'refresh token rotated');
+    eq($contact, (int)db_value('SELECT xero_contact_id FROM accounts WHERE id = ?', [$north]));
+
+    global $mockState;
+    $st = mock_state(); $st['expire_next'] = true; file_put_contents($mockState, json_encode($st));
+    xero_sync(); // 401 mid-sync → refresh and retry
+    eq(null, setting('xero_last_sync_error'));
+});
+
+test('revoked connection gives a clear error and is marked disconnected', function () {
+    global $mockState;
+    $st = mock_state(); $st['refresh'] = []; $st['tokens'] = []; file_put_contents($mockState, json_encode($st));
+    set_setting('xero_expires_at', '0');
+    try {
+        xero_sync();
+        throw new Exception('expected failure');
+    } catch (XeroException $e) {
+        ok(str_contains($e->getMessage(), 'reconnect'), $e->getMessage());
+    }
+    ok(!xero_connected());
+    ok(str_contains((string)setting('xero_last_sync_error'), 'reconnect'));
+});
+
+proc_terminate($mock);
+@unlink($mockState);
 
 echo "Demo data\n";
 test('demo data loads', function () {

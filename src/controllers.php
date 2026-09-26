@@ -61,7 +61,17 @@ function dashboard_controller(): void
         JOIN accounts a ON a.id = t.account_id LEFT JOIN users u ON u.id = t.user_id
         ORDER BY t.created_at DESC LIMIT 8");
 
-    page('dashboard', compact('stats', 'mrrByType', 'renewals', 'tickets', 'tasks', 'recent', 'window'), 'Dashboard');
+    $debtors = [];
+    if (xero_connected()) {
+        $stats['xero_overdue'] = (float)db_value('SELECT COALESCE(SUM(overdue),0) FROM xero_contacts');
+        $stats['xero_outstanding'] = (float)db_value('SELECT COALESCE(SUM(GREATEST(outstanding,0)),0) FROM xero_contacts');
+        $stats['xero_debtors'] = (int)db_value('SELECT COUNT(*) FROM xero_contacts WHERE overdue > 0');
+        $debtors = db_all('SELECT a.id, a.name, a.status, a.credit_limit, x.outstanding, x.overdue, x.oldest_due_date
+            FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
+            WHERE x.overdue > 0 ORDER BY x.overdue DESC LIMIT 8');
+    }
+
+    page('dashboard', compact('stats', 'mrrByType', 'renewals', 'tickets', 'tasks', 'recent', 'window', 'debtors'), 'Dashboard');
 }
 
 function pipeline_controller(): void
@@ -347,7 +357,11 @@ function account_view(array $entity, array $account): void
     }
     $openTickets = count(array_filter($tickets, fn($t) => !in_array($t['status'], ['resolved', 'closed'], true)));
 
-    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets'), $account['name']);
+    $xero = (xero_connected() && $account['xero_contact_id'])
+        ? db_one('SELECT * FROM xero_contacts WHERE id = ?', [$account['xero_contact_id']])
+        : null;
+
+    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero'), $account['name']);
 }
 
 function ticket_view(array $entity, array $ticket): void
@@ -384,7 +398,7 @@ function export_csv(string $name, array $entity, array $opts): void
 {
     $opts['per_page'] = 0;
     $rows = list_rows($name, $opts)['rows'];
-    $columns = array_keys($entity['fields'] + ($entity['computed'] ?? []));
+    $columns = array_keys(array_filter($entity['fields'] + ($entity['computed'] ?? []), 'field_enabled'));
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $name . '-' . date('Y-m-d') . '.csv"');
@@ -404,4 +418,96 @@ function csv_safe(string $value): string
     return ($value !== '' && in_array($value[0], ['=', '+', '-', '@', "\t", "\r"], true) && !is_numeric($value))
         ? "'" . $value
         : $value;
+}
+
+function xero_controller(): void
+{
+    $action = query('action');
+
+    if ($action === 'sync') {
+        if (!is_post()) {
+            redirect(url('xero'));
+        }
+        verify_csrf();
+        try {
+            $s = xero_sync();
+            flash(sprintf('Xero sync complete: %d contacts, %d unpaid invoices, %d customers newly linked.', $s['contacts'], $s['invoices'], $s['linked']));
+        } catch (XeroException | PDOException $e) {
+            flash('Xero sync failed: ' . $e->getMessage(), 'error');
+        }
+        redirect(safe_return($_POST['_return'] ?? null, url('xero')));
+    }
+
+    require_admin();
+
+    if (is_post()) {
+        verify_csrf();
+        switch ($action) {
+            case 'credentials':
+                $clientId = trim((string)($_POST['client_id'] ?? ''));
+                $secret = trim((string)($_POST['client_secret'] ?? ''));
+                $scopes = trim(preg_replace('/\s+/', ' ', (string)($_POST['scopes'] ?? '')));
+                $redirectUri = trim((string)($_POST['redirect_uri'] ?? ''));
+                if (!preg_match('/^[A-Za-z0-9]{16,64}$/', $clientId)) {
+                    flash('That Client ID doesn\'t look right. Copy it from your app in the Xero developer portal.', 'error');
+                    redirect(url('xero'));
+                }
+                if ($redirectUri !== '' && !preg_match('#^https?://[^\s]+/xero-callback\.php$#', $redirectUri)) {
+                    flash('The redirect URI must be a full URL ending in /xero-callback.php.', 'error');
+                    redirect(url('xero'));
+                }
+                if ($clientId !== setting('xero_client_id') && xero_connected()) {
+                    xero_disconnect(); // tokens belong to the old app
+                }
+                set_setting('xero_client_id', $clientId);
+                if ($secret !== '') {
+                    set_setting('xero_client_secret', $secret);
+                }
+                set_setting('xero_scopes', $scopes === '' || $scopes === XERO_DEFAULT_SCOPES ? null : $scopes);
+                set_setting('xero_redirect_uri', $redirectUri === '' ? null : $redirectUri);
+                flash('Xero app details saved.');
+                break;
+
+            case 'connect':
+                if (!xero_configured()) {
+                    flash('Enter your Xero app\'s Client ID and Client Secret first.', 'error');
+                    break;
+                }
+                $_SESSION['xero_oauth_state'] = bin2hex(random_bytes(16));
+                $_SESSION['xero_redirect_uri'] = xero_redirect_uri();
+                redirect(xero_authorize_url($_SESSION['xero_oauth_state'], $_SESSION['xero_redirect_uri']));
+
+            case 'tenant':
+                $tenants = json_decode((string)setting('xero_tenants', '[]'), true) ?: [];
+                foreach ($tenants as $t) {
+                    if ($t['id'] === ($_POST['tenant_id'] ?? '')) {
+                        set_setting('xero_tenant_id', $t['id']);
+                        set_setting('xero_tenant_name', $t['name']);
+                        db_exec('UPDATE accounts SET xero_contact_id = NULL');
+                        db_exec('DELETE FROM xero_contacts');
+                        flash('Switched to ' . $t['name'] . '. Run a sync to load its balances.');
+                    }
+                }
+                break;
+
+            case 'disconnect':
+                xero_disconnect();
+                flash('Disconnected from Xero. Customer links and the last synced balances are kept but hidden until you reconnect.');
+                break;
+        }
+        redirect(url('xero'));
+    }
+
+    $stats = [
+        'contacts'    => (int)db_value('SELECT COUNT(*) FROM xero_contacts'),
+        'linked'      => (int)db_value('SELECT COUNT(*) FROM accounts WHERE xero_contact_id IS NOT NULL'),
+        'unlinked'    => db_all("SELECT id, name, account_number FROM accounts WHERE xero_contact_id IS NULL AND status IN ('active','suspended') ORDER BY name LIMIT 50"),
+        'unlinked_total' => (int)db_value("SELECT COUNT(*) FROM accounts WHERE xero_contact_id IS NULL AND status IN ('active','suspended')"),
+    ];
+    page('xero', [
+        'stats'       => $stats,
+        'redirectUri' => xero_redirect_uri(),
+        'tenants'     => json_decode((string)setting('xero_tenants', '[]'), true) ?: [],
+        'summary'     => json_decode((string)setting('xero_last_sync_summary', 'null'), true),
+    ], 'Xero');
 }

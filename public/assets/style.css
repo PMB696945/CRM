@@ -77,7 +77,7 @@ h3.subhead { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em;
 .grid-side { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1.25rem; align-items: start; }
 
 /* KPIs */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: .15rem; color: var(--text); border-top: 3px solid var(--primary); }
 a.kpi:hover { text-decoration: none; border-color: var(--primary); }
 .kpi-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
@@ -235,3 +235,21 @@ input[type=checkbox] { width: auto; accent-color: var(--primary); }
 .install-card label.check { flex-direction: row; align-items: center; gap: .5rem; font-weight: 500; }
 .install-card textarea.code { width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .75rem; }
 code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; background: var(--surface-2); padding: .05rem .3rem; border-radius: 4px; }
+
+/* Xero page */
+.lead { margin: -.5rem 0 1.25rem; max-width: 70ch; }
+.steps { margin: 0 0 1rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .5rem; }
+.step { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); font-size: .8rem; margin-right: .35rem; }
+.step-done { background: var(--ok); border-color: var(--ok); color: #fff; }
+.copy-row { display: flex; margin-top: .35rem; }
+.copy-row input { flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .8rem; }
+.stack { display: flex; flex-direction: column; gap: .75rem; }
+.stack label { display: flex; flex-direction: column; gap: .3rem; font-weight: 600; font-size: .85rem; }
+.stack details { display: flex; flex-direction: column; gap: .5rem; }
+.stack details[open] > *:not(summary) { margin-top: .5rem; }
+.stack summary { cursor: pointer; color: var(--muted); }
+.stack .btn { align-self: flex-start; }
+.inline-form { display: flex; gap: .5rem; align-items: center; }
+.link-list { columns: 3 220px; margin: 0; padding-left: 1.1rem; }
+.link-list li { margin-bottom: .3rem; break-inside: avoid; }
+.card-head .muted form { margin: 0 .5rem; }
