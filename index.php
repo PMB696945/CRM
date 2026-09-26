@@ -1,3 +1,3 @@
 <?php
-// When the whole CRM folder sits inside the web root, send visitors to the app.
+// Fallback for servers without mod_rewrite: send visitors to the app in public/.
 header('Location: public/', true, 302);

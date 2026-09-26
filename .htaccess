@@ -1,6 +1,7 @@
-# Only used when the whole CRM folder is uploaded inside the web root
-# (e.g. public_html/crm/). Visitors are sent to public/, and everything
-# else (config, source code, installer scripts) is blocked.
+# Used when the whole CRM folder is uploaded into a web-accessible folder
+# (e.g. public_html/crm/ or straight into public_html). Requests are served
+# from public/ behind the scenes, so the site works at /crm/ rather than
+# /crm/public/. Everything else (config, source code, installer scripts) is blocked.
 Options -Indexes
 DirectoryIndex index.php
 
@@ -10,5 +11,16 @@ DirectoryIndex index.php
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
+
     RewriteRule ^(src|templates|install|tests|\.git)(/|$) - [F,L]
+
+    # Already addressed to public/ (old links, or the rewrite below): leave alone.
+    RewriteRule ^public(/|$) - [L]
+
+    # Work out the URL prefix this folder is served from (e.g. /crm or /~account/crm),
+    # so this works without editing on any domain, sub-folder or temporary URL.
+    RewriteCond %{REQUEST_URI}::$0 ^(/.+)/(.*)::\2$
+    RewriteRule .* - [E=CRM_BASE:%1]
+
+    RewriteRule ^(.*)$ %{ENV:CRM_BASE}/public/$1 [END]
 </IfModule>
