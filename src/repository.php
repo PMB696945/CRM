@@ -133,8 +133,8 @@ function select_parts(array $entity): array
         $alias = 'r' . $i++;
         $label = REF_LABELS[$def['ref']];
         $cols[] = "$alias.$label AS `{$field}__label`";
-        if ($def['ref'] === 'xero_contacts') {
-            $cols[] = "$alias.contact_id AS `{$field}__xero`";
+        if (isset(EXTERNAL_REFS[$def['ref']])) {
+            $cols[] = "$alias." . EXTERNAL_REFS[$def['ref']][0] . " AS `{$field}__ext`";
         }
         $joins[] = "LEFT JOIN {$def['ref']} $alias ON $alias.id = t.$field";
     }
@@ -282,8 +282,9 @@ function display_value(array $entity, string $column, array $row, bool $link = t
             if ($label === null) {
                 return '<span class="muted">—</span>';
             }
-            if ($def['ref'] === 'xero_contacts' && !empty($row[$column . '__xero'])) {
-                return '<a href="' . h(xero_contact_url($row[$column . '__xero'])) . '" target="_blank" rel="noopener">' . h($label) . ' ↗</a>';
+            if (isset(EXTERNAL_REFS[$def['ref']]) && !empty($row[$column . '__ext'])) {
+                $href = (EXTERNAL_REFS[$def['ref']][1])($row[$column . '__ext']);
+                return '<a href="' . h($href) . '" target="_blank" rel="noopener">' . h($label) . ' ↗</a>';
             }
             if ($link && entity($def['ref']) !== null) {
                 return '<a href="' . h(url($def['ref'], ['action' => 'view', 'id' => $value])) . '">' . h($label) . '</a>';
@@ -298,6 +299,8 @@ function display_value(array $entity, string $column, array $row, bool $link = t
                 : h($def['options'][$value] ?? humanize($value));
         case 'money':
             return $value === null ? '<span class="muted">—</span>' : h(money($value));
+        case 'mandate':
+            return gc_mandate_badge($value);
         case 'bool':
             return $value ? '✔' : '<span class="muted">—</span>';
         case 'date':
@@ -367,6 +370,7 @@ function export_value(array $entity, string $column, array $row): string
         'select' => (string)($def['options'][$value] ?? $value ?? ''),
         'bool'   => $value ? 'Yes' : 'No',
         'money'  => $value === null ? '' : number_format((float)$value, 2, '.', ''),
+        'mandate' => gc_mandate_label($value),
         default  => (string)($value ?? ''),
     };
 }

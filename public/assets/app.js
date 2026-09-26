@@ -25,3 +25,20 @@ document.querySelectorAll('form[data-entity]').forEach((form) => {
     }
   });
 });
+
+// Copy buttons: <button data-copy="#input-id">
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-copy]');
+  if (!btn) return;
+  const input = document.querySelector(btn.dataset.copy);
+  if (!input) return;
+  input.select();
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch {
+    document.execCommand('copy');
+  }
+  const label = btn.textContent;
+  btn.textContent = 'Copied ✓';
+  setTimeout(() => { btn.textContent = label; }, 1500);
+});

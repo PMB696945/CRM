@@ -65,13 +65,14 @@ function create(string $name, array $input): int
 echo "Database upgrades\n";
 test('upgrades a version 1 database and is safe to re-run', function () {
     eq(1, schema_version());
-    eq([2], migrate());
+    eq(range(2, latest_schema_version()), migrate());
     eq(latest_schema_version(), schema_version());
     ok(column_exists('accounts', 'xero_contact_id'));
     ok(constraint_exists('accounts', 'fk_accounts_xero'));
     eq([], migrate(), 'nothing left to apply');
     set_setting('schema_version', '1');
-    eq([2], migrate(), 're-running a migration is harmless');
+    eq(range(2, latest_schema_version()), migrate(), 're-running migrations is harmless');
+    ok(column_exists('accounts', 'gocardless_customer_id'));
 });
 
 db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Tester', 'test@example.com', ?, 'admin')", [password_hash('password123', PASSWORD_DEFAULT)]);
@@ -252,9 +253,9 @@ test('parses Xero date formats', function () {
     eq(null, xero_date(null));
 });
 test('normalises company names for matching', function () {
-    eq('copper kettle cafe', xero_match_name('The Copper Kettle Café'));
-    eq('fenwick and rowe solicitors', xero_match_name('Fenwick & Rowe Solicitors LLP'));
-    eq('acme telecom', xero_match_name('ACME Telecom Ltd.'));
+    eq('copper kettle cafe', company_match_key('The Copper Kettle Café'));
+    eq('fenwick and rowe solicitors', company_match_key('Fenwick & Rowe Solicitors LLP'));
+    eq('acme telecom', company_match_key('ACME Telecom Ltd.'));
 });
 test('calculates outstanding, overdue, credit and currency', function () {
     $c = fn($id) => ['ContactID' => $id];
@@ -373,6 +374,138 @@ test('revoked connection gives a clear error and is marked disconnected', functi
 
 proc_terminate($mock);
 @unlink($mockState);
+
+echo "GoCardless\n";
+test('mandate states and best mandate per customer', function () {
+    eq('active', gc_mandate_state('active'));
+    eq('pending', gc_mandate_state('pending_customer_approval'));
+    eq('inactive', gc_mandate_state('cancelled'));
+    eq('none', gc_mandate_state(null));
+    $best = gc_best_mandates([
+        ['id' => 'A', 'status' => 'cancelled', 'created_at' => '2026-01-01', 'links' => ['customer' => 'CU1']],
+        ['id' => 'B', 'status' => 'active', 'created_at' => '2025-01-01', 'links' => ['customer' => 'CU1']],
+        ['id' => 'C', 'status' => 'failed', 'created_at' => '2025-01-01', 'links' => ['customer' => 'CU2']],
+        ['id' => 'D', 'status' => 'failed', 'created_at' => '2026-01-01', 'links' => ['customer' => 'CU2']],
+    ]);
+    eq('B', $best['CU1']['id'], 'active beats newer cancelled');
+    eq('D', $best['CU2']['id'], 'newest wins a tie');
+});
+
+$gcState = sys_get_temp_dir() . '/crm_gc_mock_' . getmypid() . '.json';
+$gcPort = 17000 + getmypid() % 1000;
+$gcMock = proc_open([PHP_BINARY, '-S', "127.0.0.1:$gcPort", APP_ROOT . '/tests/gocardless_mock.php'],
+    [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $gcPipes, null, ['MOCK_STATE' => $gcState] + getenv());
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $gcPort); $i++) {
+    usleep(100000);
+}
+$cfg = &config_ref();
+$cfg['gocardless_url'] = "http://127.0.0.1:$gcPort";
+function gc_mock_state(): array { global $gcState; return json_decode(file_get_contents($gcState), true); }
+function gc_mock_complete(string $br): void { global $gcPort; http_request('POST', "http://127.0.0.1:$gcPort/__complete/$br"); }
+
+test('rejects a bad token and accepts a good one', function () {
+    set_setting('gocardless_access_token', 'wrong');
+    ok(gc_configured());
+    try {
+        gc_creditor_name();
+        throw new Exception('expected failure');
+    } catch (GoCardlessException $e) {
+        ok(str_contains($e->getMessage(), 'rejected the access token'), $e->getMessage());
+    }
+    set_setting('gocardless_access_token', 'sandbox_mock_readwrite');
+    eq('Mock Telecom Ltd', gc_creditor_name());
+});
+
+$gcIds = [];
+test('syncs customers and mandates with paging, 429 retry and auto-linking', function () use (&$gcIds) {
+    db_exec('DELETE FROM accounts');
+    $mk = fn($name, $extra = []) => create('accounts', ['name' => $name, 'type' => 'business', 'status' => 'active'] + $extra);
+    $gcIds['harbour'] = $mk('Harbour View Dental');
+    create('contacts', ['account_id' => $gcIds['harbour'], 'name' => 'Lucy Grant', 'email' => 'lucy@harbour.example.co.uk', 'is_billing' => '1']); // match by contact email
+    $gcIds['wilson'] = $mk('Mr David Wilson', ['type' => 'residential']);                                                                         // match by name, title ignored
+    $gcIds['north'] = $mk('Northgate Motors');
+    $gcIds['kettle'] = $mk('The Copper Kettle Café', ['email' => 'hello@kettle.example.co.uk', 'address' => '1 High St', 'city' => 'York', 'postcode' => 'YO1 8RS']);
+    create('contacts', ['account_id' => $gcIds['kettle'], 'name' => 'Tom Hughes', 'email' => 'tom@kettle.example.co.uk', 'is_primary' => '1']);
+
+    $s = gc_sync();
+    eq(603, $s['customers'], 'both pages of customers');
+    eq(1, $s['active']);
+    eq(3, $s['linked']);
+    $status = fn($id) => db_value('SELECT g.mandate_status FROM accounts a JOIN gocardless_customers g ON g.id = a.gocardless_customer_id WHERE a.id = ?', [$id]);
+    eq('active', $status($gcIds['harbour']), 'active mandate beats older cancelled one');
+    eq('pending_customer_approval', $status($gcIds['wilson']));
+    eq('failed', $status($gcIds['north']));
+    eq(null, $status($gcIds['kettle']));
+    ok(count(array_filter(gc_mock_state()['calls'], fn($c) => str_starts_with($c, 'GET /mandates'))) >= 2, '429 retried');
+});
+
+test('No Direct Debit filter and list column', function () use (&$gcIds) {
+    $rows = list_rows('accounts', ['preset' => 'no_dd', 'per_page' => 0])['rows'];
+    $ids = array_map('intval', array_column($rows, 'id'));
+    sort($ids);
+    $expected = [$gcIds['kettle'], $gcIds['north']];
+    sort($expected);
+    eq($expected, $ids, 'failed mandate and no mandate');
+    ok(in_array('_dd', entities()['accounts']['list'], true));
+    eq('Setting up', export_value(entity('accounts'), '_dd', ['_dd' => 'pending_submission']));
+});
+
+test('creates a prefilled setup link for a new customer', function () use (&$gcIds) {
+    $account = db_one('SELECT * FROM accounts WHERE id = ?', [$gcIds['kettle']]);
+    $link = gc_create_setup_link($account);
+    ok(str_starts_with($link['url'], 'https://pay-sandbox.gocardless.com/'), $link['url']);
+    ok(strtotime($link['expires_at']) > strtotime('+6 days'), 'expires in ~7 days');
+    $bodies = gc_mock_state()['last_bodies'];
+    eq('bacs', $bodies['/billing_requests']['billing_requests']['mandate_request']['scheme']);
+    eq('GBP', $bodies['/billing_requests']['billing_requests']['mandate_request']['currency']);
+    eq($account['account_number'], $bodies['/billing_requests']['billing_requests']['metadata']['crm_account']);
+    $prefill = $bodies['/billing_request_flows']['billing_request_flows']['prefilled_customer'];
+    eq('The Copper Kettle Café', $prefill['company_name']);
+    eq('Tom', $prefill['given_name']);
+    eq('Hughes', $prefill['family_name']);
+    eq('tom@kettle.example.co.uk', $prefill['email'], 'primary contact email preferred');
+    eq('YO1 8RS', $prefill['postal_code']);
+    // A second link replaces the first
+    $second = gc_create_setup_link($account);
+    ok($second['id'] !== $link['id']);
+    eq(1, (int)db_value("SELECT COUNT(*) FROM gocardless_setup_links WHERE account_id = ? AND status = 'open'", [$gcIds['kettle']]));
+    $mailto = gc_setup_mailto($account, $second['url']);
+    ok(str_starts_with($mailto, 'mailto:tom%40kettle.example.co.uk?subject='), $mailto);
+    ok(str_contains(rawurldecode($mailto), $second['url']));
+});
+
+test('completed setup link links the customer and shows the new mandate', function () use (&$gcIds) {
+    $link = gc_open_setup_link($gcIds['kettle']);
+    gc_mock_complete($link['billing_request_id']);
+    gc_refresh_account($gcIds['kettle']);
+    $row = db_one('SELECT g.* FROM accounts a JOIN gocardless_customers g ON g.id = a.gocardless_customer_id WHERE a.id = ?', [$gcIds['kettle']]);
+    eq('pending_submission', $row['mandate_status']);
+    eq('completed', db_value('SELECT status FROM gocardless_setup_links WHERE id = ?', [$link['id']]));
+    eq(null, gc_open_setup_link($gcIds['kettle']));
+});
+
+test('link for an existing GoCardless customer uses their record', function () use (&$gcIds) {
+    $account = db_one('SELECT * FROM accounts WHERE id = ?', [$gcIds['north']]);
+    gc_create_setup_link($account);
+    $bodies = gc_mock_state()['last_bodies'];
+    eq('CU0003', $bodies['/billing_requests']['billing_requests']['links']['customer']);
+    ok(!isset($bodies['/billing_request_flows']['billing_request_flows']['prefilled_customer']), 'no prefill for existing customer');
+});
+
+test('read-only token explains it cannot create links', function () use (&$gcIds) {
+    set_setting('gocardless_access_token', 'sandbox_mock_readonly');
+    try {
+        gc_create_setup_link(db_one('SELECT * FROM accounts WHERE id = ?', [$gcIds['kettle']]));
+        throw new Exception('expected failure');
+    } catch (GoCardlessException $e) {
+        ok(str_contains($e->getMessage(), 'read-write'), $e->getMessage());
+    }
+    gc_refresh_account($gcIds['harbour']); // reading still works
+    set_setting('gocardless_access_token', 'sandbox_mock_readwrite');
+});
+
+proc_terminate($gcMock);
+@unlink($gcState);
 
 echo "Demo data\n";
 test('demo data loads', function () {

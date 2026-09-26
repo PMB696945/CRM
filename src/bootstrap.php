@@ -28,4 +28,7 @@ require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/entities.php';
 require_once __DIR__ . '/repository.php';
 require_once __DIR__ . '/settings.php';
+require_once __DIR__ . '/matching.php';
+require_once __DIR__ . '/http.php';
 require_once __DIR__ . '/xero.php';
+require_once __DIR__ . '/gocardless.php';

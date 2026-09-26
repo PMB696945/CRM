@@ -87,6 +87,7 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
   </div>
 
   <aside>
+    <?php if ($dd !== null) render('_direct_debit', ['account' => $account, 'dd' => $dd]); ?>
     <section class="card">
       <div class="card-head"><h2>Details</h2></div>
       <dl class="details details-stack">

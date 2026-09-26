@@ -32,6 +32,13 @@ const REF_LABELS = [
     'contacts' => 'name',
     'users'    => 'name',
     'xero_contacts' => 'name',
+    'gocardless_customers' => 'name',
+];
+
+/** Refs to external systems: [table => [id column, function building a URL to it]]. */
+const EXTERNAL_REFS = [
+    'xero_contacts'        => ['contact_id', 'xero_contact_url'],
+    'gocardless_customers' => ['customer_id', 'gc_customer_url'],
 ];
 
 function opts(array $values): array
@@ -51,7 +58,7 @@ function entities(): array
 {
     // Cached per request, keyed on the features that change the definitions.
     static $cache = [];
-    $key = xero_connected() ? 'xero' : 'base';
+    $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '');
     if (isset($cache[$key])) {
         return $cache[$key];
     }
@@ -75,6 +82,8 @@ function entities(): array
                 'credit_limit'   => ['label' => 'Credit limit', 'type' => 'money'],
                 'xero_contact_id' => ['label' => 'Xero contact', 'type' => 'ref', 'ref' => 'xero_contacts', 'if' => 'xero_connected',
                     'help' => 'Linked automatically on sync when the account number, email or name matches'],
+                'gocardless_customer_id' => ['label' => 'GoCardless customer', 'type' => 'ref', 'ref' => 'gocardless_customers', 'if' => 'gc_configured',
+                    'help' => 'Linked automatically when they complete a setup link, or on sync when the email or name matches'],
                 'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
             ],
             'list'    => ['account_number', 'name', 'type', 'status', 'city', 'owner_id', '_mrr'],
@@ -238,10 +247,21 @@ function entities(): array
         ];
         $entities['accounts']['list'][] = '_balance';
         $entities['accounts']['list'][] = '_overdue';
-        $entities['accounts']['presets'] = [
+        $entities['accounts']['presets'] = ($entities['accounts']['presets'] ?? []) + [
             'arrears'   => ['label' => 'In arrears', 'sql' => 'EXISTS (SELECT 1 FROM xero_contacts x WHERE x.id = t.xero_contact_id AND x.overdue > 0)'],
             'over_limit' => ['label' => 'Over credit limit', 'sql' => 't.credit_limit IS NOT NULL AND EXISTS (SELECT 1 FROM xero_contacts x WHERE x.id = t.xero_contact_id AND x.outstanding > t.credit_limit)'],
             'no_xero'   => ['label' => 'Not linked to Xero', 'sql' => "t.xero_contact_id IS NULL AND t.status IN ('active','suspended')"],
+        ];
+    }
+
+    // GoCardless Direct Debit status, once set up.
+    if (gc_configured()) {
+        $entities['accounts']['computed']['_dd'] = ['label' => 'Direct Debit', 'type' => 'mandate',
+            'sql' => '(SELECT g.mandate_status FROM gocardless_customers g WHERE g.id = t.gocardless_customer_id)'];
+        $entities['accounts']['list'][] = '_dd';
+        $entities['accounts']['presets'] = ($entities['accounts']['presets'] ?? []) + [
+            'no_dd' => ['label' => 'No Direct Debit', 'sql' => "t.status = 'active' AND NOT EXISTS (SELECT 1 FROM gocardless_customers g WHERE g.id = t.gocardless_customer_id
+                AND g.mandate_status IN ('active','submitted','pending_submission','pending_customer_approval'))"],
         ];
     }
 

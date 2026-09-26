@@ -213,7 +213,7 @@ input[type=checkbox] { width: auto; accent-color: var(--primary); }
 
 /* Responsive */
 @media (max-width: 1100px) {
-  .grid-2, .grid-side { grid-template-columns: 1fr; }
+  .grid-2, .grid-side { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 800px) {
   .sidebar { transform: translateX(-100%); transition: transform .2s; }
@@ -253,3 +253,15 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; b
 .link-list { columns: 3 220px; margin: 0; padding-left: 1.1rem; }
 .link-list li { margin-bottom: .3rem; break-inside: avoid; }
 .card-head .muted form { margin: 0 .5rem; }
+
+/* Direct Debit card */
+.dd-card { border-top: 3px solid var(--border); }
+.dd-card.dd-active { border-top-color: var(--ok); }
+.dd-card.dd-pending { border-top-color: var(--warning); }
+.dd-card.dd-none, .dd-card.dd-inactive { border-top-color: var(--danger); }
+.dd-summary { margin: 0 0 .75rem; }
+.dd-link { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .75rem; padding: .75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
+.dd-link label { font-weight: 600; font-size: .85rem; }
+.dd-link .copy-row { gap: .4rem; margin: 0; }
+.dd-foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; padding-top: .6rem; border-top: 1px solid var(--border); font-size: .8rem; }
+.dd-foot .btn { padding-left: 0; }

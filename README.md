@@ -17,6 +17,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Activities** | Calls, emails, meetings, notes and tasks with due dates |
 | **Everywhere** | Global search (names, postcodes, phone numbers, circuit IDs, ticket refs), filters, sorting, pagination and CSV export on every list. Works on mobile and supports dark mode |
 | **Xero balances** | Connect Xero read-only to see each customer's outstanding and overdue balance and number of unpaid invoices. Adds an "In arrears" and "Over credit limit" filter, an overdue-debt total on the dashboard, and a link to the contact in Xero. Syncs on demand or by cron |
+| **GoCardless Direct Debit** | Shows whether each customer has an active, pending or failed Direct Debit mandate. If they don't have one, creates a personal GoCardless setup link, prefilled with their details, that you can copy or email in one click. When they complete it, the CRM links them automatically. Adds a "No Direct Debit" filter and a dashboard count |
 | **Users** | Admin and agent roles. Only admins manage users and the product catalogue |
 
 Security: prepared statements throughout, CSRF tokens on every form, output escaping, bcrypt password hashing, session fixation protection, protection against open redirects and CSV formula injection, and security headers.
@@ -103,13 +104,32 @@ The CRM can show each customer's balance from Xero. It only **reads** from Xero 
 **Keeping balances up to date:**
 - Press **Sync now** on the dashboard or the Xero page, or schedule it with a cPanel cron job:
   ```
-  php /home/youraccount/path/to/crm/cron/xero-sync.php
+  php /home/youraccount/path/to/crm/cron/sync.php
   ```
+  This also syncs GoCardless if it's set up. The older `cron/xero-sync.php` still works.
   Hourly is plenty. Running it at least every few weeks also stops Xero expiring the connection, which happens after 60 days without use.
 
 **Scopes:** the CRM requests `offline_access accounting.contacts.read accounting.invoices.read`, the granular scopes Xero requires for apps created from March 2026. If an older app hasn't moved to granular scopes yet, change this under *Advanced* on the Xero page.
 
 **Upgrading an existing install:** new versions update the database automatically the first time you load a page. This needs the database user to have `CREATE`, `ALTER`, `INDEX` and `REFERENCES`. If it doesn't, the CRM shows a page saying so.
+
+## GoCardless integration
+
+The CRM checks each customer's Direct Debit mandate in GoCardless. If there isn't an active one, it gives you a setup link to send them.
+
+**Setup (admin):**
+1. In GoCardless, go to **Developers → Create → Access token** and choose **Read-write**. A read-only token can check mandates, but can't create setup links.
+2. In the CRM, open **GoCardless** in the sidebar, paste the token, choose *Live* or *Sandbox*, then click **Save & test**.
+3. Click **Sync now**. Existing GoCardless customers are matched to CRM customers by email (the account's or any contact's) or company name, only when unambiguous. You can also pick the GoCardless customer on the customer's edit form.
+
+**On a customer's page**, the *Direct Debit* card shows one of three states:
+- **Active:** the mandate reference and the next date a payment can be collected.
+- **Setting up:** the customer has signed up and the bank is processing the mandate.
+- **No mandate, or failed/cancelled:** use **Create Direct Debit setup link**. It creates a GoCardless hosted page, with the customer's name, email and address filled in, and gives you **Copy**, **Email to customer** and **Open** buttons. Links expire after 7 days. When the customer finishes, **Check now** (or the next sync) links them and shows the new mandate.
+
+**Keeping it current:** schedule `php /path/to/crm/cron/sync.php` hourly in cPanel. It syncs Xero and GoCardless together.
+
+**Optional settings:** under *Advanced*, you can set a return page to send customers to after setup (e.g. your website's thank-you page) and a scheme other than `bacs` for non-UK collections.
 
 ## Tests
 
@@ -131,12 +151,15 @@ src/
   repository.php   generic validation, CRUD, listing, formatting
   controllers.php  page handlers
   xero.php         Xero OAuth, API client and balance sync
+  gocardless.php   GoCardless mandates, setup links and sync
+  http.php         shared HTTP client
+  matching.php     unambiguous customer matching (used by both integrations)
   settings.php     key/value settings stored in the database
   installer.php    shared install logic (CLI + web)
 templates/         PHP view templates
 install/           schema.sql, migrations.php (upgrades), installer, demo data
-cron/              scheduled jobs (xero-sync.php)
-tests/             integration tests (+ xero_mock.php, a local stand-in for Xero's API)
+cron/              scheduled jobs (sync.php runs every connected integration)
+tests/             integration tests (+ xero_mock.php and gocardless_mock.php, local stand-ins for their APIs)
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

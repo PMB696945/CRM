@@ -78,7 +78,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
         <dt>Linked customers</dt><dd><?= number_format($stats['linked']) ?></dd>
       </dl>
       <p class="help">Balances refresh when you press <b>Sync now</b>. To keep them up to date automatically, add a cron job in cPanel (<i>Cron Jobs</i>), e.g. every hour:</p>
-      <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/xero-sync.php" onclick="this.select()" aria-label="Cron command"></div>
+      <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/sync.php" onclick="this.select()" aria-label="Cron command"></div>
       <p class="help">Running at least every few weeks also keeps the connection alive. Xero expires it after 60 days without use.</p>
     </section>
   </div>

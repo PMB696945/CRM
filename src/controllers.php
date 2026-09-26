@@ -71,6 +71,12 @@ function dashboard_controller(): void
             WHERE x.overdue > 0 ORDER BY x.overdue DESC LIMIT 8');
     }
 
+    if (gc_configured()) {
+        $stats['no_dd'] = list_rows('accounts', ['preset' => 'no_dd', 'per_page' => 1])['total'];
+        $stats['dd_pending'] = (int)db_value("SELECT COUNT(*) FROM accounts a JOIN gocardless_customers g ON g.id = a.gocardless_customer_id
+            WHERE a.status = 'active' AND g.mandate_status IN ('submitted','pending_submission','pending_customer_approval')");
+    }
+
     page('dashboard', compact('stats', 'mrrByType', 'renewals', 'tickets', 'tasks', 'recent', 'window', 'debtors'), 'Dashboard');
 }
 
@@ -361,7 +367,15 @@ function account_view(array $entity, array $account): void
         ? db_one('SELECT * FROM xero_contacts WHERE id = ?', [$account['xero_contact_id']])
         : null;
 
-    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero'), $account['name']);
+    $dd = null;
+    if (gc_configured()) {
+        $dd = [
+            'customer' => $account['gocardless_customer_id'] ? db_one('SELECT * FROM gocardless_customers WHERE id = ?', [$account['gocardless_customer_id']]) : null,
+            'link'     => gc_open_setup_link($id),
+        ];
+    }
+
+    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd'), $account['name']);
 }
 
 function ticket_view(array $entity, array $ticket): void
@@ -510,4 +524,88 @@ function xero_controller(): void
         'tenants'     => json_decode((string)setting('xero_tenants', '[]'), true) ?: [],
         'summary'     => json_decode((string)setting('xero_last_sync_summary', 'null'), true),
     ], 'Xero');
+}
+
+function gocardless_controller(): void
+{
+    $action = query('action');
+    $accountId = query_int('id');
+
+    // Actions any signed-in user can take from a customer's page.
+    if (in_array($action, ['link', 'check', 'sync'], true)) {
+        if (!is_post()) {
+            redirect(url('gocardless'));
+        }
+        verify_csrf();
+        $back = $accountId ? url('accounts', ['action' => 'view', 'id' => $accountId]) : url('gocardless');
+        try {
+            if ($action === 'sync') {
+                $s = gc_sync();
+                flash(sprintf('GoCardless sync complete: %d customers, %d with an active mandate, %d newly linked.', $s['customers'], $s['active'], $s['linked']));
+            } else {
+                $account = $accountId ? db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]) : null;
+                if (!$account) {
+                    not_found();
+                }
+                if ($action === 'link') {
+                    gc_create_setup_link($account);
+                    flash('Direct Debit setup link created. Copy it or email it to the customer; it expires in 7 days.');
+                } else {
+                    gc_refresh_account($accountId);
+                    flash('Direct Debit status refreshed from GoCardless.');
+                }
+            }
+        } catch (IntegrationException | PDOException $e) {
+            flash($e->getMessage(), 'error');
+        }
+        redirect(safe_return($_POST['_return'] ?? null, $back));
+    }
+
+    require_admin();
+
+    if (is_post()) {
+        verify_csrf();
+        if ($action === 'settings') {
+            $token = trim((string)($_POST['access_token'] ?? ''));
+            $environment = ($_POST['environment'] ?? '') === 'sandbox' ? 'sandbox' : 'live';
+            $returnUrl = trim((string)($_POST['return_url'] ?? ''));
+            $scheme = preg_replace('/[^a-z_]/', '', (string)($_POST['scheme'] ?? 'bacs')) ?: 'bacs';
+            if ($returnUrl !== '' && !preg_match('#^https://\S+$#', $returnUrl)) {
+                flash('The return page must be a full https:// address.', 'error');
+                redirect(url('gocardless'));
+            }
+            $previous = [setting('gocardless_access_token'), setting('gocardless_environment')];
+            if ($token !== '') {
+                set_setting('gocardless_access_token', $token);
+            }
+            set_setting('gocardless_environment', $environment);
+            set_setting('gocardless_return_url', $returnUrl ?: null);
+            set_setting('gocardless_scheme', $scheme === 'bacs' ? null : $scheme);
+            try {
+                set_setting('gocardless_creditor', gc_creditor_name());
+                flash('GoCardless connected to ' . setting('gocardless_creditor') . '. Run a sync to load mandates.');
+            } catch (GoCardlessException $e) {
+                // Keep the old, working credentials if the new ones fail.
+                set_setting('gocardless_access_token', $previous[0]);
+                set_setting('gocardless_environment', $previous[1]);
+                flash($e->getMessage(), 'error');
+            }
+        } elseif ($action === 'remove') {
+            foreach (['gocardless_access_token', 'gocardless_creditor'] as $key) {
+                set_setting($key, null);
+            }
+            flash('GoCardless access token removed. Customer links are kept but hidden until you add a token again.');
+        }
+        redirect(url('gocardless'));
+    }
+
+    page('gocardless', [
+        'stats' => [
+            'customers' => (int)db_value('SELECT COUNT(*) FROM gocardless_customers'),
+            'active'    => (int)db_value("SELECT COUNT(*) FROM gocardless_customers WHERE mandate_status = 'active'"),
+            'linked'    => (int)db_value('SELECT COUNT(*) FROM accounts WHERE gocardless_customer_id IS NOT NULL'),
+            'open_links' => (int)db_value("SELECT COUNT(*) FROM gocardless_setup_links WHERE status = 'open' AND (expires_at IS NULL OR expires_at > NOW())"),
+        ],
+        'summary' => json_decode((string)setting('gocardless_last_sync_summary', 'null'), true),
+    ], 'GoCardless');
 }

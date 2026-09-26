@@ -56,6 +56,7 @@ match (true) {
     $page === 'users'     => users_controller(),
     $page === 'profile'   => profile_controller(),
     $page === 'xero'      => xero_controller(),
+    $page === 'gocardless' => gocardless_controller(),
     entity($page) !== null => entity_controller($page),
     default               => not_found(),
 };

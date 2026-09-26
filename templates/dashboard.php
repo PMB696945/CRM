@@ -29,6 +29,13 @@
     <span class="kpi-sub"><?= number_format($stats['xero_debtors']) ?> in arrears · <?= h(money($stats['xero_outstanding'])) ?> outstanding</span>
   </a>
   <?php endif; ?>
+  <?php if (isset($stats['no_dd'])): ?>
+  <a class="kpi <?= $stats['no_dd'] ? 'kpi-warn' : '' ?>" href="<?= h(url('accounts', ['preset' => 'no_dd'])) ?>">
+    <span class="kpi-label">No Direct Debit</span>
+    <span class="kpi-value"><?= number_format($stats['no_dd']) ?></span>
+    <span class="kpi-sub">active customers · <?= number_format($stats['dd_pending']) ?> being set up</span>
+  </a>
+  <?php endif; ?>
   <a class="kpi <?= $stats['expiring'] ? 'kpi-warn' : '' ?>" href="<?= h(url('services', ['preset' => 'expiring'])) ?>">
     <span class="kpi-label">Up for renewal</span>
     <span class="kpi-value"><?= number_format($stats['expiring']) ?></span>

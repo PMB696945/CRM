@@ -62,42 +62,17 @@ function xero_authorize_url(string $state, string $redirectUri): string
 
 /* ---------------------------------------------------------------- HTTP --- */
 
-final class XeroException extends RuntimeException
+final class XeroException extends IntegrationException
 {
 }
 
-/**
- * Minimal HTTP client. Returns [status, decoded JSON body (or raw string), headers].
- */
 function xero_http(string $method, string $url, array $headers = [], ?string $body = null): array
 {
-    $responseHeaders = [];
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_CUSTOMREQUEST  => $method,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HTTPHEADER     => $headers,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT        => 60,
-        CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$responseHeaders) {
-            if (str_contains($line, ':')) {
-                [$k, $v] = explode(':', $line, 2);
-                $responseHeaders[strtolower(trim($k))] = trim($v);
-            }
-            return strlen($line);
-        },
-    ]);
-    if ($body !== null) {
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    try {
+        return http_request($method, $url, $headers, $body);
+    } catch (IntegrationException $e) {
+        throw new XeroException('Could not reach Xero: ' . $e->getMessage());
     }
-    $raw = curl_exec($ch);
-    if ($raw === false) {
-        $error = curl_error($ch);
-        throw new XeroException("Could not reach Xero: $error");
-    }
-    $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-    $decoded = json_decode((string)$raw, true);
-    return [$status, $decoded ?? $raw, $responseHeaders];
 }
 
 /** POST to the token endpoint (code exchange or refresh). */
@@ -242,16 +217,6 @@ function xero_date(?string $value): ?string
     return $ts ? date('Y-m-d', $ts) : null;
 }
 
-/** Normalise a company name for matching: "The Copper Kettle Café Ltd." → "copper kettle cafe". */
-function xero_match_name(?string $name): string
-{
-    $name = strtolower(trim((string)$name));
-    $name = strtr($name, ['&' => ' and ', 'é' => 'e', 'è' => 'e', 'á' => 'a', 'ö' => 'o', 'ü' => 'u']);
-    $name = preg_replace('/[^a-z0-9 ]+/', ' ', $name);
-    $name = preg_replace('/\b(the|ltd|limited|llp|plc|inc|co|uk)\b/', ' ', $name);
-    return trim(preg_replace('/\s+/', ' ', $name));
-}
-
 /**
  * Aggregate invoices and credit notes into per-contact balances.
  * Returns [contactId => ['outstanding', 'overdue', 'open_invoices', 'oldest_due_date', 'name']].
@@ -315,52 +280,28 @@ function xero_calculate_balances(array $invoices, array $creditNotes, string $to
  */
 function xero_auto_link(): int
 {
-    $contacts = db_all('SELECT id, name, account_number, email FROM xero_contacts');
-    $taken = array_flip(array_filter(array_column(db_all('SELECT xero_contact_id FROM accounts WHERE xero_contact_id IS NOT NULL'), 'xero_contact_id')));
-    $unlinked = db_all('SELECT id, name, account_number, email FROM accounts WHERE xero_contact_id IS NULL');
-
-    $index = ['account_number' => [], 'email' => [], 'name' => []];
-    foreach ($contacts as $c) {
-        if (isset($taken[$c['id']])) {
-            continue;
-        }
-        foreach (['account_number' => strtolower(trim((string)$c['account_number'])), 'email' => strtolower(trim((string)$c['email'])), 'name' => xero_match_name($c['name'])] as $key => $value) {
-            if ($value !== '') {
-                $index[$key][$value][] = (int)$c['id'];
-            }
-        }
+    $external = [];
+    $taken = 'SELECT xero_contact_id FROM accounts WHERE xero_contact_id IS NOT NULL';
+    foreach (db_all("SELECT id, name, account_number, email FROM xero_contacts WHERE id NOT IN ($taken)") as $c) {
+        $external[(int)$c['id']] = [
+            'account_number' => [strtolower(trim((string)$c['account_number']))],
+            'email'          => [email_match_key($c['email'])],
+            'name'           => [company_match_key($c['name'])],
+        ];
     }
-
-    $crmCounts = ['account_number' => [], 'email' => [], 'name' => []];
-    foreach ($unlinked as $a) {
-        foreach (xero_account_keys($a) as $key => $value) {
-            $crmCounts[$key][$value] = ($crmCounts[$key][$value] ?? 0) + 1;
-        }
+    $crm = [];
+    foreach (db_all('SELECT id, name, account_number, email FROM accounts WHERE xero_contact_id IS NULL') as $a) {
+        $crm[(int)$a['id']] = [
+            'account_number' => [strtolower(trim((string)$a['account_number']))],
+            'email'          => [email_match_key($a['email'])],
+            'name'           => [company_match_key($a['name'])],
+        ];
     }
-
-    $linked = 0;
-    foreach ($unlinked as $a) {
-        foreach (xero_account_keys($a) as $key => $value) {
-            $matches = $index[$key][$value] ?? [];
-            // Only link unambiguous one-to-one matches.
-            if (count($matches) === 1 && $crmCounts[$key][$value] === 1 && !isset($taken[$matches[0]])) {
-                db_exec('UPDATE accounts SET xero_contact_id = ? WHERE id = ? AND xero_contact_id IS NULL', [$matches[0], $a['id']]);
-                $taken[$matches[0]] = true;
-                $linked++;
-                break;
-            }
-        }
+    $pairs = match_unambiguous($external, $crm, ['account_number', 'email', 'name']);
+    foreach ($pairs as $accountId => $contactId) {
+        db_exec('UPDATE accounts SET xero_contact_id = ? WHERE id = ? AND xero_contact_id IS NULL', [$contactId, $accountId]);
     }
-    return $linked;
-}
-
-function xero_account_keys(array $account): array
-{
-    return array_filter([
-        'account_number' => strtolower(trim((string)$account['account_number'])),
-        'email'          => strtolower(trim((string)$account['email'])),
-        'name'           => xero_match_name($account['name']),
-    ], fn($v) => $v !== '');
+    return count($pairs);
 }
 
 /** Pull contacts and balances from Xero. Returns a summary array. */
