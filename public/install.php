@@ -10,7 +10,7 @@ declare(strict_types=1);
  * Once any user exists the installer is locked and does nothing.
  */
 
-require dirname(__DIR__) . '/src/bootstrap.php';
+require (require __DIR__ . '/app_root.php') . '/src/bootstrap.php';
 require APP_ROOT . '/src/installer.php';
 
 header('X-Frame-Options: DENY');

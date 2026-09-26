@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require dirname(__DIR__) . '/src/bootstrap.php';
+require (require __DIR__ . '/app_root.php') . '/src/bootstrap.php';
 require APP_ROOT . '/src/controllers.php';
 
 header('X-Frame-Options: DENY');
