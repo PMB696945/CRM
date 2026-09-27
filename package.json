@@ -1,0 +1,15 @@
+{
+  "name": "telecom-crm",
+  "private": true,
+  "description": "Front-end build for the Telecom CRM. Only needed when changing styles: the built CSS is committed, so hosting needs no Node.js.",
+  "scripts": {
+    "build:css": "tailwindcss -i resources/css/app.css -o public/assets/app.css --minify",
+    "watch:css": "tailwindcss -i resources/css/app.css -o public/assets/app.css --watch"
+  },
+  "devDependencies": {
+    "@fontsource-variable/outfit": "^5.1.0",
+    "@tailwindcss/cli": "^4.3.3",
+    "@tailwindcss/forms": "^0.5.9",
+    "tailwindcss": "^4.3.3"
+  }
+}

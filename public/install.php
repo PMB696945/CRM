@@ -107,11 +107,13 @@ if ($hasConfig && is_installed()) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Install · <?= h(config('app_name')) ?></title>
-<link rel="stylesheet" href="assets/style.css">
+<?= theme_head() ?>
 </head>
-<body class="login-page">
-<form class="login-card install-card" method="post" action="install.php" autocomplete="off">
-  <div class="brand"><span class="brand-mark">☎</span> <?= h(config('app_name')) ?> setup</div>
+<body>
+<div class="auth-page">
+<div class="auth-form">
+<form class="login-card" method="post" action="install.php" autocomplete="off">
+  <a class="brand" href="install.php"><span class="brand-mark"><?= icon('phone') ?></span><?= h(config('app_name')) ?> setup</a>
   <?php foreach ($errors as $error): ?><div class="flash flash-error"><?= h($error) ?></div><?php endforeach; ?>
   <?= csrf_field() ?>
 
@@ -149,5 +151,8 @@ if ($hasConfig && is_installed()) {
     <button class="btn btn-primary btn-block">Install</button>
   <?php endif; ?>
 </form>
+</div>
+<?php render('_auth_panel'); ?>
+</div>
 </body>
 </html>

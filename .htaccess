@@ -5,7 +5,7 @@
 Options -Indexes
 DirectoryIndex index.php
 
-<FilesMatch "^(config(\.sample)?\.php|README\.md|\.gitignore|.*\.sql)$">
+<FilesMatch "^(config(\.sample)?\.php|README\.md|\.gitignore|.*\.sql|package(-lock)?\.json)$">
     Require all denied
 </FilesMatch>
 

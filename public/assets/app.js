@@ -42,3 +42,16 @@ document.addEventListener('click', async (e) => {
   btn.textContent = 'Copied ✓';
   setTimeout(() => { btn.textContent = label; }, 1500);
 });
+
+// Mobile sidebar
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-sidebar-toggle]')) document.body.classList.toggle('sidebar-open');
+  else if (e.target.closest('[data-sidebar-close]')) document.body.classList.remove('sidebar-open');
+});
+
+// Light / dark theme, remembered per browser
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('[data-theme-toggle]')) return;
+  const dark = document.documentElement.classList.toggle('dark');
+  try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (err) { /* private mode */ }
+});

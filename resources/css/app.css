@@ -1,0 +1,448 @@
+/*
+ * Telecom CRM styles, built with Tailwind CSS v4 using the design system of
+ * TailAdmin (https://tailadmin.com), free edition, MIT licence,
+ * Copyright (c) 2023 TailAdmin. See resources/css/TAILADMIN-LICENSE.
+ *
+ * Build: npm install && npm run build:css  →  public/assets/app.css (committed)
+ */
+@import "tailwindcss";
+@plugin "@tailwindcss/forms";
+
+@source "../../templates";
+@source "../../src";
+@source "../../public";
+
+@custom-variant dark (&:is(.dark *));
+
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("fonts/outfit-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Outfit";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("fonts/outfit-latin-ext-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* TailAdmin design tokens */
+@theme {
+  --font-*: initial;
+  --font-outfit: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --breakpoint-*: initial;
+  --breakpoint-2xsm: 375px;
+  --breakpoint-xsm: 425px;
+  --breakpoint-3xl: 2000px;
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  --text-title-2xl: 72px;
+  --text-title-2xl--line-height: 90px;
+  --text-title-xl: 60px;
+  --text-title-xl--line-height: 72px;
+  --text-title-lg: 48px;
+  --text-title-lg--line-height: 60px;
+  --text-title-md: 36px;
+  --text-title-md--line-height: 44px;
+  --text-title-sm: 30px;
+  --text-title-sm--line-height: 38px;
+  --text-title-xs: 24px;
+  --text-title-xs--line-height: 32px;
+  --text-theme-xl: 20px;
+  --text-theme-xl--line-height: 30px;
+  --text-theme-sm: 14px;
+  --text-theme-sm--line-height: 20px;
+  --text-theme-xs: 12px;
+  --text-theme-xs--line-height: 18px;
+
+  --color-current: currentColor;
+  --color-transparent: transparent;
+  --color-white: #ffffff;
+  --color-black: #101828;
+
+  --color-brand-25: #f2f7ff;
+  --color-brand-50: #ecf3ff;
+  --color-brand-100: #dde9ff;
+  --color-brand-200: #c2d6ff;
+  --color-brand-300: #9cb9ff;
+  --color-brand-400: #7592ff;
+  --color-brand-500: #465fff;
+  --color-brand-600: #3641f5;
+  --color-brand-700: #2a31d8;
+  --color-brand-800: #252dae;
+  --color-brand-900: #262e89;
+  --color-brand-950: #161950;
+
+  --color-blue-light-25: #f5fbff;
+  --color-blue-light-50: #f0f9ff;
+  --color-blue-light-100: #e0f2fe;
+  --color-blue-light-200: #b9e6fe;
+  --color-blue-light-300: #7cd4fd;
+  --color-blue-light-400: #36bffa;
+  --color-blue-light-500: #0ba5ec;
+  --color-blue-light-600: #0086c9;
+  --color-blue-light-700: #026aa2;
+  --color-blue-light-800: #065986;
+  --color-blue-light-900: #0b4a6f;
+  --color-blue-light-950: #062c41;
+
+  --color-gray-25: #fcfcfd;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f2f4f7;
+  --color-gray-200: #e4e7ec;
+  --color-gray-300: #d0d5dd;
+  --color-gray-400: #98a2b3;
+  --color-gray-500: #667085;
+  --color-gray-600: #475467;
+  --color-gray-700: #344054;
+  --color-gray-800: #1d2939;
+  --color-gray-900: #101828;
+  --color-gray-950: #0c111d;
+  --color-gray-dark: #1a2231;
+
+  --color-orange-25: #fffaf5;
+  --color-orange-50: #fff6ed;
+  --color-orange-100: #ffead5;
+  --color-orange-200: #fddcab;
+  --color-orange-300: #feb273;
+  --color-orange-400: #fd853a;
+  --color-orange-500: #fb6514;
+  --color-orange-600: #ec4a0a;
+  --color-orange-700: #c4320a;
+  --color-orange-800: #9c2a10;
+  --color-orange-900: #7e2410;
+  --color-orange-950: #511c10;
+
+  --color-success-25: #f6fef9;
+  --color-success-50: #ecfdf3;
+  --color-success-100: #d1fadf;
+  --color-success-200: #a6f4c5;
+  --color-success-300: #6ce9a6;
+  --color-success-400: #32d583;
+  --color-success-500: #12b76a;
+  --color-success-600: #039855;
+  --color-success-700: #027a48;
+  --color-success-800: #05603a;
+  --color-success-900: #054f31;
+  --color-success-950: #053321;
+
+  --color-error-25: #fffbfa;
+  --color-error-50: #fef3f2;
+  --color-error-100: #fee4e2;
+  --color-error-200: #fecdca;
+  --color-error-300: #fda29b;
+  --color-error-400: #f97066;
+  --color-error-500: #f04438;
+  --color-error-600: #d92d20;
+  --color-error-700: #b42318;
+  --color-error-800: #912018;
+  --color-error-900: #7a271a;
+  --color-error-950: #55160c;
+
+  --color-warning-25: #fffcf5;
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-200: #fedf89;
+  --color-warning-300: #fec84b;
+  --color-warning-400: #fdb022;
+  --color-warning-500: #f79009;
+  --color-warning-600: #dc6803;
+  --color-warning-700: #b54708;
+  --color-warning-800: #93370d;
+  --color-warning-900: #7a2e0e;
+  --color-warning-950: #4e1d09;
+
+  --color-theme-pink-500: #ee46bc;
+
+  --color-theme-purple-500: #7a5af8;
+
+  --shadow-theme-md:
+    0px 4px 8px -2px rgba(16, 24, 40, 0.1),
+    0px 2px 4px -2px rgba(16, 24, 40, 0.06);
+  --shadow-theme-lg:
+    0px 12px 16px -4px rgba(16, 24, 40, 0.08),
+    0px 4px 6px -2px rgba(16, 24, 40, 0.03);
+  --shadow-theme-sm:
+    0px 1px 3px 0px rgba(16, 24, 40, 0.1),
+    0px 1px 2px 0px rgba(16, 24, 40, 0.06);
+  --shadow-theme-xs: 0px 1px 2px 0px rgba(16, 24, 40, 0.05);
+  --shadow-theme-xl:
+    0px 20px 24px -4px rgba(16, 24, 40, 0.08),
+    0px 8px 8px -4px rgba(16, 24, 40, 0.03);
+  --shadow-datepicker: -5px 0 0 #262d3c, 5px 0 0 #262d3c;
+  --shadow-focus-ring: 0px 0px 0px 4px rgba(70, 95, 255, 0.12);
+  --shadow-slider-navigation:
+    0px 1px 2px 0px rgba(16, 24, 40, 0.1), 0px 1px 3px 0px rgba(16, 24, 40, 0.1);
+  --shadow-tooltip:
+    0px 4px 6px -2px rgba(16, 24, 40, 0.05),
+    -8px 0px 20px 8px rgba(16, 24, 40, 0.05);
+
+  --drop-shadow-4xl:
+    0 35px 35px rgba(0, 0, 0, 0.25), 0 45px 65px rgba(0, 0, 0, 0.15);
+
+  --z-index-1: 1;
+  --z-index-9: 9;
+  --z-index-99: 99;
+  --z-index-999: 999;
+  --z-index-9999: 9999;
+  --z-index-99999: 99999;
+  --z-index-999999: 999999;
+}
+
+
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button { border-color: var(--color-gray-200, currentColor); }
+  .dark *, .dark ::after, .dark ::before { border-color: var(--color-gray-800); }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  body { @apply font-outfit relative z-1 bg-gray-50 text-sm font-normal text-gray-700 dark:bg-gray-900 dark:text-gray-300; }
+  a { @apply text-brand-500 hover:text-brand-600 dark:text-brand-400; }
+  h1 { @apply flex flex-wrap items-center gap-2 text-title-xs font-semibold text-gray-800 dark:text-white/90; }
+  h2 { @apply text-lg font-semibold text-gray-800 dark:text-white/90; }
+  code { @apply rounded bg-gray-100 px-1 py-0.5 font-mono text-[0.9em] text-gray-800 dark:bg-white/5 dark:text-white/80; }
+  details > summary { @apply cursor-pointer text-gray-500 dark:text-gray-400; }
+}
+
+@layer components {
+  /* Form controls (in this layer so they win over the forms plugin's base styles). */
+  :where(input:not([type=checkbox]):not([type=radio]), select, textarea) {
+    @apply shadow-theme-xs focus:border-brand-300 focus:ring-brand-500/10 dark:focus:border-brand-800 h-11 min-w-0 rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 placeholder:text-gray-400 focus:ring-3 focus:outline-hidden dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30;
+  }
+  :where(select) { @apply pr-10; }
+  :where(textarea) { @apply h-auto; }
+  :where(input[readonly]) { @apply bg-gray-50 dark:bg-white/[0.03]; }
+  :where(input[type=checkbox]) { @apply text-brand-500 focus:ring-brand-500/20 size-4 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900; }
+
+  /* ---- App shell (sidebar + header) ---- */
+  .app { @apply flex min-h-screen; }
+  .sidebar { @apply fixed top-0 left-0 z-50 flex h-screen w-72.5 -translate-x-full flex-col overflow-y-auto border-r border-gray-200 bg-white px-5 transition-all duration-300 xl:translate-x-0 dark:border-gray-800 dark:bg-gray-900; }
+  .sidebar-open .sidebar { @apply translate-x-0; }
+  .sidebar-header { @apply flex items-center gap-2 pt-7 pb-6; }
+  .brand { @apply flex items-center gap-2.5 text-lg font-semibold text-gray-800 hover:text-gray-800 dark:text-white/90 dark:hover:text-white/90; }
+  .brand-mark { @apply bg-brand-500 flex size-8 shrink-0 items-center justify-center rounded-lg text-white; }
+  .brand-mark svg { @apply size-5; }
+  .menu-group-title { @apply mb-3 text-xs leading-5 text-gray-400 uppercase; }
+  .menu { @apply mb-6 flex flex-col gap-1; }
+  .menu-item { @apply relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-white/5 dark:hover:text-gray-300; }
+  .menu-item svg { @apply size-6 shrink-0 text-gray-500 dark:text-gray-400; }
+  .menu-item:hover svg { @apply text-gray-700 dark:text-gray-300; }
+  .menu-item.active { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/[0.12] dark:text-brand-400; }
+  .menu-item.active svg { @apply text-brand-500 dark:text-brand-400; }
+  .sidebar-foot { @apply mt-auto mb-5 flex items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-800; }
+  .avatar { @apply bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400 flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold; }
+  .me { @apply flex min-w-0 flex-1 flex-col text-sm font-medium text-gray-800 hover:text-gray-800 dark:text-white/90; }
+  .me small { @apply truncate text-xs font-normal text-gray-500 dark:text-gray-400; }
+  .overlay { @apply fixed inset-0 z-40 hidden bg-gray-900/50 xl:hidden; }
+  .sidebar-open .overlay { @apply block; }
+  .main { @apply relative flex min-w-0 flex-1 flex-col xl:ml-72.5; }
+  .topbar { @apply sticky top-0 z-30 flex w-full items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 sm:gap-4 xl:px-6 dark:border-gray-800 dark:bg-gray-900; }
+  .icon-btn { @apply relative flex size-11 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white; }
+  .icon-btn.round { @apply rounded-full; }
+  .icon-btn svg { @apply size-5; }
+  .burger { @apply xl:hidden; }
+  .global-search { @apply relative max-w-[430px] flex-1; }
+  .global-search svg { @apply pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-gray-500 dark:text-gray-400; }
+  .global-search input { @apply w-full bg-transparent pl-12 xl:w-[430px]; }
+  .quick-add { @apply ml-auto flex items-center gap-2 sm:gap-3; }
+  .theme-toggle .icon-sun { @apply hidden dark:block; }
+  .theme-toggle .icon-moon { @apply block dark:hidden; }
+  .content { @apply mx-auto w-full max-w-(--breakpoint-2xl) p-4 pb-20 md:p-6 md:pb-6; }
+
+  /* ---- Page furniture ---- */
+  .page-head { @apply mb-6 flex flex-wrap items-end justify-between gap-3; }
+  .crumbs { @apply mb-1 text-sm text-gray-500 dark:text-gray-400; }
+  .actions { @apply flex flex-wrap items-center gap-2; }
+  .count { @apply rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/5 dark:text-gray-400; }
+  .lead { @apply -mt-3 mb-6 max-w-3xl text-gray-500 dark:text-gray-400; }
+  .muted { @apply text-gray-500 dark:text-gray-400; }
+  .text-danger { @apply text-error-600 dark:text-error-500 font-medium; }
+  .text-warning { @apply text-warning-600 dark:text-orange-400 font-medium; }
+  .text-ok { @apply text-success-600 dark:text-success-500 font-medium; }
+  .right { @apply text-right; }
+  .inline { @apply inline; }
+  .subhead { @apply mt-5 mb-2 text-xs font-medium tracking-wide text-gray-400 uppercase; }
+
+  /* ---- Cards ---- */
+  .card { @apply mb-6 rounded-2xl border border-gray-200 bg-white p-5 sm:p-6 dark:border-gray-800 dark:bg-white/[0.03]; }
+  .card-head { @apply mb-4 flex flex-wrap items-center justify-between gap-2; }
+  .card.empty { @apply py-12 text-center; }
+  .card p { @apply mb-3 last:mb-0; }
+  .card dl + p { @apply mt-4; }
+  .grid-2 { @apply grid grid-cols-1 gap-6 xl:grid-cols-2; }
+  .grid-2 > .card, .grid-2 > div > .card:last-child { @apply mb-0; }
+  .grid-2 { @apply mb-6; }
+  .grid-side { @apply grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]; }
+
+  /* ---- Metric cards ---- */
+  .kpis { @apply mb-6 grid grid-cols-2 gap-3 sm:gap-4 md:gap-6 lg:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]; }
+  .kpis-sm { @apply lg:grid-cols-[repeat(auto-fit,minmax(190px,1fr))]; }
+  .kpi { @apply flex min-w-0 flex-col rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 text-gray-700 hover:text-gray-700 md:p-6 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300; }
+  a.kpi { @apply hover:border-brand-300 dark:hover:border-brand-800 transition-colors; }
+  .kpi-label { @apply text-sm text-gray-500 dark:text-gray-400; }
+  .kpi-value { @apply mt-2 text-xl sm:text-title-sm font-bold break-words text-gray-800 dark:text-white/90; }
+  .kpi-value small { @apply text-sm font-medium text-gray-500; }
+  .kpi-value.kpi-text { @apply text-lg font-semibold; }
+  .kpi-sub { @apply mt-2 text-theme-xs text-gray-500 dark:text-gray-400; }
+  .kpi-alert { @apply border-error-200 dark:border-error-500/30; }
+  .kpi-alert .kpi-value { @apply text-error-600 dark:text-error-500; }
+  .kpi-warn { @apply border-warning-200 dark:border-warning-500/30; }
+
+  /* ---- Buttons ---- */
+  .btn { @apply shadow-theme-xs inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium whitespace-nowrap text-gray-700 transition hover:bg-gray-50 hover:text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-white/[0.03] dark:hover:text-gray-200; }
+  .btn-primary { @apply bg-brand-500 hover:bg-brand-600 border-brand-500 hover:border-brand-600 text-white hover:text-white dark:border-brand-500 dark:bg-brand-500 dark:text-white dark:hover:bg-brand-600 dark:hover:text-white; }
+  .btn-danger { @apply text-error-600 hover:bg-error-50 hover:text-error-700 dark:text-error-500 dark:hover:bg-error-500/15; }
+  .btn-ghost { @apply border-transparent bg-transparent shadow-none dark:border-transparent dark:bg-transparent; }
+  .btn-sm { @apply px-3 py-2 text-theme-xs; }
+  .btn-block { @apply w-full; }
+  .link { @apply cursor-pointer border-0 bg-transparent p-0 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white; }
+
+  /* ---- Badges ---- */
+  .badge { @apply inline-flex items-center justify-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-theme-xs font-medium whitespace-nowrap text-gray-700 dark:bg-white/5 dark:text-white/80; }
+  .badge-active, .badge-won, .badge-resolved, .badge-customer { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
+  .badge-prospect, .badge-lead, .badge-pending, .badge-open, .badge-new_business { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400; }
+  .badge-qualified, .badge-proposal, .badge-in_progress, .badge-upsell, .badge-billing, .badge-business { @apply bg-blue-light-50 text-blue-light-500 dark:bg-blue-light-500/15 dark:text-blue-light-500; }
+  .badge-negotiation, .badge-awaiting_customer, .badge-awaiting_carrier, .badge-suspended, .badge-p2, .badge-renewal, .badge-task, .badge-sandbox { @apply bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400; }
+  .badge-churned, .badge-lost, .badge-ceased, .badge-p1, .badge-disabled { @apply bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500; }
+  .badge-admin, .badge-internal { @apply bg-theme-purple-500/10 text-theme-purple-500 dark:bg-theme-purple-500/15; }
+
+  /* ---- Tables ---- */
+  .table-wrap { @apply overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]; }
+  .card .table-wrap { @apply -mx-5 rounded-none border-0 border-t bg-transparent sm:-mx-6 dark:bg-transparent; }
+  .card .card-head + .table-wrap { @apply mt-0; }
+  .card > .table-wrap:last-child { @apply -mb-5 sm:-mb-6; }
+  .table { @apply w-full border-collapse text-left; }
+  .table th { @apply border-b border-gray-100 px-5 py-3 text-theme-xs font-medium whitespace-nowrap text-gray-500 dark:border-gray-800 dark:text-gray-400; }
+  .table th a { @apply text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white; }
+  .table td { @apply border-b border-gray-100 px-5 py-3.5 align-middle text-theme-sm text-gray-500 dark:border-gray-800 dark:text-gray-400; }
+  .table tbody tr:last-child td { @apply border-b-0; }
+  .table tbody tr:hover td { @apply bg-gray-50 dark:bg-white/[0.02]; }
+  .table .num { @apply text-right tabular-nums; }
+  .table.compact th, .table.compact td { @apply px-4 py-2.5; }
+  .row-link { @apply whitespace-nowrap font-medium text-gray-800 hover:text-brand-500 dark:text-white/90 dark:hover:text-brand-400; }
+  .empty-row { @apply py-10! text-center; }
+
+  /* ---- Filters, tabs, paging ---- */
+  .filters { @apply mb-5 flex flex-wrap gap-2; }
+  .filters input[type=search] { @apply max-w-xs flex-[1_1_220px]; }
+  .tabs { @apply mb-5 flex gap-1 overflow-x-auto rounded-lg bg-gray-100 p-0.5 sm:inline-flex dark:bg-gray-900; }
+  .tabs a { @apply rounded-md px-3 py-2 text-theme-sm font-medium whitespace-nowrap text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white; }
+  .tabs a.active { @apply shadow-theme-xs bg-white text-gray-900 dark:bg-gray-800 dark:text-white; }
+  .pager { @apply mt-5 flex items-center justify-center gap-4 text-gray-500; }
+
+  /* ---- Forms ---- */
+  .form-grid { @apply grid grid-cols-1 gap-5 md:grid-cols-2; }
+  .field { @apply flex flex-col gap-1.5; }
+  .field > label, .stack label, .login-card label, .dd-link label { @apply text-sm font-medium text-gray-700 dark:text-gray-400; }
+  .field input:not([type=checkbox]), .field select, .field textarea { @apply w-full; }
+  .field-check { @apply justify-end; }
+  .field-check label { @apply flex items-center gap-2 font-normal; }
+  .wide { @apply md:col-span-2; }
+  .req { @apply text-error-500; }
+  .help { @apply text-theme-xs text-gray-500 dark:text-gray-400; }
+  .error { @apply text-theme-xs text-error-500; }
+  .has-error input, .has-error select, .has-error textarea { @apply border-error-300 focus:border-error-300 focus:ring-error-500/10 dark:border-error-700; }
+  .form-actions { @apply flex gap-3 pt-2; }
+  .stack { @apply flex flex-col gap-4; }
+  .stack label { @apply flex flex-col gap-1.5; }
+  .stack details { @apply flex flex-col gap-3; }
+  .stack details[open] > :not(summary) { @apply mt-3; }
+  .stack .btn { @apply self-start; }
+  .inline-form { @apply flex items-center gap-2; }
+
+  /* ---- Alerts ---- */
+  .flash { @apply mb-6 rounded-xl border p-4 text-sm font-medium; }
+  .flash-success { @apply border-success-500 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/15 dark:text-success-500; }
+  .flash-error { @apply border-error-500 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/15 dark:text-error-500; }
+
+  /* ---- Detail lists ---- */
+  .details { @apply m-0 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-[180px_1fr] sm:gap-y-3; }
+  .details dt { @apply text-theme-sm text-gray-500 dark:text-gray-400; }
+  .details dd { @apply m-0 mb-2 text-theme-sm font-medium break-words text-gray-800 sm:mb-0 dark:text-white/90; }
+  .details-stack { @apply grid-cols-1! gap-y-0.5!; }
+  .details-stack dt { @apply mt-3 text-theme-xs first:mt-0; }
+  .notes, .prose { @apply mt-4 border-t border-gray-100 pt-4 text-theme-sm dark:border-gray-800; }
+  .prose { @apply mt-0 border-0 pt-0; }
+
+  /* ---- Feeds, timeline, contacts ---- */
+  .feed { @apply m-0 list-none p-0; }
+  .feed li { @apply border-b border-gray-100 py-3 text-theme-sm last:border-0 dark:border-gray-800; }
+  .feed-body { @apply mt-1 text-gray-500 dark:text-gray-400; }
+  .quick-log { @apply mb-4 flex flex-wrap gap-2; }
+  .quick-log input[name=subject] { @apply flex-[1_1_220px]; }
+  .contact-list { @apply m-0 list-none p-0; }
+  .contact-list li { @apply border-b border-gray-100 py-3 text-theme-sm last:border-0 dark:border-gray-800; }
+  .contact-list strong { @apply text-gray-800 dark:text-white/90; }
+  .timeline { @apply mb-4 list-none p-0; }
+  .timeline li { @apply mb-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-theme-sm dark:border-gray-800 dark:bg-white/[0.02]; }
+  .timeline li.external { @apply border-l-success-500 border-l-4; }
+  .timeline li.internal { @apply border-l-theme-purple-500 border-l-4; }
+  .timeline-meta { @apply mb-1.5 text-theme-xs text-gray-500 dark:text-gray-400; }
+  .timeline-meta strong { @apply text-gray-800 dark:text-white/90; }
+  .comment-form textarea { @apply w-full; }
+  .comment-actions { @apply mt-3 flex flex-wrap items-center justify-end gap-4; }
+  .comment-actions label { @apply flex items-center gap-2; }
+
+  /* ---- Bars (revenue by type) ---- */
+  .bars { @apply flex flex-col gap-4; }
+  .bar-row { @apply grid grid-cols-[120px_1fr_80px] items-center gap-3 text-theme-sm sm:grid-cols-[150px_1fr_90px]; }
+  .bar-label { @apply text-gray-700 dark:text-gray-300; }
+  .bar { @apply h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800; }
+  .bar span { @apply bg-brand-500 block h-full rounded-full; }
+  .bar-value { @apply text-right font-semibold text-gray-800 tabular-nums dark:text-white/90; }
+
+  /* ---- Pipeline board ---- */
+  .board { @apply grid grid-cols-[repeat(6,minmax(200px,1fr))] gap-4 overflow-x-auto pb-4; }
+  .board-col { @apply border-t-brand-500 min-h-52 rounded-2xl border border-t-4 border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]; }
+  .board-won { @apply border-t-success-500; }
+  .board-lost { @apply border-t-error-500; }
+  .board-negotiation { @apply border-t-warning-500; }
+  .board-head { @apply mb-4 font-semibold text-gray-800 dark:text-white/90; }
+  .board-total { @apply text-theme-xs font-normal text-gray-500 dark:text-gray-400; }
+  .board-card { @apply shadow-theme-xs mb-3 flex flex-col gap-1 rounded-xl border border-gray-200 bg-white p-3.5 text-theme-sm text-gray-700 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300; }
+  .board-card:hover { @apply border-brand-300 dark:border-brand-800; }
+  .board-card strong { @apply text-gray-800 dark:text-white/90; }
+  .board-meta { @apply text-theme-xs tabular-nums; }
+
+  /* ---- Integrations (Xero, GoCardless) ---- */
+  .steps { @apply mb-5 flex list-decimal flex-col gap-2 pl-5 text-theme-sm; }
+  .step { @apply mr-2 inline-flex size-7 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-theme-xs font-semibold dark:border-gray-700 dark:bg-gray-800; }
+  .step-done { @apply bg-success-500 border-success-500 text-white dark:border-success-500 dark:bg-success-500; }
+  .copy-row { @apply mt-1.5 flex gap-2; }
+  .copy-row input { @apply flex-1 font-mono text-theme-xs; }
+  .link-list { @apply m-0 columns-1 pl-5 text-theme-sm sm:columns-2 lg:columns-3; }
+  .link-list li { @apply mb-1.5 break-inside-avoid; }
+  .card-head .muted form { @apply mx-2; }
+  .dd-card { @apply border-t-4 border-t-gray-200 dark:border-t-gray-800; }
+  .dd-card.dd-active { @apply border-t-success-500; }
+  .dd-card.dd-pending { @apply border-t-warning-500; }
+  .dd-card.dd-none, .dd-card.dd-inactive { @apply border-t-error-500; }
+  .dd-summary { @apply mb-4 text-theme-sm; }
+  .dd-link { @apply mb-4 flex flex-col gap-2.5 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]; }
+  .dd-link .copy-row { @apply m-0; }
+  .dd-foot { @apply mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-theme-xs dark:border-gray-800; }
+  .dd-foot .btn { @apply pl-0; }
+
+  /* ---- Sign-in and installer ---- */
+  .auth-page { @apply flex min-h-screen bg-white dark:bg-gray-900; }
+  .auth-form { @apply flex w-full flex-1 flex-col justify-center px-6 py-10 lg:w-1/2; }
+  .auth-panel { @apply bg-brand-950 relative hidden flex-1 items-center justify-center overflow-hidden lg:flex dark:bg-white/5; }
+  .login-card { @apply mx-auto flex w-full max-w-md flex-col gap-5; }
+  .login-card .brand { @apply mb-2; }
+  .login-card h1 { @apply text-title-sm; }
+  .login-card label { @apply flex flex-col gap-1.5; }
+  .login-card label.check { @apply flex-row items-center gap-2 font-normal; }
+  .login-card input:not([type=checkbox]) { @apply w-full; }
+  .login-card textarea.code { @apply h-auto w-full font-mono text-theme-xs; }
+}

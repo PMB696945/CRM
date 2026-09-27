@@ -131,6 +131,23 @@ The CRM checks each customer's Direct Debit mandate in GoCardless. If there isn'
 
 **Optional settings:** under *Advanced*, you can set a return page to send customers to after setup (e.g. your website's thank-you page) and a scheme other than `bacs` for non-UK collections.
 
+## Look and feel
+
+The interface uses the design system of [TailAdmin](https://tailadmin.com), a free Tailwind CSS admin template (MIT licence; see `resources/css/TAILADMIN-LICENSE`). It includes a light/dark mode toggle, which is remembered per browser, and works on phones.
+
+The finished stylesheet, `public/assets/app.css`, is committed along with the Outfit font files. **Hosting needs no Node.js or build step**, and no files are loaded from third-party servers.
+
+To change the styles:
+
+```bash
+npm install          # once
+npm run build:css    # rebuilds public/assets/app.css from resources/css/app.css
+npm run watch:css    # or rebuild automatically while you edit
+```
+
+- `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
+- Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
+
 ## Tests
 
 ```bash
@@ -142,6 +159,7 @@ The tests run against a throwaway `<db_name>_test` database, which is created an
 ## Project layout
 
 ```
+resources/css/     stylesheet source (Tailwind + TailAdmin design tokens)
 public/            web root: index.php (front controller), install.php (web installer), assets/
 src/
   bootstrap.php    config + includes
