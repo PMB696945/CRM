@@ -19,6 +19,9 @@ function quotes_controller(): void
         $quote = quote_expire_if_due($quote);
     }
     $back = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : url('quotes');
+    if ($action !== 'view' && !can('sales.edit')) {
+        forbidden();
+    }
 
     switch ($action) {
         case 'new':
@@ -178,6 +181,10 @@ function contracts_controller(): void
         return;
     }
 
+    if ($action !== 'download' && !can('sales.edit')) {
+        forbidden();
+    }
+
     if ($action === 'download') {
         $file = query('file');
         $names = array_column(contract_documents($contract), 'file');
@@ -295,7 +302,7 @@ function send_download(string $path, string $name): never
 
 function contract_templates_controller(): void
 {
-    require_admin();
+    require_permission('settings.manage');
     $action = query('action', 'list');
     $id = query_int('id');
 
@@ -378,10 +385,12 @@ function contract_merge_field_help(): array
 
 function settings_controller(): void
 {
-    require_admin();
+    require_permission('settings.manage');
     $keys = ['company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
-        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https'];
+        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https',
+        'marketing_topics', 'campaign_batch_size'];
+    $before = array_combine($keys, array_map(fn($k) => (string)setting($k), $keys));
     if (is_post()) {
         verify_csrf();
         if (query('action') === 'test_email') {
@@ -406,13 +415,22 @@ function settings_controller(): void
                 $value = '0'; // set it up yourself first
                 flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
             }
+            if ($key === 'campaign_batch_size') {
+                $value = ctype_digit($value) ? (string)max(5, min(500, (int)$value)) : '';
+            }
+            if ($key === 'mail_transport' && !in_array($value, ['php', 'smtp', 'mandrill'], true)) {
+                $value = 'php';
+            }
             if ($key === 'session_idle_minutes') {
                 $value = ctype_digit($value) ? (string)max(5, min(720, (int)$value)) : '';
             }
             set_setting($key, $value === '' ? null : $value);
         }
-        if (($pw = (string)($_POST['smtp_password'] ?? '')) !== '') {
-            set_setting('smtp_password', $pw);
+        foreach (['smtp_password', 'mandrill_api_key'] as $secret) {
+            if (($pw = trim((string)($_POST[$secret] ?? ''))) !== '') {
+                set_setting($secret, $pw);
+                $before[$secret] = '';
+            }
         }
         foreach (['mail_from_email', 'mail_reply_to', 'company_email'] as $k) {
             if (setting($k) && !filter_var(setting($k), FILTER_VALIDATE_EMAIL)) {
@@ -420,7 +438,14 @@ function settings_controller(): void
                 redirect(url('settings'));
             }
         }
-        audit('settings', 'Settings saved (sign-out after ' . (setting('session_idle_minutes') ?: 60) . ' min idle, 2FA ' . (setting('require_2fa') === '1' ? 'required' : 'optional') . ', HTTPS ' . (setting('force_https') === '1' ? 'forced' : 'not forced') . ')');
+        $changes = [];
+        foreach ($before as $key => $old) {
+            $new = in_array($key, ['smtp_password', 'mandrill_api_key'], true) ? '(changed)' : (string)setting($key);
+            if (in_array($key, ['smtp_password', 'mandrill_api_key'], true) || $new !== $old) {
+                $changes[humanize($key)] = ['from' => in_array($key, ['smtp_password', 'mandrill_api_key'], true) ? '' : $old, 'to' => $new];
+            }
+        }
+        audit('settings', 'Settings saved' . ($changes ? ': ' . implode(', ', array_keys($changes)) : ' (no changes)'), null, null, null, $changes ?: null);
         if (empty($_SESSION['flash'])) {
             flash('Settings saved.');
         }
@@ -431,7 +456,7 @@ function settings_controller(): void
 
 function signable_controller(): void
 {
-    require_admin();
+    require_permission('settings.manage');
     $action = query('action');
     if (is_post()) {
         verify_csrf();

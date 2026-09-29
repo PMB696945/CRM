@@ -24,12 +24,36 @@ const CARRIERS = [
 const OPP_STAGES = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
 const STAGE_PROBABILITY = ['lead' => 10, 'qualified' => 25, 'proposal' => 50, 'negotiation' => 75, 'won' => 100, 'lost' => 0];
 
+const MARKETING_SOURCES = [
+    'existing_customer' => 'Existing customer (soft opt-in)',
+    'verbal'            => 'Verbally, on a call or in person',
+    'email'             => 'By email',
+    'web_form'          => 'Website form',
+    'contract'          => 'Order form or contract',
+    'unsubscribed'      => 'Unsubscribed themselves',
+];
+
+/** Marketing topics customers can choose from (Settings → Marketing), as [key => label]. */
+function marketing_topics(): array
+{
+    $raw = (string)(setting('marketing_topics') ?: "Newsletter\nProduct news & offers\nEvents & webinars");
+    $out = [];
+    foreach (preg_split('/\r?\n/', $raw) as $line) {
+        $line = trim($line);
+        if ($line !== '') {
+            $out[substr(preg_replace('/[^a-z0-9]+/', '_', strtolower($line)), 0, 40)] = $line;
+        }
+    }
+    return $out;
+}
+
 /** Reference targets: which column is shown for a foreign key. */
 const REF_LABELS = [
     'accounts' => 'name',
     'products' => 'name',
     'services' => 'identifier',
     'contacts' => 'name',
+    'sites'    => 'name',
     'users'    => 'name',
     'xero_contacts' => 'name',
     'gocardless_customers' => 'name',
@@ -60,19 +84,19 @@ function entities(): array
 {
     // Cached per request, keyed on the features that change the definitions.
     static $cache = [];
-    $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '');
+    $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '') . '|' . (can('finance.view') ? 'fin' : '');
     if (isset($cache[$key])) {
         return $cache[$key];
     }
 
     $entities = [
         'accounts' => [
-            'label' => 'Customer', 'plural' => 'Customers', 'icon' => '🏢',
+            'label' => 'Customer', 'plural' => 'Customers', 'icon' => '🏢', 'perm' => 'customers.edit',
             'fields' => [
                 'account_number' => ['label' => 'Account no.', 'type' => 'text', 'help' => 'Leave blank to auto-generate'],
                 'name'           => ['label' => 'Name', 'type' => 'text', 'required' => true],
                 'type'           => ['label' => 'Type', 'type' => 'select', 'options' => opts(['business', 'residential']), 'required' => true],
-                'status'         => ['label' => 'Status', 'type' => 'select', 'options' => opts(['prospect', 'active', 'suspended', 'churned']), 'required' => true],
+                'status'         => ['label' => 'Status', 'type' => 'select', 'options' => ['prospect' => 'Prospect', 'active' => 'Active', 'suspended' => 'Suspended', 'churned' => 'Closed / churned'], 'required' => true],
                 'is_dealer'      => ['label' => 'This customer is a dealer', 'type' => 'bool', 'help' => 'Dealers can have other customers under them'],
                 'parent_id'      => ['label' => 'Dealer', 'type' => 'ref', 'ref' => 'accounts', 'ref_where' => 'is_dealer = 1', 'help' => 'The dealer this customer came through or is billed via'],
                 'parent_relationship' => ['label' => 'Relationship to dealer', 'type' => 'select', 'options' => ['referral' => 'Referred by the dealer', 'billed_via_dealer' => 'Billed via the dealer']],
@@ -80,20 +104,36 @@ function entities(): array
                 'dealer_commission_pct' => ['label' => 'Dealer commission %', 'type' => 'int', 'min' => 0, 'max' => 100, 'help' => 'For dealers: % of their customers\' MRR'],
                 'industry'       => ['label' => 'Industry', 'type' => 'text'],
                 'company_number' => ['label' => 'Company no.', 'type' => 'text'],
-                'email'          => ['label' => 'Email', 'type' => 'email'],
-                'phone'          => ['label' => 'Phone', 'type' => 'tel'],
-                'address'        => ['label' => 'Address', 'type' => 'text'],
-                'city'           => ['label' => 'City', 'type' => 'text'],
-                'postcode'       => ['label' => 'Postcode', 'type' => 'text'],
                 'owner_id'       => ['label' => 'Account manager', 'type' => 'ref', 'ref' => 'users'],
-                'credit_limit'   => ['label' => 'Credit limit', 'type' => 'money'],
-                'xero_contact_id' => ['label' => 'Xero contact', 'type' => 'ref', 'ref' => 'xero_contacts', 'if' => 'xero_connected',
+                'credit_limit'   => ['label' => 'Credit limit', 'type' => 'money', 'if' => fn() => can('finance.view')],
+                'email'          => ['label' => 'Company email', 'type' => 'email', 'section' => 'Head office', 'help' => 'General inbox, e.g. info@'],
+                'phone'          => ['label' => 'Main phone', 'type' => 'tel'],
+                'address'        => ['label' => 'Address line 1', 'type' => 'text'],
+                'address2'       => ['label' => 'Address line 2', 'type' => 'text'],
+                'city'           => ['label' => 'Town / city', 'type' => 'text'],
+                'county'         => ['label' => 'County', 'type' => 'text'],
+                'postcode'       => ['label' => 'Postcode', 'type' => 'text'],
+                'main_name'      => ['label' => 'Name', 'type' => 'text', 'virtual' => true, 'section' => 'Main contact',
+                    'section_help' => 'The day-to-day contact. Saved as one of the customer\'s contacts.'],
+                'main_job_title' => ['label' => 'Job title', 'type' => 'text', 'virtual' => true],
+                'main_phone'     => ['label' => 'Phone', 'type' => 'tel', 'virtual' => true],
+                'main_email'     => ['label' => 'Email', 'type' => 'email', 'virtual' => true],
+                'billing_same'   => ['label' => 'Send invoices and statements to the main contact', 'type' => 'bool', 'virtual' => true, 'default' => 1, 'section' => 'Accounts contact',
+                    'section_help' => 'Who receives invoices and statements.'],
+                'billing_name'   => ['label' => 'Name', 'type' => 'text', 'virtual' => true, 'show_if' => 'billing_same=0'],
+                'billing_phone'  => ['label' => 'Phone', 'type' => 'tel', 'virtual' => true, 'show_if' => 'billing_same=0'],
+                'billing_email'  => ['label' => 'Email for invoices', 'type' => 'email', 'virtual' => true, 'show_if' => 'billing_same=0'],
+                'xero_contact_id' => ['label' => 'Xero contact', 'type' => 'ref', 'ref' => 'xero_contacts', 'if' => 'xero_connected', 'section' => 'Links & notes',
                     'help' => 'Linked automatically on sync when the account number, email or name matches'],
                 'gocardless_customer_id' => ['label' => 'GoCardless customer', 'type' => 'ref', 'ref' => 'gocardless_customers', 'if' => 'gc_configured',
                     'help' => 'Linked automatically when they complete a setup link, or on sync when the email or name matches'],
-                'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
+                'notes'          => ['label' => 'Notes', 'type' => 'textarea', 'section' => 'Links & notes'],
+                'main_contact_id'    => ['label' => 'Main contact', 'type' => 'ref', 'ref' => 'contacts', 'readonly' => true],
+                'billing_contact_id' => ['label' => 'Accounts contact', 'type' => 'ref', 'ref' => 'contacts', 'readonly' => true],
+                'closed_at'      => ['label' => 'Closed', 'type' => 'datetime', 'readonly' => true],
+                'closed_reason'  => ['label' => 'Reason for closing', 'type' => 'text', 'readonly' => true],
             ],
-            'list'    => ['account_number', 'name', 'type', 'status', 'parent_id', 'owner_id', '_mrr'],
+            'list'    => ['account_number', 'name', 'type', 'status', 'parent_id', 'main_contact_id', 'owner_id', '_mrr'],
             'search'  => ['name', 'account_number', 'email', 'phone', 'postcode', 'company_number'],
             'filters' => ['status', 'type', 'owner_id', 'parent_id'],
             'presets' => [
@@ -107,7 +147,7 @@ function entities(): array
         ],
 
         'contacts' => [
-            'label' => 'Contact', 'plural' => 'Contacts', 'icon' => '👤',
+            'label' => 'Contact', 'plural' => 'Contacts', 'icon' => '👤', 'perm' => 'customers.edit',
             'fields' => [
                 'account_id' => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
                 'name'       => ['label' => 'Name', 'type' => 'text', 'required' => true],
@@ -115,18 +155,55 @@ function entities(): array
                 'email'      => ['label' => 'Email', 'type' => 'email'],
                 'phone'      => ['label' => 'Phone', 'type' => 'tel'],
                 'mobile'     => ['label' => 'Mobile', 'type' => 'tel'],
-                'is_primary' => ['label' => 'Primary contact', 'type' => 'bool'],
-                'is_billing' => ['label' => 'Billing contact', 'type' => 'bool'],
+                'is_primary' => ['label' => 'Main contact', 'type' => 'bool'],
+                'is_billing' => ['label' => 'Accounts contact (invoices & statements)', 'type' => 'bool'],
                 'notes'      => ['label' => 'Notes', 'type' => 'textarea'],
+                'service_alerts'   => ['label' => 'Service alerts (faults, maintenance, outages)', 'type' => 'bool', 'default' => 1, 'section' => 'Communication preferences',
+                    'section_help' => 'Service alerts are about services they have with you. Marketing needs their permission.'],
+                'marketing_email'  => ['label' => 'Marketing by email', 'type' => 'bool'],
+                'marketing_phone'  => ['label' => 'Marketing by phone', 'type' => 'bool'],
+                'marketing_sms'    => ['label' => 'Marketing by text message', 'type' => 'bool'],
+                'marketing_post'   => ['label' => 'Marketing by post', 'type' => 'bool'],
+                'marketing_topics' => ['label' => 'Interested in', 'type' => 'checkboxes', 'options' => marketing_topics(), 'help' => 'Leave all unticked to receive every topic'],
+                'marketing_source' => ['label' => 'How permission was given', 'type' => 'select', 'options' => MARKETING_SOURCES],
+                'marketing_updated_at' => ['label' => 'Preferences updated', 'type' => 'datetime', 'readonly' => true],
+                'unsubscribed_at'  => ['label' => 'Unsubscribed', 'type' => 'datetime', 'readonly' => true],
             ],
-            'list'    => ['name', 'account_id', 'job_title', 'email', 'phone', 'mobile', 'is_primary'],
+            'list'    => ['name', 'account_id', 'job_title', 'email', 'phone', 'mobile', 'is_primary', 'is_billing', 'marketing_email'],
             'search'  => ['name', 'email', 'phone', 'mobile'],
+            'filters' => ['account_id', 'marketing_email', 'service_alerts'],
+            'presets' => [
+                'marketing' => ['label' => 'Opted in to email marketing', 'sql' => 't.marketing_email = 1'],
+                'no_alerts' => ['label' => 'Opted out of service alerts', 'sql' => 't.service_alerts = 0'],
+            ],
+            'default_sort' => ['name', 'asc'],
+        ],
+
+        'sites' => [
+            'label' => 'Site', 'plural' => 'Sites & addresses', 'icon' => '📍', 'perm' => 'customers.edit',
+            'fields' => [
+                'account_id' => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
+                'name'       => ['label' => 'Site name', 'type' => 'text', 'required' => true, 'help' => 'e.g. "Manchester office" or "Warehouse"'],
+                'address'    => ['label' => 'Address line 1', 'type' => 'text'],
+                'address2'   => ['label' => 'Address line 2', 'type' => 'text'],
+                'city'       => ['label' => 'Town / city', 'type' => 'text'],
+                'county'     => ['label' => 'County', 'type' => 'text'],
+                'postcode'   => ['label' => 'Postcode', 'type' => 'text'],
+                'phone'      => ['label' => 'Site phone', 'type' => 'tel'],
+                'contact_id' => ['label' => 'Site contact', 'type' => 'ref', 'ref' => 'contacts', 'scoped' => true, 'help' => 'Leave blank to use the head office main contact'],
+                'notes'      => ['label' => 'Access notes', 'type' => 'textarea', 'help' => 'Parking, opening hours, comms room location…'],
+            ],
+            'list'    => ['name', 'account_id', 'address', 'city', 'postcode', 'contact_id', '_services'],
+            'search'  => ['name', 'address', 'city', 'postcode'],
             'filters' => ['account_id'],
+            'computed' => [
+                '_services' => ['label' => 'Live services', 'type' => 'int', 'sql' => "(SELECT COUNT(*) FROM services s WHERE s.site_id = t.id AND s.status = 'active')"],
+            ],
             'default_sort' => ['name', 'asc'],
         ],
 
         'products' => [
-            'label' => 'Product', 'plural' => 'Products & tariffs', 'icon' => '📦', 'admin_write' => true,
+            'label' => 'Product', 'plural' => 'Products & tariffs', 'icon' => '📦', 'perm' => 'products.edit',
             'fields' => [
                 'sku'           => ['label' => 'SKU', 'type' => 'text', 'required' => true],
                 'name'          => ['label' => 'Name', 'type' => 'text', 'required' => true],
@@ -145,9 +222,10 @@ function entities(): array
         ],
 
         'services' => [
-            'label' => 'Service', 'plural' => 'Services & lines', 'icon' => '📶',
+            'label' => 'Service', 'plural' => 'Services & lines', 'icon' => '📶', 'perm' => 'services.edit',
             'fields' => [
                 'account_id'        => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
+                'site_id'           => ['label' => 'Installation site', 'type' => 'ref', 'ref' => 'sites', 'scoped' => true, 'help' => 'From the customer\'s address book. Leave blank for head office.'],
                 'product_id'        => ['label' => 'Product / tariff', 'type' => 'ref', 'ref' => 'products', 'help' => 'Prices, term and type are copied from the product when left blank'],
                 'service_type'      => ['label' => 'Service type', 'type' => 'select', 'options' => SERVICE_TYPES],
                 'identifier'        => ['label' => 'Number / circuit ID', 'type' => 'text', 'required' => true, 'help' => 'MSISDN, CLI, circuit reference or serial number'],
@@ -158,12 +236,12 @@ function entities(): array
                 'start_date'        => ['label' => 'Contract start', 'type' => 'date'],
                 'term_months'       => ['label' => 'Term (months)', 'type' => 'int', 'min' => 0],
                 'contract_end_date' => ['label' => 'Contract end', 'type' => 'date', 'help' => 'Calculated from start + term when left blank'],
-                'install_address'   => ['label' => 'Installation address', 'type' => 'text'],
+                'install_address'   => ['label' => 'Installation address notes', 'type' => 'text', 'help' => 'Only if the site isn\'t in the address book'],
                 'notes'             => ['label' => 'Notes', 'type' => 'textarea'],
             ],
-            'list'    => ['identifier', 'account_id', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date'],
+            'list'    => ['identifier', 'account_id', 'site_id', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date'],
             'search'  => ['identifier', 'install_address', 'notes'],
-            'filters' => ['status', 'service_type', 'carrier', 'account_id'],
+            'filters' => ['status', 'service_type', 'carrier', 'account_id', 'site_id'],
             'presets' => [
                 'expiring' => ['label' => 'Up for renewal', 'sql' => "t.status = 'active' AND t.contract_end_date IS NOT NULL AND t.contract_end_date <= DATE_ADD(CURDATE(), INTERVAL :window DAY)", 'params' => fn() => ['window' => (int)config('renewal_window_days')]],
                 'out_of_contract' => ['label' => 'Out of contract', 'sql' => "t.status = 'active' AND t.contract_end_date < CURDATE()"],
@@ -172,7 +250,7 @@ function entities(): array
         ],
 
         'tickets' => [
-            'label' => 'Ticket', 'plural' => 'Support tickets', 'icon' => '🎫',
+            'label' => 'Ticket', 'plural' => 'Support tickets', 'icon' => '🎫', 'perm' => 'tickets.edit',
             'fields' => [
                 'reference'   => ['label' => 'Ref', 'type' => 'text', 'readonly' => true],
                 'account_id'  => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
@@ -200,7 +278,7 @@ function entities(): array
         ],
 
         'opportunities' => [
-            'label' => 'Opportunity', 'plural' => 'Opportunities', 'icon' => '💷',
+            'label' => 'Opportunity', 'plural' => 'Opportunities', 'icon' => '💷', 'perm' => 'sales.edit',
             'fields' => [
                 'account_id'     => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
                 'title'          => ['label' => 'Title', 'type' => 'text', 'required' => true],
@@ -227,7 +305,7 @@ function entities(): array
         ],
 
         'quotes' => [
-            'label' => 'Quote', 'plural' => 'Quotes', 'icon' => '📝',
+            'label' => 'Quote', 'plural' => 'Quotes', 'icon' => '📝', 'perm' => 'sales.edit',
             'fields' => [
                 'reference'       => ['label' => 'Ref', 'type' => 'text', 'readonly' => true],
                 'account_id'      => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
@@ -256,7 +334,7 @@ function entities(): array
         ],
 
         'contracts' => [
-            'label' => 'Contract', 'plural' => 'Contracts', 'icon' => '✍️',
+            'label' => 'Contract', 'plural' => 'Contracts', 'icon' => '✍️', 'perm' => 'sales.edit',
             'fields' => [
                 'reference'    => ['label' => 'Ref', 'type' => 'text', 'readonly' => true],
                 'account_id'   => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
@@ -281,7 +359,7 @@ function entities(): array
         ],
 
         'activities' => [
-            'label' => 'Activity', 'plural' => 'Activities', 'icon' => '🗒️',
+            'label' => 'Activity', 'plural' => 'Activities', 'icon' => '🗒️', 'perm' => 'customers.edit',
             'fields' => [
                 'account_id' => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
                 'type'       => ['label' => 'Type', 'type' => 'select', 'options' => opts(['call', 'email', 'meeting', 'note', 'task']), 'required' => true],
@@ -302,8 +380,8 @@ function entities(): array
         ],
     ];
 
-    // Xero balances, once connected.
-    if (xero_connected()) {
+    // Xero balances, once connected (and only for people allowed to see money).
+    if (xero_connected() && can('finance.view')) {
         $balance = '(SELECT %s FROM xero_contacts x WHERE x.id = t.xero_contact_id)';
         $entities['accounts']['computed'] += [
             '_balance' => ['label' => 'Balance', 'type' => 'money', 'sql' => sprintf($balance, 'x.outstanding')],
@@ -319,7 +397,7 @@ function entities(): array
     }
 
     // GoCardless Direct Debit status, once set up.
-    if (gc_configured()) {
+    if (gc_configured() && can('finance.view')) {
         $entities['accounts']['computed']['_dd'] = ['label' => 'Direct Debit', 'type' => 'mandate',
             'sql' => '(SELECT g.mandate_status FROM gocardless_customers g WHERE g.id = t.gocardless_customer_id)'];
         $entities['accounts']['list'][] = '_dd';
@@ -377,6 +455,37 @@ function before_save(string $name, array $data, ?array $existing): array
             }
             if (array_key_exists('is_dealer', $data) && empty($data['is_dealer'])) {
                 $data['dealer_commission_pct'] = null;
+            }
+            if (isset($data['status'])) {
+                if ($data['status'] === 'churned' && ($existing['status'] ?? null) !== 'churned') {
+                    $data['closed_at'] = $now;
+                } elseif ($data['status'] !== 'churned') {
+                    $data['closed_at'] = null;
+                    $data['closed_reason'] = null;
+                }
+            }
+            break;
+
+        case 'sites':
+            if (!empty($data['postcode'])) {
+                $data['postcode'] = strtoupper($data['postcode']);
+            }
+            break;
+
+        case 'contacts':
+            $prefs = ['marketing_email', 'marketing_phone', 'marketing_sms', 'marketing_post', 'marketing_topics', 'service_alerts'];
+            $changed = false;
+            foreach ($prefs as $p) {
+                if (array_key_exists($p, $data) && (string)($data[$p] ?? '') !== (string)($existing[$p] ?? ($existing === null ? '' : null))) {
+                    $changed = true;
+                }
+            }
+            $anyMarketing = !empty($data['marketing_email']) || !empty($data['marketing_phone']) || !empty($data['marketing_sms']) || !empty($data['marketing_post']);
+            if ($changed && ($existing !== null || $anyMarketing)) {
+                $data['marketing_updated_at'] = $now;
+            }
+            if (!empty($data['marketing_email']) && empty($existing['marketing_email'])) {
+                $data['unsubscribed_at'] = null;
             }
             break;
 
@@ -463,6 +572,79 @@ function after_insert(string $name, int $id, array $data): void
     }
 }
 
+/** Runs after a row is inserted or updated. $data includes virtual (form-only) fields. */
+function after_save(string $name, int $id, array $data, ?array $existing): void
+{
+    if ($name === 'accounts' && array_key_exists('main_name', $data)) {
+        save_account_contacts($id, $data);
+    }
+    if ($name === 'contacts' && isset($data['account_id'])) {
+        // Keep the customer's main/accounts contact in step with the ticks on the contact.
+        foreach (['is_primary' => 'main_contact_id', 'is_billing' => 'billing_contact_id'] as $flag => $column) {
+            if (!array_key_exists($flag, $data)) {
+                continue;
+            }
+            if ($data[$flag]) {
+                db_exec("UPDATE accounts SET $column = ? WHERE id = ?", [$id, $data['account_id']]);
+                db_exec("UPDATE contacts SET $flag = 0 WHERE account_id = ? AND id <> ?", [$data['account_id'], $id]);
+            } else {
+                db_exec("UPDATE accounts SET $column = NULL WHERE id = ? AND $column = ?", [$data['account_id'], $id]);
+            }
+        }
+        if ($existing && (int)$existing['account_id'] !== (int)$data['account_id']) {
+            db_exec('UPDATE accounts SET main_contact_id = IF(main_contact_id = ?, NULL, main_contact_id), billing_contact_id = IF(billing_contact_id = ?, NULL, billing_contact_id) WHERE id = ?',
+                [$id, $id, $existing['account_id']]);
+        }
+    }
+}
+
+/** Main and accounts contact as edited on the customer form (virtual fields). */
+function account_contact_values(?array $account): array
+{
+    $main = !empty($account['main_contact_id']) ? db_one('SELECT * FROM contacts WHERE id = ?', [$account['main_contact_id']]) : null;
+    $billing = !empty($account['billing_contact_id']) ? db_one('SELECT * FROM contacts WHERE id = ?', [$account['billing_contact_id']]) : null;
+    $same = !$billing || ($main && (int)$main['id'] === (int)$billing['id']);
+    return [
+        'main_name' => $main['name'] ?? null, 'main_job_title' => $main['job_title'] ?? null,
+        'main_phone' => $main['phone'] ?? ($main['mobile'] ?? null), 'main_email' => $main['email'] ?? null,
+        'billing_same' => $same ? 1 : 0,
+        'billing_name' => $same ? null : $billing['name'], 'billing_phone' => $same ? null : ($billing['phone'] ?: $billing['mobile']),
+        'billing_email' => $same ? null : $billing['email'],
+    ];
+}
+
+/** Create/update the main and accounts contacts from the customer form. */
+function save_account_contacts(int $accountId, array $v): void
+{
+    $account = db_one('SELECT main_contact_id, billing_contact_id FROM accounts WHERE id = ?', [$accountId]);
+    $upsert = function (?int $contactId, string $name, ?string $jobTitle, ?string $phone, ?string $email, bool $keepJob) use ($accountId): int {
+        $exists = $contactId ? db_value('SELECT id FROM contacts WHERE id = ? AND account_id = ?', [$contactId, $accountId]) : null;
+        if ($exists) {
+            db_exec('UPDATE contacts SET name = ?, phone = ?, email = ?' . ($keepJob ? '' : ', job_title = ?') . ' WHERE id = ?',
+                array_merge([$name, $phone, $email], $keepJob ? [] : [$jobTitle], [$contactId]));
+            return $contactId;
+        }
+        db_exec('INSERT INTO contacts (account_id, name, job_title, phone, email) VALUES (?, ?, ?, ?, ?)', [$accountId, $name, $jobTitle, $phone, $email]);
+        return (int)db()->lastInsertId();
+    };
+
+    $main = null;
+    if (trim((string)($v['main_name'] ?? '')) !== '') {
+        $main = $upsert($account['main_contact_id'] ? (int)$account['main_contact_id'] : null, trim($v['main_name']), $v['main_job_title'] ?? null, $v['main_phone'] ?? null, $v['main_email'] ?? null, false);
+    }
+
+    $billing = null;
+    if (!empty($v['billing_same'])) {
+        $billing = $main;
+    } elseif (trim((string)($v['billing_name'] ?? '')) !== '' || !empty($v['billing_email'])) {
+        $current = $account['billing_contact_id'] && (int)$account['billing_contact_id'] !== $main ? (int)$account['billing_contact_id'] : null;
+        $billing = $upsert($current, trim((string)($v['billing_name'] ?? '')) ?: 'Accounts', null, $v['billing_phone'] ?? null, $v['billing_email'] ?? null, true);
+    }
+
+    db_exec('UPDATE accounts SET main_contact_id = ?, billing_contact_id = ? WHERE id = ?', [$main, $billing, $accountId]);
+    db_exec('UPDATE contacts SET is_primary = (id <=> ?), is_billing = (id <=> ?) WHERE account_id = ?', [$main, $billing, $accountId]);
+}
+
 function contract_end_date(string $start, int $months): string
 {
     // End date is the day before the anniversary, e.g. 2025-01-15 + 24m = 2027-01-14.
@@ -501,11 +683,32 @@ function validate_rules(string $name, array $data, ?int $id): array
                 $errors['parent_relationship'] = 'Choose how this customer relates to the dealer.';
             }
         }
+        if (($data['status'] ?? null) === 'churned' && !can('customers.close')
+            && (!$id || db_value('SELECT status FROM accounts WHERE id = ?', [$id]) !== 'churned')) {
+            $errors['status'] = 'Closing a customer needs approval. Save without closing, then use "Request closure" on the customer\'s page.';
+        }
+        if (array_key_exists('main_name', $data)) {
+            if (trim((string)$data['main_name']) === '' && (!empty($data['main_email']) || !empty($data['main_phone']))) {
+                $errors['main_name'] = 'Enter the main contact\'s name.';
+            }
+            if (empty($data['billing_same']) && trim((string)($data['billing_name'] ?? '')) !== '' && empty($data['billing_email'])) {
+                $errors['billing_email'] = 'Enter the email invoices should go to, or tick "Send invoices and statements to the main contact".';
+            }
+        }
         if ($id && array_key_exists('is_dealer', $data) && empty($data['is_dealer'])) {
             $children = (int)db_value('SELECT COUNT(*) FROM accounts WHERE parent_id = ?', [$id]);
             if ($children) {
                 $errors['is_dealer'] = "This dealer has $children customer" . ($children === 1 ? '' : 's') . ' under it. Move them first.';
             }
+        }
+    }
+    if ($name === 'contacts') {
+        $marketing = !empty($data['marketing_email']) || !empty($data['marketing_phone']) || !empty($data['marketing_sms']) || !empty($data['marketing_post']);
+        if ($marketing && empty($data['marketing_source'])) {
+            $errors['marketing_source'] = 'Record how they gave permission for marketing.';
+        }
+        if (!empty($data['marketing_email']) && empty($data['email'])) {
+            $errors['marketing_email'] = 'Add an email address to send them marketing emails.';
         }
     }
     return $errors;

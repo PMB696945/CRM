@@ -27,6 +27,11 @@ function validate(array $entity, array $input): array
         $raw = is_string($raw) ? trim($raw) : $raw;
         $label = $def['label'];
 
+        if ($def['type'] === 'checkboxes') {
+            $picked = is_array($raw) ? array_values(array_intersect(array_keys($def['options']), array_map('strval', $raw))) : [];
+            $data[$field] = $picked ? implode(',', $picked) : null;
+            continue;
+        }
         if ($def['type'] === 'bool') {
             $data[$field] = !empty($raw) ? 1 : 0;
             continue;
@@ -195,7 +200,7 @@ function list_rows(string $name, array $opts = []): array
     $sort = $opts['sort'] ?? '';
     if (isset($entity['computed'][$sort])) {
         $sortSql = "`$sort`";
-    } elseif (isset($entity['fields'][$sort])) {
+    } elseif (isset($entity['fields'][$sort]) && empty($entity['fields'][$sort]['virtual'])) {
         $sortSql = ($entity['fields'][$sort]['type'] === 'ref') ? "`{$sort}__label`" : "t.$sort";
     } else {
         $sortSql = "t.$defaultSort";
@@ -217,15 +222,23 @@ function list_rows(string $name, array $opts = []): array
     return ['rows' => $rows, 'total' => $total];
 }
 
+/** Form-only fields that aren't table columns (handled in after_save()). */
+function virtual_fields(string $name): array
+{
+    return array_filter(entity($name)['fields'] ?? [], fn($def) => !empty($def['virtual']));
+}
+
 function insert_row(string $name, array $data): int
 {
-    $data = before_save($name, $data, null);
+    $virtual = array_intersect_key($data, virtual_fields($name));
+    $data = before_save($name, array_diff_key($data, $virtual), null);
     $cols = array_keys($data);
     $sql = sprintf('INSERT INTO %s (%s) VALUES (%s)', $name,
         implode(', ', $cols), implode(', ', array_map(fn($c) => ":$c", $cols)));
     db_exec($sql, $data);
     $id = (int)db()->lastInsertId();
     after_insert($name, $id, $data);
+    after_save($name, $id, $data + $virtual, null);
     return $id;
 }
 
@@ -235,9 +248,11 @@ function update_row(string $name, int $id, array $data): void
     if (!$existing) {
         throw new RuntimeException('Record not found');
     }
-    $data = before_save($name, $data, $existing);
+    $virtual = array_intersect_key($data, virtual_fields($name));
+    $data = before_save($name, array_diff_key($data, $virtual), $existing);
     $sets = implode(', ', array_map(fn($c) => "$c = :$c", array_keys($data)));
     db_exec("UPDATE $name SET $sets WHERE id = :_id", $data + ['_id' => $id]);
+    after_save($name, $id, $data + $virtual, $existing);
 }
 
 function delete_row(string $name, int $id): void
@@ -260,15 +275,16 @@ function ref_options(string $ref, ?int $accountId = null, ?string $extraWhere = 
     if ($extraWhere !== null) {
         $where[] = $extraWhere; // from entity definitions only, never user input
     }
-    if ($accountId !== null && in_array($ref, ['services', 'contacts', 'opportunities'], true)) {
+    if ($accountId !== null && in_array($ref, ['services', 'contacts', 'opportunities', 'sites'], true)) {
         $where[] = 'account_id = ?';
         $params[] = $accountId;
     }
-    $sql = "SELECT id, $label AS label" . ($ref === 'products' ? ', monthly_price' : '') . " FROM $ref"
+    $sql = "SELECT id, $label AS label" . ($ref === 'products' ? ', monthly_price' : '') . ($ref === 'sites' ? ', postcode' : '') . " FROM $ref"
         . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . " ORDER BY $label";
     $out = [];
     foreach (db_all($sql, $params) as $row) {
-        $out[$row['id']] = $row['label'] . (isset($row['monthly_price']) ? ' (' . money($row['monthly_price']) . '/mo)' : '');
+        $out[$row['id']] = $row['label'] . (isset($row['monthly_price']) ? ' (' . money($row['monthly_price']) . '/mo)' : '')
+            . (!empty($row['postcode']) ? ' (' . $row['postcode'] . ')' : '');
     }
     return $out;
 }
@@ -306,6 +322,8 @@ function display_value(array $entity, string $column, array $row, bool $link = t
             return gc_mandate_badge($value);
         case 'bool':
             return $value ? '✔' : '<span class="muted">—</span>';
+        case 'checkboxes':
+            return $value ? h(checkbox_labels($def, $value)) : '<span class="muted">—</span>';
         case 'date':
             if ($column === 'contract_end_date' && $value) {
                 return contract_end_html($value);
@@ -374,6 +392,13 @@ function export_value(array $entity, string $column, array $row): string
         'bool'   => $value ? 'Yes' : 'No',
         'money'  => $value === null ? '' : number_format((float)$value, 2, '.', ''),
         'mandate' => gc_mandate_label($value),
+        'checkboxes' => checkbox_labels($def, $value),
         default  => (string)($value ?? ''),
     };
+}
+
+function checkbox_labels(array $def, ?string $value): string
+{
+    $keys = array_filter(explode(',', (string)$value));
+    return implode(', ', array_map(fn($k) => $def['options'][$k] ?? humanize($k), $keys));
 }

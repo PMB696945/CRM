@@ -7,7 +7,7 @@ $exportParams = array_merge($_GET, ['page' => $name, 'action' => 'export', 'p' =
 <div class="page-head">
   <h1><?= h($entity['plural']) ?> <small class="count"><?= (int)$result['total'] ?></small></h1>
   <div class="actions">
-    <a class="btn" href="<?= h(url($name, $exportParams)) ?>">Export CSV</a>
+    <?php if (can('export')): ?><a class="btn" href="<?= h(url($name, $exportParams)) ?>">Export CSV</a><?php endif; ?>
     <?php if ($canWrite): ?><a class="btn btn-primary" href="<?= h(url($name, ['action' => 'new'])) ?>">+ New <?= h(strtolower($entity['label'])) ?></a><?php endif; ?>
   </div>
 </div>

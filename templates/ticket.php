@@ -5,8 +5,9 @@
     <h1><?= h($ticket['subject']) ?> <?= badge($ticket['priority']) ?> <?= badge($ticket['status']) ?></h1>
   </div>
   <div class="actions">
-    <a class="btn" href="<?= h(url('tickets', ['action' => 'edit', 'id' => $id])) ?>">Edit</a>
-    <?php render('_delete', ['name' => 'tickets', 'id' => $id, 'label' => 'ticket']); ?>
+    <?php if (can('audit.view')): ?><a class="btn btn-ghost" href="<?= h(url('audit', ['entity' => 'tickets', 'entity_id' => $id])) ?>">History</a><?php endif; ?>
+    <?php if (can('tickets.edit')): ?><a class="btn" href="<?= h(url('tickets', ['action' => 'edit', 'id' => $id])) ?>">Edit</a><?php endif; ?>
+    <?php if (can('tickets.edit') && can('records.delete')) render('_delete', ['name' => 'tickets', 'id' => $id, 'label' => 'ticket']); ?>
   </div>
 </div>
 

@@ -21,7 +21,7 @@
       <div class="field"><label for="s_fn">Send from (name)</label><input id="s_fn" name="mail_from_name" value="<?= $v('mail_from_name') ?>"></div>
       <div class="field"><label for="s_rt">Reply-to (optional)</label><input id="s_rt" type="email" name="mail_reply_to" value="<?= $v('mail_reply_to') ?>"></div>
       <div class="field"><label for="s_tr">Send using</label>
-        <select id="s_tr" name="mail_transport"><option value="php">This server's mail (PHP mail)</option><option value="smtp" <?= setting('mail_transport') === 'smtp' ? 'selected' : '' ?>>SMTP server</option></select>
+        <select id="s_tr" name="mail_transport"><option value="php">This server's mail (PHP mail)</option><option value="smtp" <?= setting('mail_transport') === 'smtp' ? 'selected' : '' ?>>SMTP server</option><option value="mandrill" <?= setting('mail_transport') === 'mandrill' ? 'selected' : '' ?>>Mailchimp Transactional (Mandrill)</option></select>
         <div class="help">SMTP (e.g. Microsoft 365, Google Workspace, your host) is more reliable for reaching inboxes.</div></div>
       <div class="field"><label for="s_sh">SMTP server</label><input id="s_sh" name="smtp_host" value="<?= $v('smtp_host') ?>" placeholder="smtp.office365.com"></div>
       <div class="field"><label for="s_sp">Port</label><input id="s_sp" name="smtp_port" value="<?= $v('smtp_port', '587') ?>" inputmode="numeric"></div>
@@ -29,6 +29,8 @@
         <select id="s_se" name="smtp_encryption"><?php foreach (['tls' => 'STARTTLS (port 587)', 'ssl' => 'SSL (port 465)', 'none' => 'None'] as $k => $l): ?><option value="<?= $k ?>" <?= (setting('smtp_encryption') ?: 'tls') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></div>
       <div class="field"><label for="s_su">Username</label><input id="s_su" name="smtp_username" value="<?= $v('smtp_username') ?>" autocomplete="off"></div>
       <div class="field"><label for="s_sw">Password</label><input id="s_sw" type="password" name="smtp_password" placeholder="<?= setting('smtp_password') ? '•••••••• saved (leave blank to keep)' : '' ?>" autocomplete="new-password"></div>
+      <div class="field wide"><label for="s_mk">Mailchimp Transactional API key</label><input id="s_mk" type="password" name="mandrill_api_key" placeholder="<?= setting('mandrill_api_key') ? '•••••••• saved (leave blank to keep)' : 'Only if sending using Mailchimp Transactional' ?>" autocomplete="new-password">
+        <div class="help">A paid Mailchimp add-on for one-to-one emails (quotes, alerts, notifications). Create a key in Mandrill under Settings → SMTP &amp; API Info, and verify your sending domain there.</div></div>
     </section>
   </div>
 
@@ -38,6 +40,14 @@
     <div class="field field-check"><label><input type="checkbox" name="contracts_auto_on_accept" value="1" <?= setting('contracts_auto_on_accept', '1') === '1' ? 'checked' : '' ?>> Create the contract automatically when a quote is accepted</label>
       <div class="help">It's also sent for signature straight away if that's switched on under Signable.</div></div>
     <div class="field wide"><label for="s_qt">Terms shown on quotes</label><textarea id="s_qt" name="quote_terms" rows="4" placeholder="e.g. All prices exclude VAT. Services are subject to survey and our standard terms and conditions."><?= $v('quote_terms') ?></textarea></div>
+  </section>
+
+  <section class="card form-grid">
+    <h2 class="wide">Marketing &amp; service alerts</h2>
+    <div class="field"><label for="s_mt">Marketing topics</label><textarea id="s_mt" name="marketing_topics" rows="4" placeholder="Newsletter&#10;Product news &amp; offers&#10;Events &amp; webinars"><?= $v('marketing_topics') ?></textarea>
+      <div class="help">One per line. Contacts can choose which of these they want.</div></div>
+    <div class="field"><label for="s_bs">Emails per batch</label><input id="s_bs" name="campaign_batch_size" value="<?= $v('campaign_batch_size', '50') ?>" inputmode="numeric">
+      <div class="help">Large sends go out in batches so the server doesn't time out. The cron job carries on with any that are left. Check your email provider's hourly limit.</div></div>
   </section>
 
   <section class="card form-grid">

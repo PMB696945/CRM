@@ -11,7 +11,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <form method="post" action="<?= h(url('xero', ['action' => 'sync'])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-primary">Sync now</button></form>
   <?php endif; ?>
 </div>
-<p class="muted lead">Pulls each customer's outstanding and overdue balance from Xero, calculated from unpaid sales invoices less unused credit notes. Nothing is ever written to Xero.</p>
+<p class="muted lead">Pulls each customer's outstanding and overdue balance from Xero, calculated from unpaid sales invoices less unused credit notes. The only thing the CRM ever changes in Xero is a contact's invoice email, and only if you switch that on below.</p>
 
 <div class="grid-2">
   <section class="card">
@@ -61,7 +61,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
           <form method="post" action="<?= h(url('xero', ['action' => 'disconnect'])) ?>" class="inline" data-confirm="Disconnect from Xero?"><?= csrf_field() ?><button class="btn btn-sm btn-danger">Disconnect</button></form>
         </div>
       <?php elseif ($configured): ?>
-        <p>You'll be sent to Xero to log in and choose which organisation to share. The CRM asks for <b>read-only</b> access to contacts and invoices.</p>
+        <p>You'll be sent to Xero to log in and choose which organisation to share. The CRM asks for <b>read-only</b> access to contacts and invoices<?= xero_can_write_contacts() ? ', plus permission to update contact email addresses' : '' ?>.</p>
         <form method="post" action="<?= h(url('xero', ['action' => 'connect'])) ?>"><?= csrf_field() ?><button class="btn btn-primary">Connect to Xero</button></form>
       <?php else: ?>
         <p class="muted">Save your Xero app details first.</p>
@@ -83,6 +83,20 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     </section>
   </div>
 </div>
+
+<?php if ($connected): ?>
+<section class="card">
+  <div class="card-head"><h2>Invoice emails</h2></div>
+  <p>Each customer's <b>accounts contact</b> in the CRM is who should get invoices and statements. The CRM can tell Xero, by setting the Xero contact's email address.</p>
+  <form method="post" action="<?= h(url('xero', ['action' => 'push_setting'])) ?>" class="stack">
+    <?= csrf_field() ?>
+    <label class="check"><input type="checkbox" name="push_contacts" value="1" <?= setting('xero_push_contacts') === '1' ? 'checked' : '' ?>> Update Xero automatically when a customer's accounts contact changes</label>
+    <?php if (setting('xero_push_contacts') === '1' && !xero_can_write_contacts()): ?><p class="text-warning">Xero hasn't been given permission to update contacts. Press <b>Reconnect</b> above.</p><?php endif; ?>
+    <p class="help">This needs permission to update contacts in Xero (the <code>accounting.contacts</code> scope instead of read-only). After switching it on, press <b>Reconnect</b> and approve the new permission. Nothing else in Xero is changed.</p>
+    <button class="btn">Save</button>
+  </form>
+</section>
+<?php endif; ?>
 
 <?php if ($connected && $stats['unlinked_total']): ?>
 <section class="card">

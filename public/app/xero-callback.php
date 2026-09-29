@@ -8,7 +8,7 @@ require APP_ROOT . '/src/controllers.php';
 security_headers();
 start_session();
 require_login();
-require_admin();
+require_permission('settings.manage');
 
 $expected = $_SESSION['xero_oauth_state'] ?? '';
 $redirectUri = $_SESSION['xero_redirect_uri'] ?? xero_redirect_uri();

@@ -128,7 +128,7 @@ function xero_access_token(bool $forceRefresh = false): string
 }
 
 /** Authorised GET/POST against the Xero API, with one retry for expired tokens and rate limits. */
-function xero_api(string $method, string $url, array $query = [], bool $withTenant = true): mixed
+function xero_api(string $method, string $url, array $query = [], bool $withTenant = true, ?array $json = null): mixed
 {
     if ($query) {
         $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
@@ -139,7 +139,10 @@ function xero_api(string $method, string $url, array $query = [], bool $withTena
         if ($withTenant) {
             $headers[] = 'xero-tenant-id: ' . setting('xero_tenant_id');
         }
-        [$status, $body, $responseHeaders] = xero_http($method, $url, $headers);
+        if ($json !== null) {
+            $headers[] = 'Content-Type: application/json';
+        }
+        [$status, $body, $responseHeaders] = xero_http($method, $url, $headers, $json === null ? null : json_encode($json));
 
         if ($status >= 200 && $status < 300) {
             return $body;
@@ -376,3 +379,50 @@ function xero_contact_url(string $contactId): string
 {
     return 'https://go.xero.com/Contacts/View/' . rawurlencode($contactId);
 }
+
+/* ------------------------------------------------- Accounts contact push --- */
+
+/** Scopes when the CRM may also update contact details in Xero (contacts write access). */
+function xero_write_scopes(string $scopes): string
+{
+    return trim(preg_replace('/(^|\s)accounting\.contacts\.read(\s|$)/', '$1accounting.contacts$2', ' ' . $scopes . ' '));
+}
+
+/** Whether the saved scopes allow updating contacts in Xero. */
+function xero_can_write_contacts(): bool
+{
+    return (bool)preg_match('/(^|\s)accounting\.contacts(\s|$)/', (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES));
+}
+
+function xero_push_enabled(): bool
+{
+    return xero_connected() && setting('xero_push_contacts') === '1' && xero_can_write_contacts();
+}
+
+/**
+ * Tell Xero where to send this customer's invoices and statements: sets the Xero
+ * contact's email address and name to the CRM accounts contact (or main contact).
+ */
+function xero_push_billing_contact(int $accountId): string
+{
+    $a = db_one('SELECT a.name, a.main_contact_id, a.billing_contact_id, x.contact_id AS xero_id, x.id AS xero_row
+        FROM accounts a LEFT JOIN xero_contacts x ON x.id = a.xero_contact_id WHERE a.id = ?', [$accountId]);
+    if (!$a || !$a['xero_id']) {
+        throw new XeroException('This customer isn\'t linked to a Xero contact yet. Link it by editing the customer.');
+    }
+    $contact = db_one('SELECT name, email FROM contacts WHERE id = ?', [$a['billing_contact_id'] ?: $a['main_contact_id'] ?: 0]);
+    if (!$contact || !$contact['email']) {
+        throw new XeroException('Add an accounts contact with an email address first.');
+    }
+    $parts = preg_split('/\s+/', trim($contact['name']), 2);
+    xero_api('POST', xero_urls()['api'] . '/Contacts/' . rawurlencode($a['xero_id']), [], true, ['Contacts' => [[
+        'ContactID'    => $a['xero_id'],
+        'EmailAddress' => $contact['email'],
+        'FirstName'    => mb_substr($parts[0] ?? '', 0, 255),
+        'LastName'     => mb_substr($parts[1] ?? '', 0, 255),
+    ]]]);
+    db_exec('UPDATE xero_contacts SET email = ? WHERE id = ?', [$contact['email'], $a['xero_row']]);
+    audit('xero_push', "Invoice email in Xero set to {$contact['email']} for {$a['name']}", 'accounts', $accountId);
+    return $contact['email'];
+}
+

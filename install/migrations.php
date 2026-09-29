@@ -233,4 +233,145 @@ return [
         }
         settings_cache(true);
     },
+
+    7 => function (): void {
+        // Roles: super admin / admin / manager / staff / sales / support / finance / read only.
+        db()->exec("ALTER TABLE users MODIFY role VARCHAR(20) NOT NULL DEFAULT 'staff'");
+        db()->exec("UPDATE users SET role = 'super_admin' WHERE role = 'admin'");
+        db()->exec("UPDATE users SET role = 'staff' WHERE role = 'agent'");
+
+        // Audit trail: before/after values and the customer each entry relates to.
+        if (!column_exists('audit_log', 'changes')) {
+            db()->exec('ALTER TABLE audit_log ADD COLUMN changes MEDIUMTEXT NULL AFTER summary');
+        }
+        if (!column_exists('audit_log', 'account_id')) {
+            db()->exec('ALTER TABLE audit_log ADD COLUMN account_id INT UNSIGNED NULL AFTER entity_id, ADD KEY idx_audit_account (account_id, created_at)');
+        }
+
+        // Customers: fuller head office address, main + accounts contacts, closure.
+        $columns = [
+            'address2'           => 'VARCHAR(255) NULL AFTER address',
+            'county'             => 'VARCHAR(100) NULL AFTER city',
+            'main_contact_id'    => 'INT UNSIGNED NULL',
+            'billing_contact_id' => 'INT UNSIGNED NULL',
+            'closed_at'          => 'DATETIME NULL',
+            'closed_reason'      => 'VARCHAR(500) NULL',
+        ];
+        foreach ($columns as $column => $definition) {
+            if (!column_exists('accounts', $column)) {
+                db()->exec("ALTER TABLE accounts ADD COLUMN $column $definition");
+            }
+        }
+        if (!constraint_exists('accounts', 'fk_accounts_main_contact')) {
+            db()->exec('ALTER TABLE accounts ADD CONSTRAINT fk_accounts_main_contact FOREIGN KEY (main_contact_id) REFERENCES contacts(id) ON DELETE SET NULL');
+        }
+        if (!constraint_exists('accounts', 'fk_accounts_billing_contact')) {
+            db()->exec('ALTER TABLE accounts ADD CONSTRAINT fk_accounts_billing_contact FOREIGN KEY (billing_contact_id) REFERENCES contacts(id) ON DELETE SET NULL');
+        }
+        db()->exec('UPDATE accounts a SET a.main_contact_id = (SELECT MIN(c.id) FROM contacts c WHERE c.account_id = a.id AND c.is_primary = 1) WHERE a.main_contact_id IS NULL');
+        db()->exec('UPDATE accounts a SET a.billing_contact_id = (SELECT MIN(c.id) FROM contacts c WHERE c.account_id = a.id AND c.is_billing = 1) WHERE a.billing_contact_id IS NULL');
+
+        // Address book: other sites for a customer (installation addresses etc.).
+        db()->exec("CREATE TABLE IF NOT EXISTS sites (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id  INT UNSIGNED NOT NULL,
+            name        VARCHAR(150) NOT NULL,
+            address     VARCHAR(255) NULL,
+            address2    VARCHAR(255) NULL,
+            city        VARCHAR(100) NULL,
+            county      VARCHAR(100) NULL,
+            postcode    VARCHAR(12) NULL,
+            contact_id  INT UNSIGNED NULL,
+            phone       VARCHAR(40) NULL,
+            notes       TEXT NULL,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_sites_postcode (postcode),
+            CONSTRAINT fk_sites_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            CONSTRAINT fk_sites_contact FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        if (!column_exists('services', 'site_id')) {
+            db()->exec('ALTER TABLE services ADD COLUMN site_id INT UNSIGNED NULL AFTER account_id');
+        }
+        if (!constraint_exists('services', 'fk_services_site')) {
+            db()->exec('ALTER TABLE services ADD CONSTRAINT fk_services_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL');
+        }
+
+        // Marketing preferences and service alert opt-out, per contact.
+        $columns = [
+            'marketing_email'      => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'marketing_phone'      => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'marketing_sms'        => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'marketing_post'       => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'marketing_topics'     => 'VARCHAR(500) NULL',
+            'marketing_source'     => 'VARCHAR(30) NULL',
+            'marketing_updated_at' => 'DATETIME NULL',
+            'service_alerts'       => 'TINYINT(1) NOT NULL DEFAULT 1',
+            'unsubscribed_at'      => 'DATETIME NULL',
+        ];
+        foreach ($columns as $column => $definition) {
+            if (!column_exists('contacts', $column)) {
+                db()->exec("ALTER TABLE contacts ADD COLUMN $column $definition");
+            }
+        }
+
+        // Requests from staff that an admin must approve (close / delete a customer).
+        db()->exec("CREATE TABLE IF NOT EXISTS approval_requests (
+            id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            type          VARCHAR(30) NOT NULL,
+            account_id    INT UNSIGNED NULL,
+            account_label VARCHAR(255) NOT NULL,
+            reason        TEXT NOT NULL,
+            options       TEXT NULL,
+            status        ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+            requested_by  INT UNSIGNED NULL,
+            decided_by    INT UNSIGNED NULL,
+            decided_at    DATETIME NULL,
+            decision_note VARCHAR(500) NULL,
+            created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_approvals_status (status, created_at),
+            CONSTRAINT fk_approvals_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            CONSTRAINT fk_approvals_requester FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL,
+            CONSTRAINT fk_approvals_decider FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        // Service alerts and marketing emails.
+        db()->exec("CREATE TABLE IF NOT EXISTS campaigns (
+            id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            reference       VARCHAR(20) NULL UNIQUE,
+            kind            ENUM('service_alert','marketing') NOT NULL,
+            channel         ENUM('email','mailchimp') NOT NULL DEFAULT 'email',
+            subject         VARCHAR(200) NOT NULL,
+            body            TEXT NOT NULL,
+            filters         TEXT NULL,
+            status          ENUM('draft','sending','sent','failed','cancelled') NOT NULL DEFAULT 'draft',
+            recipients      INT UNSIGNED NOT NULL DEFAULT 0,
+            sent_count      INT UNSIGNED NOT NULL DEFAULT 0,
+            failed_count    INT UNSIGNED NOT NULL DEFAULT 0,
+            mailchimp_id    VARCHAR(50) NULL,
+            last_error      VARCHAR(500) NULL,
+            created_by      INT UNSIGNED NULL,
+            sent_by         INT UNSIGNED NULL,
+            sent_at         DATETIME NULL,
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            CONSTRAINT fk_campaigns_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+            CONSTRAINT fk_campaigns_sender FOREIGN KEY (sent_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS campaign_recipients (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            campaign_id INT UNSIGNED NOT NULL,
+            account_id  INT UNSIGNED NULL,
+            contact_id  INT UNSIGNED NULL,
+            email       VARCHAR(190) NOT NULL,
+            name        VARCHAR(150) NULL,
+            status      ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+            error       VARCHAR(500) NULL,
+            sent_at     DATETIME NULL,
+            UNIQUE KEY uq_campaign_email (campaign_id, email),
+            KEY idx_cr_status (campaign_id, status),
+            CONSTRAINT fk_cr_campaign FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+            CONSTRAINT fk_cr_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            CONSTRAINT fk_cr_contact FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];

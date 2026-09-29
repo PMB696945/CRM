@@ -2,7 +2,13 @@
 $id = (int)$account['id'];
 $here = url('accounts', ['action' => 'view', 'id' => $id]);
 $new = fn(string $entity, array $extra = []) => url($entity, ['action' => 'new', 'account_id' => $id, 'return' => $here] + $extra);
-$primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] ?? ($contacts[0] ?? null);
+$contactEntity = entity('contacts');
+$fmtAddress = fn(array $r) => implode(', ', array_filter([$r['address'] ?? null, $r['address2'] ?? null, $r['city'] ?? null, $r['county'] ?? null, $r['postcode'] ?? null]));
+$prefs = function (array $c): string {
+    $on = array_filter(['Email' => $c['marketing_email'], 'Phone' => $c['marketing_phone'], 'Text' => $c['marketing_sms'], 'Post' => $c['marketing_post']]);
+    return $on ? implode(', ', array_keys($on)) : 'No marketing';
+};
+$canEdit = can('customers.edit');
 ?>
 <div class="page-head">
   <div>
@@ -17,17 +23,51 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
     <?php endif; ?>
   </div>
   <div class="actions">
-    <a class="btn" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a>
-    <?php if (is_admin()) render('_delete', ['name' => 'accounts', 'id' => $id, 'label' => 'customer and all its records']); ?>
+    <?php if (can('marketing.send') && $activeCount): ?><a class="btn" href="<?= h(url('campaigns', ['action' => 'new', 'kind' => 'service_alert', 'account_id' => $id])) ?>">Send service alert</a><?php endif; ?>
+    <?php if ($canEdit): ?><a class="btn" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a><?php endif; ?>
+    <?php if ($canEdit && !$pendingRequest): ?>
+      <details class="dropdown">
+        <summary class="btn btn-danger-ghost">Close or delete…</summary>
+        <div class="dropdown-panel card">
+          <?php foreach (APPROVAL_TYPES as $type => $typeLabel):
+              if ($type === 'close_account' && $account['status'] === 'churned') continue;
+              $direct = can(approval_permission($type)); ?>
+            <form method="post" action="<?= h(url('approvals', ['action' => $direct ? 'now' : 'request'])) ?>" class="stack"
+                  <?= $direct ? 'data-confirm="' . h($type === 'delete_account' ? 'Permanently delete ' . $account['name'] . ' and everything under it? This can\'t be undone.' : 'Close ' . $account['name'] . ' now?') . '"' : '' ?>>
+              <?= csrf_field() ?>
+              <input type="hidden" name="account_id" value="<?= $id ?>"><input type="hidden" name="type" value="<?= h($type) ?>">
+              <h3><?= h($typeLabel) ?></h3>
+              <p class="help"><?= $type === 'delete_account'
+                  ? 'Removes the customer and all their contacts, sites, services, tickets and quotes (the audit trail is kept). Usually closing is better.'
+                  : 'Marks the customer as closed. Their records are kept.' ?>
+                <?= $direct ? '' : '<br><b>An approver will review your request before anything changes.</b>' ?></p>
+              <label>Reason<textarea name="reason" rows="2" required></textarea></label>
+              <?php if ($type === 'close_account' && $activeCount): ?><label class="check"><input type="checkbox" name="cease_services" value="1"> Also mark the <?= (int)$activeCount ?> live service<?= $activeCount === 1 ? '' : 's' ?> as ceased</label><?php endif; ?>
+              <button class="btn <?= $type === 'delete_account' ? 'btn-danger' : '' ?>"><?= $direct ? h($typeLabel) : 'Request ' . h(strtolower($typeLabel === 'Close customer' ? 'closure' : 'deletion')) ?></button>
+            </form>
+          <?php endforeach; ?>
+        </div>
+      </details>
+    <?php endif; ?>
   </div>
 </div>
+
+<?php if ($pendingRequest): ?>
+  <div class="flash flash-warning" role="status">
+    <b><?= h(APPROVAL_TYPES[$pendingRequest['type']] ?? 'Change') ?></b> requested by <?= h($pendingRequest['requested_by_name'] ?? 'someone') ?> on <?= h(fmt_datetime($pendingRequest['created_at'])) ?>: “<?= h($pendingRequest['reason']) ?>”. Waiting for approval.
+    <a href="<?= h(url('approvals', ['action' => 'view', 'id' => $pendingRequest['id']])) ?>">View request →</a>
+  </div>
+<?php endif; ?>
+<?php if ($account['status'] === 'churned' && $account['closed_at']): ?>
+  <div class="flash flash-info" role="status">Closed on <?= h(fmt_date($account['closed_at'])) ?><?= $account['closed_reason'] ? ': ' . h($account['closed_reason']) : '' ?></div>
+<?php endif; ?>
 
 <div class="kpis kpis-sm">
   <div class="kpi"><span class="kpi-label">MRR</span><span class="kpi-value"><?= h(money($mrr)) ?></span></div>
   <div class="kpi"><span class="kpi-label">Active services</span><span class="kpi-value"><?= (int)$activeCount ?></span></div>
   <div class="kpi <?= $openTickets ? 'kpi-warn' : '' ?>"><span class="kpi-label">Open tickets</span><span class="kpi-value"><?= (int)$openTickets ?></span></div>
   <div class="kpi"><span class="kpi-label">Account manager</span><span class="kpi-value kpi-text"><?= h($account['owner_id__label'] ?? '—') ?></span></div>
-  <?php if (xero_connected()): ?>
+  <?php if (xero_connected() && can('finance.view')): ?>
     <?php if ($xero):
         $overLimit = $account['credit_limit'] !== null && (float)$xero['outstanding'] > (float)$account['credit_limit'];
         $inCredit = (float)$xero['outstanding'] < 0; ?>
@@ -58,7 +98,7 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
         $commission = $account['dealer_commission_pct'] !== null ? $groupMrr * (float)$account['dealer_commission_pct'] / 100 : null; ?>
     <section class="card">
       <div class="card-head"><h2>Dealer's customers <span class="count"><?= count($children) ?></span></h2>
-        <a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a></div>
+        <?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a><?php endif; ?></div>
       <p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
         <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p>
       <?php if ($children): ?>
@@ -81,32 +121,33 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
     <?php endif; ?>
 
     <section class="card">
-      <div class="card-head"><h2>Services &amp; lines</h2><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a></div>
-      <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
+      <div class="card-head"><h2>Services &amp; lines</h2><?php if (can('services.edit')): ?><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a><?php endif; ?></div>
+      <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => $sites ? ['identifier', 'service_type', 'site_id', 'carrier', 'status', 'monthly_price', 'contract_end_date'] : ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Quotes</h2><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a></div>
+      <div class="card-head"><h2>Quotes</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('quotes'), 'name' => 'quotes', 'rows' => $quotes, 'columns' => ['reference', 'title', 'status', '_monthly', 'valid_until', 'sent_at']]); ?>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Contracts</h2><a class="btn btn-sm" href="<?= h(url('contracts', ['action' => 'new', 'account_id' => $id])) ?>">+ New contract<?= $account['is_dealer'] ? ' / MSA' : '' ?></a></div>
+      <div class="card-head"><h2>Contracts</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('contracts', ['action' => 'new', 'account_id' => $id])) ?>">+ New contract<?= $account['is_dealer'] ? ' / MSA' : '' ?></a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('contracts'), 'name' => 'contracts', 'rows' => $contracts, 'columns' => ['reference', 'title', 'kind', 'status', 'sent_at', 'signed_at']]); ?>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Support tickets</h2><a class="btn btn-sm" href="<?= h($new('tickets')) ?>">+ Raise ticket</a></div>
+      <div class="card-head"><h2>Support tickets</h2><?php if (can('tickets.edit')): ?><a class="btn btn-sm" href="<?= h($new('tickets')) ?>">+ Raise ticket</a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('tickets'), 'name' => 'tickets', 'rows' => $tickets, 'columns' => ['reference', 'subject', 'category', 'priority', 'status', 'sla_due_at']]); ?>
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Opportunities</h2><a class="btn btn-sm" href="<?= h($new('opportunities')) ?>">+ Add opportunity</a></div>
+      <div class="card-head"><h2>Opportunities</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h($new('opportunities')) ?>">+ Add opportunity</a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('opportunities'), 'name' => 'opportunities', 'rows' => $opps, 'columns' => ['title', 'opp_type', 'stage', 'monthly_value', '_tcv', 'expected_close']]); ?>
     </section>
 
     <section class="card">
       <div class="card-head"><h2>Activity</h2></div>
+      <?php if ($canEdit): ?>
       <form method="post" action="<?= h(url('activities', ['action' => 'new'])) ?>" class="quick-log">
         <?= csrf_field() ?>
         <input type="hidden" name="account_id" value="<?= $id ?>">
@@ -116,6 +157,7 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
         <input type="date" name="due_date" aria-label="Due date" title="Due date (tasks)">
         <button class="btn btn-primary">Log</button>
       </form>
+      <?php endif; ?>
       <ul class="feed">
         <?php foreach ($activities as $a): ?>
           <li>
@@ -128,15 +170,38 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
         <?php if (!$activities): ?><li class="muted">No activity logged yet.</li><?php endif; ?>
       </ul>
     </section>
+
+    <?php if (can('audit.view')): ?>
+    <section class="card">
+      <div class="card-head"><h2>History</h2><a href="<?= h(url('audit', ['account_id' => $id])) ?>">Full audit trail →</a></div>
+      <?php if ($history): ?>
+        <ul class="feed">
+          <?php foreach ($history as $e): $changes = audit_changes($e['changes']); ?>
+            <li>
+              <b><?= h($e['user_name'] ?? 'System') ?></b> <?= h($e['summary']) ?>
+              <span class="muted">· <?= h(fmt_datetime($e['created_at'])) ?></span>
+              <?php if ($changes): ?>
+                <details class="changes"><summary><?= count($changes) ?> change<?= count($changes) === 1 ? '' : 's' ?></summary>
+                  <?php render('_changes', ['changes' => $changes]); ?>
+                </details>
+              <?php endif; ?>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php else: ?><p class="muted">Nothing recorded yet.</p><?php endif; ?>
+    </section>
+    <?php endif; ?>
   </div>
 
   <aside>
     <?php if ($dd !== null) render('_direct_debit', ['account' => $account, 'dd' => $dd]); ?>
     <section class="card">
-      <div class="card-head"><h2>Details</h2></div>
+      <div class="card-head"><h2>Head office</h2><?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a><?php endif; ?></div>
+      <?php if ($fmtAddress($account)): ?><p class="address"><?= nl2br(h(implode("\n", array_filter([$account['address'], $account['address2'], $account['city'], $account['county'], $account['postcode']])))) ?></p><?php else: ?><p class="muted">No address yet.</p><?php endif; ?>
       <dl class="details details-stack">
-        <?php foreach (['account_number', 'industry', 'company_number', 'email', 'phone', 'address', 'city', 'postcode', 'credit_limit', 'created_at'] as $f):
+        <?php foreach (['phone', 'email', 'account_number', 'industry', 'company_number', 'credit_limit', 'created_at'] as $f):
             if ($f === 'created_at') { $v = h(fmt_date($account['created_at'])); $label = 'Customer since'; }
+            elseif (!isset($entity['fields'][$f]) || !field_enabled($entity['fields'][$f])) { continue; }
             else { $v = display_value($entity, $f, $account); $label = $entity['fields'][$f]['label']; }
             if ($v === '' || $v === '<span class="muted">—</span>') continue; ?>
           <dt><?= h($label) ?></dt><dd><?= $v ?></dd>
@@ -146,20 +211,80 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Contacts</h2><a class="btn btn-sm" href="<?= h($new('contacts')) ?>">+ Add</a></div>
+      <div class="card-head"><h2>Key contacts</h2></div>
+      <?php foreach (['Main contact' => $mainContact, 'Accounts contact' => $billingContact] as $role => $c): ?>
+        <div class="key-contact">
+          <div class="muted small"><?= h($role) ?><?= $role === 'Accounts contact' ? ' · invoices & statements' : '' ?></div>
+          <?php if ($c): ?>
+            <a href="<?= h(url('contacts', ['action' => 'view', 'id' => $c['id']])) ?>"><strong><?= h($c['name']) ?></strong></a>
+            <?php if ($role === 'Accounts contact' && $mainContact && (int)$c['id'] === (int)$mainContact['id']): ?><span class="muted">(same as main)</span><?php endif; ?>
+            <div><?= display_value($contactEntity, 'email', $c) ?></div>
+            <div><?= display_value($contactEntity, 'phone', $c) ?> <?= display_value($contactEntity, 'mobile', $c) ?></div>
+          <?php elseif ($role === 'Accounts contact' && $mainContact): ?>
+            <span class="muted">Same as main contact</span>
+          <?php else: ?>
+            <span class="text-warning">Not set</span><?php if ($canEdit): ?> · <a href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">add</a><?php endif; ?>
+          <?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+      <?php if (xero_connected() && $account['xero_contact_id'] && ($billingContact || $mainContact) && $canEdit && xero_can_write_contacts()): ?>
+        <form method="post" action="<?= h(url('xero', ['action' => 'push', 'id' => $id])) ?>" class="inline" data-confirm="Set this customer's invoice email in Xero to <?= h(($billingContact ?: $mainContact)['email'] ?? '') ?>?">
+          <?= csrf_field() ?><button class="btn btn-sm">Send accounts contact to Xero</button>
+        </form>
+        <?php if (setting('xero_push_contacts') === '1'): ?><p class="help">Xero is updated automatically when the accounts contact changes.</p><?php endif; ?>
+      <?php endif; ?>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Address book</h2><?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h($new('sites')) ?>">+ Add site</a><?php endif; ?></div>
+      <ul class="contact-list">
+        <li>
+          <strong>Head office</strong> <span class="badge badge-active">Main</span>
+          <div class="muted"><?= h($fmtAddress($account) ?: 'No address yet') ?></div>
+          <div class="small">Contact: <?= h($mainContact['name'] ?? '—') ?></div>
+        </li>
+        <?php foreach ($sites as $site): ?>
+          <li>
+            <a href="<?= h(url('sites', ['action' => 'view', 'id' => $site['id']])) ?>"><strong><?= h($site['name']) ?></strong></a>
+            <?php if ($site['_services']): ?><span class="muted small"><?= (int)$site['_services'] ?> live service<?= (int)$site['_services'] === 1 ? '' : 's' ?></span><?php endif; ?>
+            <div class="muted"><?= h($fmtAddress($site) ?: '—') ?></div>
+            <div class="small">Contact: <?= $site['contact_id'] ? h($site['contact_id__label']) : h(($mainContact['name'] ?? '—')) . ' <span class="muted">(head office)</span>' ?></div>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Contacts</h2><?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h($new('contacts')) ?>">+ Add</a><?php endif; ?></div>
       <ul class="contact-list">
         <?php foreach ($contacts as $c): ?>
           <li>
             <a href="<?= h(url('contacts', ['action' => 'view', 'id' => $c['id']])) ?>"><strong><?= h($c['name']) ?></strong></a>
-            <?php if ($c['is_primary']): ?><span class="badge badge-active">Primary</span><?php endif; ?>
-            <?php if ($c['is_billing']): ?><span class="badge badge-billing">Billing</span><?php endif; ?>
+            <?php if ($c['is_primary']): ?><span class="badge badge-active">Main</span><?php endif; ?>
+            <?php if ($c['is_billing']): ?><span class="badge badge-billing">Accounts</span><?php endif; ?>
             <?php if ($c['job_title']): ?><div class="muted"><?= h($c['job_title']) ?></div><?php endif; ?>
-            <div><?= display_value(entity('contacts'), 'email', $c) ?></div>
-            <div><?= display_value(entity('contacts'), 'phone', $c) ?> <?= display_value(entity('contacts'), 'mobile', $c) ?></div>
+            <div><?= display_value($contactEntity, 'email', $c) ?></div>
+            <div><?= display_value($contactEntity, 'phone', $c) ?> <?= display_value($contactEntity, 'mobile', $c) ?></div>
           </li>
         <?php endforeach; ?>
         <?php if (!$contacts): ?><li class="muted">No contacts yet.</li><?php endif; ?>
       </ul>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Marketing &amp; alerts</h2></div>
+      <?php if ($contacts): ?>
+        <ul class="contact-list">
+          <?php foreach ($contacts as $c): ?>
+            <li>
+              <strong><?= h($c['name']) ?></strong>
+              <?php if ($canEdit): ?><a class="small" href="<?= h(url('contacts', ['action' => 'edit', 'id' => $c['id'], 'return' => $here])) ?>">change</a><?php endif; ?>
+              <div class="small"><?= h($prefs($c)) ?><?= $c['marketing_topics'] ? ' · ' . h(checkbox_labels($contactEntity['fields']['marketing_topics'], $c['marketing_topics'])) : '' ?></div>
+              <div class="small <?= $c['service_alerts'] ? '' : 'text-warning' ?>"><?= $c['service_alerts'] ? 'Gets service alerts' : 'Opted out of service alerts' ?></div>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      <?php else: ?><p class="muted">Add a contact to record their preferences.</p><?php endif; ?>
     </section>
   </aside>
 </div>

@@ -2,7 +2,8 @@
 declare(strict_types=1);
 
 /*
- * Sync every connected integration (Xero balances, GoCardless mandates).
+ * Sync every connected integration (Xero balances, GoCardless mandates, Signable,
+ * Mailchimp unsubscribes) and carry on sending queued service alert / marketing emails.
  * Schedule as a cron job, e.g. hourly:
  *   php /home/youraccount/crm/cron/sync.php
  */
@@ -46,6 +47,27 @@ if (signable_configured()) {
         fwrite(STDERR, date('c') . ' Signable check failed: ' . $e->getMessage() . "\n");
         $failed = true;
     }
+}
+
+if (mailchimp_configured()) {
+    try {
+        $n = mailchimp_sync_unsubscribes();
+        echo date('c') . " Mailchimp OK: $n contacts unsubscribed\n";
+    } catch (Throwable $e) {
+        fwrite(STDERR, date('c') . ' Mailchimp check failed: ' . $e->getMessage() . "\n");
+        $failed = true;
+    }
+}
+
+// Carry on sending service alerts / marketing emails that are part-way through.
+try {
+    $n = campaigns_process_queue();
+    if ($n) {
+        echo date('c') . " Emails OK: $n campaign emails sent\n";
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, date('c') . ' Sending campaign emails failed: ' . $e->getMessage() . "\n");
+    $failed = true;
 }
 
 exit($failed ? 1 : 0);

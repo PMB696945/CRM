@@ -358,6 +358,25 @@ test('manual links survive re-sync; refresh token rotates; expired access token 
     eq(null, setting('xero_last_sync_error'));
 });
 
+test('accounts contact can be sent to Xero once contacts write access is granted', function () {
+    ok(!xero_can_write_contacts(), 'read-only by default');
+    eq('offline_access accounting.contacts accounting.invoices.read', xero_write_scopes(XERO_DEFAULT_SCOPES));
+    eq('offline_access accounting.contacts accounting.transactions.read', xero_write_scopes('offline_access accounting.contacts.read accounting.transactions.read'));
+    set_setting('xero_scopes', xero_write_scopes(XERO_DEFAULT_SCOPES));
+    set_setting('xero_push_contacts', '1');
+    ok(xero_push_enabled());
+    $id = (int)db_value("SELECT id FROM accounts WHERE name = 'Harbour View Dental'");
+    $c = create('contacts', ['account_id' => $id, 'name' => 'Alex Ledger Smith', 'email' => 'ledger@harbour.example.co.uk', 'is_billing' => '1']);
+    eq('ledger@harbour.example.co.uk', xero_push_billing_contact($id));
+    $pushed = end(mock_state()['pushed']);
+    eq(['ContactID' => 'c1000000-0000-0000-0000-000000000001', 'EmailAddress' => 'ledger@harbour.example.co.uk', 'FirstName' => 'Alex', 'LastName' => 'Ledger Smith'], $pushed);
+    eq('ledger@harbour.example.co.uk', db_value('SELECT x.email FROM xero_contacts x JOIN accounts a ON a.xero_contact_id = x.id WHERE a.id = ?', [$id]));
+    $unlinked = create('accounts', ['name' => 'Not In Xero', 'type' => 'business', 'status' => 'active']);
+    try { xero_push_billing_contact($unlinked); throw new Exception('expected failure'); } catch (XeroException $e) { ok(str_contains($e->getMessage(), 'linked')); }
+    set_setting('xero_scopes', null);
+    set_setting('xero_push_contacts', null);
+});
+
 test('revoked connection gives a clear error and is marked disconnected', function () {
     global $mockState;
     $st = mock_state(); $st['refresh'] = []; $st['tokens'] = []; file_put_contents($mockState, json_encode($st));
@@ -718,6 +737,320 @@ test('bad Signable key is reported; contract marked failed', function () use (&$
     eq('failed', db_value('SELECT status FROM contracts WHERE id = ?', [$c['id']]));
     set_setting('signable_api_key', 'signable-test-key');
 });
+
+
+echo "Roles, customers, approvals and audit\n";
+function as_role(string $role): void { db_exec('UPDATE users SET role = ? WHERE id = 1', [$role]); current_user(true); }
+test('version 6 roles become super admin / staff', function () {
+    ok(in_array(db_value('SELECT role FROM users WHERE id = 1'), ['admin', 'super_admin'], true));
+    as_role('super_admin');
+    ok(can('audit.view') && can('customers.delete') && is_super_admin() && is_admin());
+});
+test('role permissions: defaults, changes on the Roles page, super admin always all', function () {
+    as_role('staff');
+    ok(can('customers.edit') && !can('customers.close') && !can('customers.delete') && !can('audit.view') && !can('approvals.decide'));
+    as_role('manager');
+    ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
+    set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
+    ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
+    eq(['customers.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped');
+    set_setting('role_permissions', json_encode(['super_admin' => []]));
+    as_role('super_admin');
+    ok(can('approvals.decide'), 'super admin cannot be restricted');
+    set_setting('role_permissions', null);
+    as_role('read_only');
+    ok(!can('customers.edit') && !can('export'));
+    as_role('staff');
+    ok(!array_key_exists('_balance', entity('accounts')['computed']) || can('finance.view'));
+    as_role('finance');
+    ok(!can('services.edit') && can('finance.view'));
+    as_role('super_admin');
+    eq([], users_with_permission('not.a.permission'));
+    ok(in_array('test@example.com', array_column(users_with_permission('approvals.decide'), 'email'), true));
+});
+
+$acct = [];
+test('customer form creates main and accounts contacts', function () use (&$acct) {
+    $acct['a'] = create('accounts', ['name' => 'Bramble Dental', 'type' => 'business', 'status' => 'active', 'address' => '1 High St', 'postcode' => 'm1 2ab',
+        'main_name' => 'Sam Lee', 'main_phone' => '0161 000 0000', 'main_email' => 'sam@bramble.example', 'billing_same' => '1']);
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$acct['a']]);
+    ok($a["main_contact_id"] && $a["main_contact_id"] === $a["billing_contact_id"], "same contact for both: " . json_encode([$a["main_contact_id"], $a["billing_contact_id"]]));
+    $c = db_one('SELECT * FROM contacts WHERE id = ?', [$a['main_contact_id']]);
+    eq('Sam Lee', $c['name']); eq(1, (int)$c['is_primary']); eq(1, (int)$c['is_billing']);
+    eq(1, (int)$c['service_alerts'], 'alerts on by default'); eq(0, (int)$c['marketing_email'], 'no marketing by default');
+
+    // Separate accounts contact
+    [$data, $errors] = validate(entity('accounts'), ['billing_same' => '0', 'billing_name' => 'Pat Accounts', 'billing_email' => 'ACCOUNTS@bramble.example'] + account_contact_values($a) + $a);
+    eq([], $errors + validate_rules('accounts', $data, $acct['a']));
+    update_row('accounts', $acct['a'], $data);
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$acct['a']]);
+    ok($a['billing_contact_id'] && $a['billing_contact_id'] !== $a['main_contact_id'], 'separate: ' . json_encode([$a['main_contact_id'], $a['billing_contact_id']]));
+    eq('accounts@bramble.example', db_value('SELECT email FROM contacts WHERE id = ?', [$a['billing_contact_id']]));
+    eq(2, (int)db_value('SELECT COUNT(*) FROM contacts WHERE account_id = ?', [$acct['a']]));
+    eq(1, (int)db_value('SELECT SUM(is_billing) FROM contacts WHERE account_id = ?', [$acct['a']]), 'one accounts contact');
+
+    // Editing the main contact updates the same record rather than adding another
+    $v = account_contact_values($a);
+    eq(0, $v['billing_same']);
+    [$data] = validate(entity('accounts'), ['main_phone' => '0161 999 9999'] + $v + $a);
+    update_row('accounts', $acct['a'], $data);
+    eq(2, (int)db_value('SELECT COUNT(*) FROM contacts WHERE account_id = ?', [$acct['a']]));
+    eq('0161 999 9999', db_value('SELECT phone FROM contacts WHERE id = ?', [$a['main_contact_id']]));
+
+    // Validation: accounts contact name without email
+    [$data] = validate(entity('accounts'), ['billing_same' => '0', 'billing_name' => 'X', 'billing_email' => ''] + $v + $a);
+    ok(isset(validate_rules('accounts', $data, $acct['a'])['billing_email']));
+});
+test('ticking "main contact" on a contact updates the customer', function () use (&$acct) {
+    $id = create('contacts', ['account_id' => $acct['a'], 'name' => 'New Boss', 'email' => 'boss@bramble.example', 'is_primary' => '1']);
+    eq($id, (int)db_value('SELECT main_contact_id FROM accounts WHERE id = ?', [$acct['a']]));
+    eq(1, (int)db_value('SELECT SUM(is_primary) FROM contacts WHERE account_id = ?', [$acct['a']]));
+    [$data] = validate(entity('contacts'), ['is_primary' => '0'] + find('contacts', $id));
+    update_row('contacts', $id, $data);
+    eq(null, db_value('SELECT main_contact_id FROM accounts WHERE id = ?', [$acct['a']]));
+    [$data] = validate(entity('contacts'), ['is_primary' => '1'] + find('contacts', $id));
+    update_row('contacts', $id, $data);
+    $acct['boss'] = $id;
+});
+test('address book: sites with their own contact, services at a site', function () use (&$acct) {
+    $other = create('accounts', ['name' => 'Other Co', 'type' => 'business', 'status' => 'active']);
+    $otherContact = create('contacts', ['account_id' => $other, 'name' => 'Nope']);
+    $siteContact = create('contacts', ['account_id' => $acct['a'], 'name' => 'Site Sue', 'email' => 'sue@bramble.example']);
+    [, $errors] = validate(entity('sites'), ['account_id' => $acct['a'], 'name' => 'Leeds', 'contact_id' => $otherContact]);
+    [$data] = validate(entity('sites'), ['account_id' => $acct['a'], 'name' => 'Leeds', 'contact_id' => $otherContact]);
+    ok(isset(validate_scoped_refs(entity('sites'), $data)['contact_id']), 'site contact must belong to the customer');
+    $acct['leeds'] = create('sites', ['account_id' => $acct['a'], 'name' => 'Leeds depot', 'address' => '5 Canal Rd', 'postcode' => 'ls1 4ap', 'contact_id' => $siteContact]);
+    eq('LS1 4AP', db_value('SELECT postcode FROM sites WHERE id = ?', [$acct['leeds']]));
+    $acct['svc_leeds'] = create('services', ['account_id' => $acct['a'], 'site_id' => $acct['leeds'], 'identifier' => 'BB-LEEDS-1', 'service_type' => 'broadband', 'carrier' => 'Openreach', 'status' => 'active', 'monthly_price' => '40']);
+    $acct['svc_ho'] = create('services', ['account_id' => $acct['a'], 'identifier' => '07700900111', 'service_type' => 'mobile', 'carrier' => 'EE', 'status' => 'active', 'monthly_price' => '15']);
+    [$data] = validate(entity('services'), ['account_id' => $other, 'site_id' => $acct['leeds'], 'identifier' => 'X', 'status' => 'active']);
+    ok(isset(validate_scoped_refs(entity('services'), $data)['site_id']), 'site must belong to the customer');
+    ok(isset(ref_options('sites', $acct['a'])[$acct['leeds']]));
+    ok(!isset(ref_options('sites', $other)[$acct['leeds']]));
+    eq(1, (int)find('sites', $acct['leeds'])['_services']);
+});
+test('marketing preferences need a source and an email; changes are timestamped', function () use (&$acct) {
+    $row = find('contacts', $acct['boss']);
+    [$data] = validate(entity('contacts'), ['marketing_email' => '1', 'marketing_topics' => ['newsletter', 'bogus']] + $row);
+    ok(isset(validate_rules('contacts', $data, $acct['boss'])['marketing_source']));
+    eq('newsletter', $data['marketing_topics'], 'unknown topics dropped');
+    [$data] = validate(entity('contacts'), ['marketing_email' => '1', 'marketing_source' => 'verbal', 'marketing_topics' => ['newsletter']] + $row);
+    eq([], validate_rules('contacts', $data, $acct['boss']));
+    update_row('contacts', $acct['boss'], $data);
+    ok(db_value('SELECT marketing_updated_at FROM contacts WHERE id = ?', [$acct['boss']]) !== null);
+    [$data] = validate(entity('contacts'), ['marketing_email' => '1', 'marketing_source' => 'verbal', 'email' => ''] + $row);
+    ok(isset(validate_rules('contacts', $data, $acct['boss'])['marketing_email']));
+    eq('Newsletter', export_value(entity('contacts'), 'marketing_topics', find('contacts', $acct['boss'])));
+});
+test('staff cannot close a customer by editing it', function () use (&$acct) {
+    as_role('staff');
+    $a = find('accounts', $acct['a']);
+    [$data] = validate(entity('accounts'), ['status' => 'churned'] + account_contact_values($a) + $a);
+    ok(isset(validate_rules('accounts', $data, $acct['a'])['status']));
+    as_role('manager');
+    eq([], array_intersect_key(validate_rules('accounts', $data, $acct['a']), ['status' => 1]), 'managers can close directly');
+    as_role('super_admin');
+});
+test('close request: approve closes the customer, ceases services and is audited', function () use (&$acct) {
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Staff Sam', 'staff@example.com', 'x', 'staff')");
+    $staff = (int)db()->lastInsertId();
+    db_exec('INSERT INTO approval_requests (type, account_id, account_label, reason, options, requested_by) VALUES (?, ?, ?, ?, ?, ?)',
+        ['close_account', $acct['a'], 'Bramble Dental', 'Moved to another provider', json_encode(['cease_services' => true]), $staff]);
+    $req = (int)db()->lastInsertId();
+    eq($req, (int)pending_request_for($acct['a'])['id']);
+    eq(1, pending_approvals_count());
+    $msg = execute_account_action('close_account', db_one('SELECT * FROM accounts WHERE id = ?', [$acct['a']]), 'Moved to another provider', ['cease_services' => true], $req);
+    ok(str_contains($msg, '2 services marked as ceased'), $msg);
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$acct['a']]);
+    eq('churned', $a['status']); ok($a['closed_at'] !== null); eq('Moved to another provider', $a['closed_reason']);
+    eq(0, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status <> 'ceased'", [$acct['a']]));
+    $log = db_one("SELECT * FROM audit_log WHERE action = 'account_close' ORDER BY id DESC LIMIT 1");
+    eq($acct['a'], (int)$log['account_id']);
+    eq(['status', 'active', 'churned'], audit_changes($log['changes'])[0]);
+    // Re-opening clears the closure details
+    $row = find('accounts', $acct['a']);
+    [$data] = validate(entity('accounts'), ['status' => 'active'] + account_contact_values($row) + $row);
+    update_row('accounts', $acct['a'], $data);
+    eq(null, db_value('SELECT closed_reason FROM accounts WHERE id = ?', [$acct['a']]));
+    db_exec("UPDATE approval_requests SET status = 'approved' WHERE id = ?", [$req]);
+    db_exec("UPDATE services SET status = 'active' WHERE account_id = ?", [$acct['a']]);
+});
+test('delete via approval keeps the request and the audit trail', function () {
+    $id = create('accounts', ['name' => 'Doomed Ltd', 'type' => 'business', 'status' => 'prospect', 'main_name' => 'Dee', 'billing_same' => '1']);
+    db_exec('INSERT INTO approval_requests (type, account_id, account_label, reason, requested_by) VALUES (?, ?, ?, ?, 1)', ['delete_account', $id, 'Doomed Ltd', 'Duplicate']);
+    $req = (int)db()->lastInsertId();
+    execute_account_action('delete_account', db_one('SELECT * FROM accounts WHERE id = ?', [$id]), 'Duplicate', [], $req);
+    eq(null, db_value('SELECT id FROM accounts WHERE id = ?', [$id]));
+    eq(null, db_value('SELECT account_id FROM approval_requests WHERE id = ?', [$req]), 'request kept, customer link cleared');
+    eq('Doomed Ltd', db_value('SELECT account_label FROM approval_requests WHERE id = ?', [$req]));
+    ok((int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'delete' AND account_id = ?", [$id]) === 1, 'history of a deleted customer is kept');
+});
+test('audit entries link to the customer and record before/after values', function () use (&$acct) {
+    audit('update', 'test', 'services', $acct['svc_leeds'], null, ['Status' => ['from' => 'Active', 'to' => 'Ceased']]);
+    $log = db_one('SELECT * FROM audit_log ORDER BY id DESC LIMIT 1');
+    eq($acct['a'], (int)$log['account_id']);
+    eq([['Status', 'Active', 'Ceased']], audit_changes($log['changes']));
+    $snap = record_snapshot('accounts', entity('accounts'), $acct['a']);
+    eq('Bramble Dental', $snap['Name']);
+    eq('Pat Accounts', $snap['Accounts contact']);
+    eq('Closed / churned', export_value(entity('accounts'), 'status', ['status' => 'churned']));
+    ok(str_contains(audit_changes_text(json_encode(['Role' => ['removed' => 'a', 'added' => 'b']])), 'removed: a'));
+});
+
+echo "Service alerts & marketing\n";
+test('service alert audience: by service type, postcode and who at the customer', function () use (&$acct) {
+    db_exec('UPDATE contacts SET service_alerts = 1 WHERE account_id = ?', [$acct['a']]);
+    $f = campaign_filters(['service_types' => ['broadband']], 'service_alert');
+    $emails = array_column(array_filter(campaign_audience('service_alert', $f), fn($r) => $r['account_id'] === $acct['a']), 'email');
+    sort($emails);
+    eq(['boss@bramble.example', 'sue@bramble.example'], $emails, 'main contact + Leeds site contact');
+    $f['who'] = 'main';
+    eq(['boss@bramble.example'], array_column(array_filter(campaign_audience('service_alert', $f), fn($r) => $r['account_id'] === $acct['a']), 'email'));
+    $f = campaign_filters(['postcodes' => 'LS1', 'who' => 'main_site'], 'service_alert');
+    $aud = campaign_audience('service_alert', $f);
+    eq([$acct['a']], array_values(array_unique(array_column($aud, 'account_id'))), 'only customers with a service at an LS1 site');
+    eq(['BB-LEEDS-1'], array_column($aud[0]['services'], 'identifier'), 'only the affected service listed');
+    $f = campaign_filters(['postcodes' => 'M1 2', 'service_types' => ['mobile']], 'service_alert');
+    eq(['07700900111'], array_column(campaign_audience('service_alert', $f)[0]['services'] ?? [], 'identifier'), 'head office postcode used when no site');
+    db_exec('UPDATE contacts SET service_alerts = 0 WHERE email = ?', ['sue@bramble.example']);
+    $f = campaign_filters(['service_types' => ['broadband'], 'account_id' => $acct['a']], 'service_alert');
+    eq(['boss@bramble.example'], array_column(campaign_audience('service_alert', $f), 'email'), 'opted-out contacts skipped');
+    db_exec('UPDATE contacts SET service_alerts = 1 WHERE email = ?', ['sue@bramble.example']);
+    $f = campaign_filters(['service_types' => ['sip_trunk'], 'account_id' => $acct['a']], 'service_alert');
+    eq([], campaign_audience('service_alert', $f), 'no matching live services, no email');
+});
+test('marketing audience: opted in, topic, live product filter', function () use (&$acct) {
+    $f = campaign_filters([], 'marketing');
+    $emails = array_column(campaign_audience('marketing', $f), 'email');
+    ok(in_array('boss@bramble.example', $emails, true));
+    ok(!in_array('sue@bramble.example', $emails, true), 'not opted in');
+    ok(in_array('boss@bramble.example', array_column(campaign_audience('marketing', campaign_filters(['topic' => 'newsletter'], 'marketing')), 'email'), true));
+    ok(!in_array('boss@bramble.example', array_column(campaign_audience('marketing', campaign_filters(['topic' => 'events_webinars'], 'marketing')), 'email'), true), 'not interested in events');
+    ok(in_array('boss@bramble.example', array_column(campaign_audience('marketing', campaign_filters(['service_types' => ['mobile']], 'marketing')), 'email'), true));
+    ok(!in_array('boss@bramble.example', array_column(campaign_audience('marketing', campaign_filters(['service_types' => ['leased_line']], 'marketing')), 'email'), true));
+});
+test('merge fields, safe HTML, unsubscribe links and problems', function () {
+    $c = ['kind' => 'marketing', 'channel' => 'email', 'subject' => 'Hi', 'body' => "Hello {{first_name}} at {{company}}\n\nSee https://example.com/offer. <script>x</script>\n\n{{services}}"];
+    $html = campaign_html($c, ['name' => 'Sam Lee', 'account_name' => 'A & B', 'account_number' => 'ACC-1', 'contact_id' => 7, 'services' => [['identifier' => 'L1', 'service_type' => 'broadband', 'site_name' => 'Leeds']]]);
+    ok(str_contains($html, 'Hello Sam at A &amp; B'));
+    ok(str_contains($html, '<a href="https://example.com/offer">'), 'link');
+    ok(!str_contains($html, '<script>'), 'escaped');
+    ok(str_contains($html, '<li>L1 – Broadband at Leeds</li>'));
+    ok(str_contains($html, 'unsubscribe.php?c=7&amp;w=marketing&amp;t=' . unsubscribe_token(7, 'marketing')));
+    ok(unsubscribe_token(7, 'marketing') !== unsubscribe_token(7, 'alerts') && unsubscribe_token(7, 'marketing') !== unsubscribe_token(8, 'marketing'));
+    eq([], campaign_content_problems($c));
+    ok(count(campaign_content_problems(['channel' => 'mailchimp'] + $c)) === 1, '{{services}} not possible with Mailchimp');
+    ok(count(campaign_content_problems(['body' => '{{nope}}'] + $c)) === 1);
+    ok(str_contains(mailchimp_merge_tags('{{first_name}} {{company}}'), '*|FNAME|* *|COMPANY|*'));
+});
+test('service alert is sent by email in batches, with unsubscribe headers, and audited', function () use (&$acct) {
+    set_setting('mail_transport', 'smtp');
+    db_exec('INSERT INTO campaigns (kind, channel, subject, body, filters, created_by) VALUES (?, ?, ?, ?, ?, 1)',
+        ['service_alert', 'email', 'Planned maintenance in Leeds', "Hi {{first_name}},\n\n{{services}}\n\nThanks", json_encode(campaign_filters(['postcodes' => 'LS1'], 'service_alert'))]);
+    $id = (int)db()->lastInsertId();
+    db_exec('UPDATE campaigns SET reference = ? WHERE id = ?', [sprintf('MSG-%05d', $id), $id]);
+    set_setting('campaign_batch_size', '1');
+    $before = count(sent_mails());
+    $msg = campaign_start(db_one('SELECT * FROM campaigns WHERE id = ?', [$id]));
+    ok(str_contains($msg, '1 still to go'), $msg);
+    eq('sending', db_value('SELECT status FROM campaigns WHERE id = ?', [$id]));
+    try { campaign_start(db_one('SELECT * FROM campaigns WHERE id = ?', [$id])); throw new Exception('sent twice'); } catch (IntegrationException) {}
+    eq(0, campaigns_process_queue() - 1, 'cron sends the rest');
+    usleep(300000);
+    $c = db_one('SELECT * FROM campaigns WHERE id = ?', [$id]);
+    eq('sent', $c['status']); eq(2, (int)$c['sent_count']); eq(2, (int)$c['recipients']);
+    $mails = array_slice(sent_mails(), $before);
+    eq(2, count($mails));
+    ok(str_contains($mails[0], 'List-Unsubscribe: <https://crm.example.co.uk/crm/unsubscribe.php?c='));
+    ok(str_contains($mails[0], 'List-Unsubscribe-Post: List-Unsubscribe=One-Click'));
+    ok(str_contains(mail_body($mails[0]), 'BB-LEEDS-1'));
+    ok(str_contains(mail_body($mails[0]), 'Stop service alert emails'));
+    eq(1, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'campaign_send' AND entity_id = ?", [$id]));
+    set_setting('campaign_batch_size', null);
+});
+test('unsubscribing: link token, marketing and alerts separately, audited', function () use (&$acct) {
+    ok(marketing_unsubscribe($acct['boss'], 'marketing', 'unsubscribe link'));
+    $c = db_one('SELECT * FROM contacts WHERE id = ?', [$acct['boss']]);
+    eq(0, (int)$c['marketing_email']); ok($c['unsubscribed_at'] !== null); eq('unsubscribed', $c['marketing_source']);
+    eq(1, (int)$c['service_alerts'], 'still gets service alerts');
+    ok(!in_array('boss@bramble.example', array_column(campaign_audience('marketing', campaign_filters([], 'marketing')), 'email'), true));
+    marketing_unsubscribe($acct['boss'], 'alerts', 'unsubscribe link');
+    eq(0, (int)db_value('SELECT service_alerts FROM contacts WHERE id = ?', [$acct['boss']]));
+    eq(2, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'unsubscribe' AND entity_id = ?", [$acct['boss']]));
+    // Opting back in clears the unsubscribe date
+    $row = find('contacts', $acct['boss']);
+    [$data] = validate(entity('contacts'), ['marketing_email' => '1', 'marketing_source' => 'email', 'service_alerts' => '1'] + $row);
+    update_row('contacts', $acct['boss'], $data);
+    eq(null, db_value('SELECT unsubscribed_at FROM contacts WHERE id = ?', [$acct['boss']]));
+});
+
+$mcState = sys_get_temp_dir() . '/crm_mc_' . getmypid() . '.json';
+$mcPort = 14000 + getmypid() % 1000;
+$mcProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$mcPort", APP_ROOT . '/tests/mailchimp_mock.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p3, null, ['MOCK_STATE' => $mcState] + getenv());
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $mcPort); $i++) {
+    usleep(100000);
+}
+$cfg = &config_ref();
+$cfg['mailchimp_base'] = "http://127.0.0.1:$mcPort/3.0";
+$cfg['mandrill_url'] = "http://127.0.0.1:$mcPort/api/1.0/messages/send.json";
+function mc_state(): array { global $mcState; return json_decode(file_get_contents($mcState), true); }
+
+test('Mailchimp: key check, audience list, bad key explained', function () {
+    eq(['list123' => 'Customers (0 contacts)'], mailchimp_lists('mc-test-key-us21'));
+    try { mailchimp_lists('wrong-key-us21'); throw new Exception('expected failure'); } catch (MailchimpException $e) { ok(str_contains($e->getMessage(), 'API Key Invalid'), $e->getMessage()); }
+    unset(config_ref()['mailchimp_base']);
+    try { mailchimp_base('no-datacentre'); throw new Exception('expected failure'); } catch (MailchimpException) {}
+    eq('https://us21.api.mailchimp.com/3.0', mailchimp_base('abc-us21'));
+    global $mcPort;
+    config_ref()['mailchimp_base'] = "http://127.0.0.1:$mcPort/3.0";
+});
+test('Mailchimp: marketing campaign synced to the audience, segmented and sent', function () use (&$acct) {
+    set_setting('mailchimp_api_key', 'mc-test-key-us21');
+    set_setting('mailchimp_list_id', 'list123');
+    ok(mailchimp_configured());
+    db_exec('INSERT INTO campaigns (kind, channel, subject, body, filters, created_by) VALUES (?, ?, ?, ?, ?, 1)',
+        ['marketing', 'mailchimp', 'Autumn offers', "Hi {{first_name}} at {{company}}", json_encode(campaign_filters(['account_id' => $acct['a']], 'marketing'))]);
+    $id = (int)db()->lastInsertId();
+    db_exec('UPDATE campaigns SET reference = ? WHERE id = ?', [sprintf('MSG-%05d', $id), $id]);
+    $msg = campaign_start(db_one('SELECT * FROM campaigns WHERE id = ?', [$id]));
+    ok(str_contains($msg, 'Sent to Mailchimp for 1 recipient'), $msg);
+    $st = mc_state();
+    ok(in_array('COMPANY', $st['merge_fields'], true) && in_array('ACCNO', $st['merge_fields'], true), 'merge fields created');
+    $member = $st['members'][md5('boss@bramble.example')];
+    eq('subscribed', $member['status']); eq('Bramble Dental', $member['merge_fields']['COMPANY']);
+    $seg = array_values($st['segments'])[0];
+    eq(['boss@bramble.example'], $seg['emails']);
+    $mc = $st['campaigns']['cmp1'];
+    eq('sent', $mc['status']);
+    eq('Autumn offers', $mc['settings']['subject_line']);
+    ok(str_contains($mc['html'], 'Hi *|FNAME|* at *|COMPANY|*'));
+    $c = db_one('SELECT * FROM campaigns WHERE id = ?', [$id]);
+    eq('sent', $c['status']); eq('cmp1', $c['mailchimp_id']); eq(1, (int)$c['sent_count']);
+});
+test('Mailchimp: unsubscribes flow back; unsubscribed members are not resubscribed', function () use (&$acct, &$mcState) {
+    $st = mc_state();
+    $st['members'][md5('boss@bramble.example')]['status'] = 'unsubscribed';
+    file_put_contents($mcState, json_encode($st));
+    eq(1, mailchimp_sync_unsubscribes());
+    eq(0, (int)db_value('SELECT marketing_email FROM contacts WHERE id = ?', [$acct['boss']]));
+    ok(setting('mailchimp_unsub_since') !== null);
+    eq('unsubscribed', mailchimp_upsert_member('list123', ['email' => 'boss@bramble.example', 'name' => 'New Boss', 'account_name' => 'B', 'account_number' => 'A']));
+});
+test('Mailchimp Transactional sends one-to-one email and reports rejections', function () {
+    set_setting('mail_transport', 'mandrill');
+    set_setting('mandrill_api_key', 'md-test-key');
+    send_mail('someone@example.com', 'Some One', 'Hello', '<p>Hi</p>', null, ['List-Unsubscribe' => '<https://x/unsub>']);
+    $m = end(mc_state()['mandrill']);
+    eq('someone@example.com', $m['to'][0]['email']); eq('Hello', $m['subject']); eq('sales@example.co.uk', $m['from_email']);
+    eq('<https://x/unsub>', $m['headers']['List-Unsubscribe']);
+    try { send_mail('x@rejected.example', 'X', 'S', '<p>b</p>'); throw new Exception('expected failure'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'hard-bounce')); }
+    set_setting('mandrill_api_key', 'bad');
+    try { send_mail('a@example.com', 'A', 'S', '<p>b</p>'); throw new Exception('expected failure'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Invalid API key')); }
+    set_setting('mail_transport', 'smtp');
+});
+proc_terminate($mcProc);
+@unlink($mcState);
+foreach (['mailchimp_api_key', 'mailchimp_list_id'] as $k) { set_setting($k, null); }
 
 proc_terminate($sinkProc);
 proc_terminate($sgProc);

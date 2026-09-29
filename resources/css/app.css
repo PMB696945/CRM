@@ -310,14 +310,14 @@
 
   /* ---- Badges ---- */
   .badge { @apply inline-flex items-center justify-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-theme-xs font-medium whitespace-nowrap text-gray-700 dark:bg-white/5 dark:text-white/80; }
-  .badge-active, .badge-won, .badge-resolved, .badge-customer, .badge-signed, .badge-accepted { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
-  .badge-prospect, .badge-lead, .badge-pending, .badge-open, .badge-new_business, .badge-sent { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400; }
+  .badge-active, .badge-won, .badge-resolved, .badge-customer, .badge-signed, .badge-accepted, .badge-approved { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
+  .badge-prospect, .badge-lead, .badge-pending, .badge-open, .badge-new_business, .badge-sent, .badge-sending, .badge-marketing { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400; }
   .badge-qualified, .badge-proposal, .badge-in_progress, .badge-upsell, .badge-billing, .badge-business { @apply bg-blue-light-50 text-blue-light-500 dark:bg-blue-light-500/15 dark:text-blue-light-500; }
-  .badge-negotiation, .badge-awaiting_customer, .badge-awaiting_carrier, .badge-suspended, .badge-p2, .badge-renewal, .badge-task, .badge-sandbox, .badge-expired { @apply bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400; }
+  .badge-negotiation, .badge-awaiting_customer, .badge-awaiting_carrier, .badge-suspended, .badge-p2, .badge-renewal, .badge-task, .badge-sandbox, .badge-expired, .badge-service_alert { @apply bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400; }
   .badge-churned, .badge-lost, .badge-ceased, .badge-p1, .badge-disabled, .badge-declined, .badge-rejected, .badge-failed { @apply bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500; }
   .badge-dealer, .badge-msa { @apply bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400; }
   .dealer-line { @apply mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400; }
-  .badge-admin, .badge-internal { @apply bg-theme-purple-500/10 text-theme-purple-500 dark:bg-theme-purple-500/15; }
+  .badge-admin, .badge-super_admin, .badge-internal { @apply bg-theme-purple-500/10 text-theme-purple-500 dark:bg-theme-purple-500/15; }
 
   /* ---- Tables ---- */
   .table-wrap { @apply overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]; }
@@ -463,4 +463,44 @@
   .login-card label.check { @apply flex-row items-center gap-2 font-normal; }
   .login-card input:not([type=checkbox]) { @apply w-full; }
   .login-card textarea.code { @apply h-auto w-full font-mono text-theme-xs; }
+
+  /* ---- Roles, approvals, audit, customers, campaigns ---- */
+  [hidden] { display: none !important; }
+  .small { @apply text-theme-xs; }
+  .flash-warning { @apply border-warning-500 bg-warning-50 text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/15 dark:text-orange-400; }
+  .flash-info { @apply border-blue-light-500 bg-blue-light-50 text-blue-light-700 dark:border-blue-light-500/30 dark:bg-blue-light-500/15 dark:text-blue-light-500; }
+  .flash a { @apply underline; }
+  .menu-count { @apply ml-auto rounded-full bg-error-500 px-2 py-0.5 text-xs font-semibold text-white; }
+  .form-section { @apply -mb-1 border-t border-gray-100 pt-5 first:border-0 first:pt-0 dark:border-gray-800; }
+  .form-section h2 { @apply text-base font-semibold text-gray-800 dark:text-white/90; }
+  .form-section .help { @apply mt-1; }
+  .checkbox-group { @apply m-0 flex flex-wrap gap-x-5 gap-y-2 border-0 p-0; }
+  .checkbox-group legend { @apply mb-2 text-sm font-medium text-gray-700 dark:text-gray-400; }
+  label.check { @apply flex! flex-row! items-center gap-2 text-sm font-normal text-gray-700 dark:text-gray-300; }
+  .details dt.details-section { @apply col-span-full mt-4 border-t border-gray-100 pt-4 text-xs font-medium tracking-wide text-gray-400 uppercase dark:border-gray-800; }
+  .details dd.details-section { @apply hidden; }
+  .key-contact { @apply mb-4 text-theme-sm last:mb-0; }
+  .address { @apply mb-3 text-theme-sm text-gray-800 dark:text-white/90; }
+  .dropdown { @apply relative; }
+  .dropdown > summary { @apply list-none cursor-pointer; }
+  .dropdown > summary::-webkit-details-marker { display: none; }
+  .dropdown-panel { @apply absolute right-0 z-40 mt-2 mb-0 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-6 shadow-theme-lg; }
+  .dropdown-panel h3 { @apply text-base font-semibold text-gray-800 dark:text-white/90; }
+  .btn-danger-ghost { @apply text-error-600 dark:text-error-500; }
+  .table-compact td, .table-compact th { @apply px-3! py-1.5! text-theme-xs; }
+  .changes { @apply mt-1; }
+  .changes summary { @apply cursor-pointer text-theme-xs text-brand-500; }
+  .changes-table { @apply mt-2 w-full; }
+  .perm-table th, .perm-table td { @apply text-center; }
+  .perm-table th:first-child, .perm-table td:first-child { @apply text-left; }
+  .perm-group td { @apply bg-gray-50 text-xs font-medium tracking-wide text-gray-500 uppercase dark:bg-white/[0.02]; }
+  .filter-grid { @apply grid grid-cols-1 gap-4 md:grid-cols-2; }
+  .filter-grid select[multiple] { @apply h-36 w-full; }
+  .email-preview { @apply h-[560px] w-full rounded-xl border border-gray-200 bg-white dark:border-gray-800; }
+  .progress { @apply h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800; }
+  .progress > span { @apply block h-full bg-brand-500; }
+  .choice-cards { @apply grid grid-cols-1 gap-3 sm:grid-cols-2; }
+  .choice-cards label { @apply flex! cursor-pointer flex-row! items-start gap-3 rounded-xl border border-gray-200 p-4 font-normal has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:border-gray-800 dark:has-[:checked]:bg-brand-500/10; }
+  .choice-cards label > span { @apply min-w-0 flex-1; }
+  .choice-cards b { @apply block text-gray-800 dark:text-white/90; }
 }

@@ -50,15 +50,16 @@ function current_user(bool $refresh = false): ?array
         $id = $_SESSION['user_id'] ?? null;
         $user = $id ? db_one('SELECT id, name, email, role, totp_enabled FROM users WHERE id = ? AND active = 1', [$id]) : null;
         if ($id) {
-            $_SESSION['is_admin'] = ($user['role'] ?? null) === 'admin';
+            $_SESSION['is_admin'] = in_array($user['role'] ?? null, ['admin', 'super_admin'], true);
         }
     }
     return $user;
 }
 
+/** Admins and super admins (see permissions.php for finer-grained checks). */
 function is_admin(): bool
 {
-    return (current_user()['role'] ?? null) === 'admin';
+    return in_array(current_user()['role'] ?? null, ['admin', 'super_admin'], true);
 }
 
 function require_login(): array
@@ -151,7 +152,7 @@ function complete_login(int $userId, string $email): void
     $_SESSION['login_time'] = $_SESSION['last_activity'] = time();
     record_login_attempt($email, true);
     db_exec('UPDATE users SET last_login_at = NOW() WHERE id = ?', [$userId]);
-    $_SESSION['is_admin'] = db_value('SELECT role FROM users WHERE id = ?', [$userId]) === 'admin';
+    $_SESSION['is_admin'] = in_array(db_value('SELECT role FROM users WHERE id = ?', [$userId]), ['admin', 'super_admin'], true);
     audit('login', 'Signed in', 'users', $userId, $userId);
 }
 

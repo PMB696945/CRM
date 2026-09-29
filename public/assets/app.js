@@ -128,3 +128,33 @@ document.querySelectorAll('[data-qr]').forEach((el) => {
   qr.make();
   el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
 });
+
+// Fields shown only when another field has a value, e.g. data-show-if="billing_same=0".
+document.querySelectorAll('[data-show-if]').forEach((field) => {
+  const [name, want] = field.dataset.showIf.split('=');
+  const form = field.closest('form');
+  const input = form && form.querySelector(`[name="${name}"]:not([type=hidden])`);
+  if (!input) return;
+  const value = () => (input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value);
+  const update = () => { field.hidden = value() !== want; };
+  input.addEventListener('change', update);
+  update();
+});
+
+// Sections that apply to one choice of a radio group: <div data-when="kind=marketing">.
+document.querySelectorAll('[data-when]').forEach((el) => {
+  const [name, want] = el.dataset.when.split('=');
+  const form = el.closest('form');
+  if (!form) return;
+  const update = () => {
+    const checked = form.querySelector(`[name="${name}"]:checked`);
+    el.hidden = !checked || checked.value !== want;
+  };
+  form.addEventListener('change', update);
+  update();
+});
+
+// Keep sending in batches: forms marked data-auto-continue submit themselves.
+document.querySelectorAll('form[data-auto-continue]').forEach((form) => {
+  setTimeout(() => form.submit(), 1500);
+});

@@ -60,10 +60,10 @@ function create_admin(string $name, string $email, string $password): bool
     $hash = password_hash($password, PASSWORD_DEFAULT);
     $existing = db_value('SELECT id FROM users WHERE email = ?', [$email]);
     if ($existing) {
-        db_exec("UPDATE users SET password_hash = ?, role = 'admin', active = 1 WHERE id = ?", [$hash, $existing]);
+        db_exec("UPDATE users SET password_hash = ?, role = 'super_admin', active = 1 WHERE id = ?", [$hash, $existing]);
         return false;
     }
-    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'admin')", [$name, $email, $hash]);
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'super_admin')", [$name, $email, $hash]);
     return true;
 }
 

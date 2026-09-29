@@ -29,7 +29,7 @@ function mail_address(string $email, string $name = ''): string
 }
 
 /** Build the full MIME message (headers + body) as used by both transports. */
-function mail_build(string $to, string $toName, string $subject, string $html, ?string $text = null): array
+function mail_build(string $to, string $toName, string $subject, string $html, ?string $text = null, array $extraHeaders = []): array
 {
     $from = (string)setting('mail_from_email');
     $fromName = (string)(setting('mail_from_name') ?: company('name', config('app_name')));
@@ -49,6 +49,9 @@ function mail_build(string $to, string $toName, string $subject, string $html, ?
     if ($replyTo = setting('mail_reply_to')) {
         $headers[] = 'Reply-To: ' . $replyTo;
     }
+    foreach ($extraHeaders as $name => $value) {
+        $headers[] = $name . ': ' . str_replace(["\r", "\n"], '', (string)$value);
+    }
     $body = "--$boundary\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
         . chunk_split(base64_encode($text))
         . "--$boundary\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
@@ -58,7 +61,7 @@ function mail_build(string $to, string $toName, string $subject, string $html, ?
 }
 
 /** Send an email. Throws IntegrationException with a readable reason on failure. */
-function send_mail(string $to, string $toName, string $subject, string $html, ?string $text = null): void
+function send_mail(string $to, string $toName, string $subject, string $html, ?string $text = null, array $headers = []): void
 {
     if (!mail_configured()) {
         throw new IntegrationException('Email isn\'t set up yet. An admin can add it under Settings → Email.');
@@ -66,7 +69,11 @@ function send_mail(string $to, string $toName, string $subject, string $html, ?s
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
         throw new IntegrationException("\"$to\" isn't a valid email address.");
     }
-    [$headers, $body] = mail_build($to, $toName, $subject, $html, $text);
+    if (setting('mail_transport') === 'mandrill') {
+        mandrill_send($to, $toName, $subject, $html, $text, $headers);
+        return;
+    }
+    [$headers, $body] = mail_build($to, $toName, $subject, $html, $text, $headers);
 
     if (setting('mail_transport') === 'smtp') {
         smtp_send((string)setting('mail_from_email'), $to, implode("\r\n", $headers) . "\r\n\r\n" . $body);
@@ -77,6 +84,38 @@ function send_mail(string $to, string $toName, string $subject, string $html, ?s
     $ok = @mail(mail_address($to, $toName), mail_encode_header($subject), $body, implode("\r\n", $extra), '-f' . setting('mail_from_email'));
     if (!$ok) {
         throw new IntegrationException('The server\'s mail() function refused the message. Try SMTP under Settings → Email.');
+    }
+}
+
+/** Send through Mailchimp Transactional (formerly Mandrill). */
+function mandrill_send(string $to, string $toName, string $subject, string $html, ?string $text, array $headers): void
+{
+    $key = (string)setting('mandrill_api_key');
+    if ($key === '') {
+        throw new IntegrationException('Add your Mailchimp Transactional API key under Settings → Email.');
+    }
+    if ($replyTo = setting('mail_reply_to')) {
+        $headers['Reply-To'] = $replyTo;
+    }
+    $payload = ['key' => $key, 'message' => array_filter([
+        'html'       => $html,
+        'text'       => $text,
+        'subject'    => $subject,
+        'from_email' => (string)setting('mail_from_email'),
+        'from_name'  => (string)(setting('mail_from_name') ?: company('name', config('app_name'))),
+        'to'         => [['email' => $to, 'name' => $toName, 'type' => 'to']],
+        'headers'    => $headers ?: null,
+        'track_opens' => true,
+        'track_clicks' => false,
+    ], fn($v) => $v !== null)];
+    [$status, $body] = http_request('POST', config('mandrill_url') ?? 'https://mandrillapp.com/api/1.0/messages/send.json',
+        ['Content-Type: application/json'], json_encode($payload));
+    if ($status !== 200 || !is_array($body) || !isset($body[0]['status'])) {
+        $message = is_array($body) ? ($body['message'] ?? json_encode($body)) : substr((string)$body, 0, 200);
+        throw new IntegrationException("Mailchimp Transactional refused the message ($status): $message");
+    }
+    if (!in_array($body[0]['status'], ['sent', 'queued', 'scheduled'], true)) {
+        throw new IntegrationException('Mailchimp Transactional did not send to ' . $to . ': ' . ($body[0]['reject_reason'] ?? $body[0]['status']));
     }
 }
 

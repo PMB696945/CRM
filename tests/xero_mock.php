@@ -115,6 +115,13 @@ $past = date('Y-m-d', strtotime('-20 days'));
 $older = date('Y-m-d', strtotime('-45 days'));
 $future = date('Y-m-d', strtotime('+10 days'));
 
+if (preg_match('#^/api.xro/2.0/Contacts/([0-9a-f-]{36})$#', $path, $m) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $body = json_decode(file_get_contents('php://input'), true);
+    $state['pushed'][] = $body['Contacts'][0] ?? null;
+    save($state);
+    json_out(200, ['Contacts' => [$body['Contacts'][0] + ['ContactID' => $m[1]]]]);
+}
+
 if ($path === '/api.xro/2.0/Contacts') {
     $contacts = [
         ['ContactID' => 'c1000000-0000-0000-0000-000000000001', 'Name' => 'Harbour View Dental Ltd', 'EmailAddress' => 'accounts@harbour.example.co.uk', 'ContactStatus' => 'ACTIVE'],

@@ -6,6 +6,7 @@ $nav = [
         'dashboard'     => ['dashboard', 'Dashboard'],
         'accounts'      => ['building', 'Customers'],
         'contacts'      => ['user', 'Contacts'],
+        'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
         'tickets'       => ['ticket', 'Support tickets'],
     ],
@@ -18,16 +19,24 @@ $nav = [
         'products'      => ['cube', 'Products & tariffs'],
     ],
 ];
-if (is_admin()) {
-    $nav['Admin'] = [
-        'settings'   => ['cog', 'Settings'],
-        'users'      => ['key', 'Users'],
-        'contract_templates' => ['template', 'Contract templates'],
-        'signable'   => ['signature', 'Signable'],
-        'audit'      => ['clipboard', 'Audit log'],
-        'xero'       => ['link', 'Xero'],
-        'gocardless' => ['bank', 'GoCardless'],
-    ];
+if (can('marketing.send')) {
+    $nav['Marketing'] = ['campaigns' => ['megaphone', 'Alerts & marketing']];
+}
+$pendingApprovals = can('approvals.decide') ? pending_approvals_count() : 0;
+$admin = array_filter([
+    'approvals'  => can('approvals.decide') ? ['check', 'Approvals'] : null,
+    'settings'   => can('settings.manage') ? ['cog', 'Settings'] : null,
+    'users'      => can('users.manage') ? ['key', 'Users'] : null,
+    'roles'      => is_super_admin() ? ['shield', 'Roles & permissions'] : null,
+    'audit'      => can('audit.view') ? ['clipboard', 'Audit trail'] : null,
+    'contract_templates' => can('settings.manage') ? ['template', 'Contract templates'] : null,
+    'signable'   => can('settings.manage') ? ['signature', 'Signable'] : null,
+    'xero'       => can('settings.manage') ? ['link', 'Xero'] : null,
+    'gocardless' => can('settings.manage') ? ['bank', 'GoCardless'] : null,
+    'mailchimp'  => can('settings.manage') ? ['megaphone', 'Mailchimp'] : null,
+]);
+if ($admin) {
+    $nav['Admin'] = $admin;
 }
 $flash = flash();
 ?><!doctype html>
@@ -49,7 +58,7 @@ $flash = flash();
         <h3 class="menu-group-title"><?= h($group) ?></h3>
         <div class="menu">
           <?php foreach ($items as $key => [$ico, $label]): ?>
-            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?></a>
+            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?></a>
           <?php endforeach; ?>
         </div>
       <?php endforeach; ?>
@@ -72,8 +81,8 @@ $flash = flash();
       </form>
       <div class="quick-add">
         <button type="button" class="icon-btn round theme-toggle" data-theme-toggle aria-label="Toggle dark mode" title="Toggle dark mode"><?= icon('moon', 'icon-moon') ?><?= icon('sun', 'icon-sun') ?></button>
-        <a class="btn hidden sm:inline-flex" href="<?= h(url('tickets', ['action' => 'new'])) ?>"><?= icon('plus', 'size-4') ?>Ticket</a>
-        <a class="btn btn-primary" href="<?= h(url('accounts', ['action' => 'new'])) ?>"><?= icon('plus', 'size-4') ?><span class="hidden sm:inline">Customer</span></a>
+        <a class="btn hidden <?= can('tickets.edit') ? 'sm:inline-flex' : '' ?>" href="<?= h(url('tickets', ['action' => 'new'])) ?>"><?= icon('plus', 'size-4') ?>Ticket</a>
+        <?php if (can('customers.edit')): ?><a class="btn btn-primary" href="<?= h(url('accounts', ['action' => 'new'])) ?>"><?= icon('plus', 'size-4') ?><span class="hidden sm:inline">Customer</span></a><?php endif; ?>
       </div>
     </header>
     <main class="content">

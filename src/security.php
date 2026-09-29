@@ -11,7 +11,7 @@ declare(strict_types=1);
 /** Settings that hold credentials; stored encrypted in the database. */
 const SECRET_SETTINGS = [
     'xero_client_secret', 'xero_access_token', 'xero_refresh_token',
-    'gocardless_access_token', 'signable_api_key', 'signable_webhook_secret', 'smtp_password',
+    'gocardless_access_token', 'signable_api_key', 'signable_webhook_secret', 'smtp_password', 'mailchimp_api_key', 'mandrill_api_key',
 ];
 
 /**
@@ -104,11 +104,30 @@ function record_login_attempt(string $email, bool $success): void
 
 /* -------------------------------------------------------------- Audit log --- */
 
-function audit(string $action, string $summary = '', ?string $entity = null, ?int $entityId = null, ?int $userId = null): void
+/** Tables whose rows belong to a customer, so audit entries can be shown on the customer's page. */
+const AUDIT_ACCOUNT_TABLES = ['contacts', 'sites', 'services', 'tickets', 'opportunities', 'activities', 'quotes', 'contracts', 'approval_requests'];
+
+/**
+ * Record who did what. $changes is [field => ['from' => old, 'to' => new]] (or any
+ * small array of details). The log is append-only: nothing in the CRM edits or deletes it.
+ */
+function audit(string $action, string $summary = '', ?string $entity = null, ?int $entityId = null, ?int $userId = null, ?array $changes = null, ?int $accountId = null): void
 {
+    $GLOBALS['audit_written'] = true;
     try {
-        db_exec('INSERT INTO audit_log (user_id, action, entity, entity_id, summary, ip) VALUES (?, ?, ?, ?, ?, ?)', [
-            $userId ?? (current_user()['id'] ?? null), $action, $entity, $entityId, mb_substr($summary, 0, 500), client_ip(),
+        if ($accountId === null && $entityId) {
+            if ($entity === 'accounts') {
+                $accountId = $entityId;
+            } elseif (in_array($entity, AUDIT_ACCOUNT_TABLES, true)) {
+                $accountId = ($v = db_value("SELECT account_id FROM $entity WHERE id = ?", [$entityId])) ? (int)$v : null;
+            }
+        }
+        $json = $changes ? json_encode($changes, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) : null;
+        if ($json !== null && strlen($json) > 60000) {
+            $json = json_encode(['note' => 'Too many changes to record in full.']);
+        }
+        db_exec('INSERT INTO audit_log (user_id, action, entity, entity_id, account_id, summary, changes, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+            $userId ?? (current_user()['id'] ?? null), $action, $entity, $entityId, $accountId, mb_substr($summary, 0, 500), $json, client_ip(),
         ]);
     } catch (PDOException $e) {
         error_log('Audit log write failed: ' . $e->getMessage()); // never block the action itself

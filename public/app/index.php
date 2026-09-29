@@ -46,6 +46,15 @@ if ($page === 'logout') {
 
 require_login();
 
+// Safety net for the audit trail: record any change (POST) that wasn't logged in more detail.
+register_shutdown_function(function () use ($page): void {
+    if (is_post() && empty($GLOBALS['audit_written']) && http_response_code() < 400 && !in_array($page, ['refs', 'logout'], true)) {
+        $action = query('action');
+        audit('action', 'Submitted ' . humanize($page) . ($action !== '' ? ' → ' . humanize($action) : '') . (query_int('id') ? ' #' . query_int('id') : ''),
+            entity($page) ? $page : null, query_int('id'));
+    }
+});
+
 // Two-factor sign-in required but not set up yet: only the profile page is available.
 if (must_set_up_2fa() && !in_array($page, ['profile', 'logout'], true)) {
     flash('Your administrator requires two-factor sign-in. Please set it up to continue.', 'error');
@@ -67,6 +76,10 @@ match (true) {
     $page === 'settings'  => settings_controller(),
     $page === 'signable'  => signable_controller(),
     $page === 'audit'     => audit_controller(),
+    $page === 'roles'     => roles_controller(),
+    $page === 'approvals' => approvals_controller(),
+    $page === 'campaigns' => campaigns_controller(),
+    $page === 'mailchimp' => mailchimp_controller(),
     entity($page) !== null => entity_controller($page),
     default               => not_found(),
 };

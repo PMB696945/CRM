@@ -17,7 +17,7 @@ function seed_demo_data(): void
     foreach ([['Sarah Mitchell', 'sarah@example.com'], ['James Patel', 'james@example.com'], ['Emma Clarke', 'emma@example.com']] as [$name, $email]) {
         $id = db_value('SELECT id FROM users WHERE email = ?', [$email]);
         if (!$id) {
-            db_exec("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'agent')",
+            db_exec("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'staff')",
                 [$name, $email, password_hash(bin2hex(random_bytes(12)), PASSWORD_DEFAULT)]);
             $id = db()->lastInsertId();
         }

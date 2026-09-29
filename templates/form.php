@@ -15,11 +15,21 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
       if (!empty($def['readonly']) || !field_enabled($def)) continue;
       $value = $values[$field] ?? null;
       $err = $errors[$field] ?? null;
-      $wide = in_array($def['type'], ['textarea'], true);
-      $id = 'f_' . $field; ?>
-    <div class="field <?= $wide ? 'wide' : '' ?> <?= $err ? 'has-error' : '' ?> <?= $def['type'] === 'bool' ? 'field-check' : '' ?>">
+      $wide = in_array($def['type'], ['textarea', 'checkboxes'], true);
+      $id = 'f_' . $field;
+      if (!empty($def['section'])): ?>
+    <div class="form-section wide"><h2><?= h($def['section']) ?></h2><?php if (!empty($def['section_help'])): ?><p class="help"><?= h($def['section_help']) ?></p><?php endif; ?></div>
+    <?php endif; ?>
+    <div<?= !empty($def['show_if']) ? ' data-show-if="' . h($def['show_if']) . '"' : '' ?> class="field <?= $wide ? 'wide' : '' ?> <?= $err ? 'has-error' : '' ?> <?= $def['type'] === 'bool' ? 'field-check' : '' ?>">
       <?php if ($def['type'] === 'bool'): ?>
         <label><input type="checkbox" name="<?= h($field) ?>" value="1" <?= $value ? 'checked' : '' ?>> <?= h($def['label']) ?></label>
+      <?php elseif ($def['type'] === 'checkboxes'):
+        $picked = is_array($value) ? $value : array_filter(explode(',', (string)$value)); ?>
+        <fieldset class="checkbox-group"><legend><?= h($def['label']) ?></legend>
+          <?php foreach ($def['options'] as $k => $label): ?>
+            <label class="check"><input type="checkbox" name="<?= h($field) ?>[]" value="<?= h($k) ?>" <?= in_array((string)$k, array_map('strval', $picked), true) ? 'checked' : '' ?>> <?= h($label) ?></label>
+          <?php endforeach; ?>
+        </fieldset>
       <?php else: ?>
         <label for="<?= h($id) ?>"><?= h($def['label']) ?><?= !empty($def['required']) ? ' <span class="req">*</span>' : '' ?></label>
         <?php switch ($def['type']):

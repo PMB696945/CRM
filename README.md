@@ -8,7 +8,10 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 |---|---|
 | **Dashboard** | Active customers, MRR/ARR, open tickets and SLA breaches, weighted pipeline, contracts up for renewal, revenue by service type, your tasks and recent activity |
 | **Customers** | Business and residential accounts with auto-generated account numbers (`ACC-10001`), status (prospect / active / suspended / churned) and an account manager. The customer page shows services, tickets, opportunities, contacts and an activity log in one place |
-| **Contacts** | Multiple contacts per customer, with primary and billing flags |
+| **Head office & address book** | Each customer has a head office address plus an address book of other sites (e.g. installation addresses). Each site can have its own contact, or use the head office main contact. Services record which site they're installed at |
+| **Contacts** | A main contact and an accounts contact (for invoices and statements) are entered right on the customer form. Add as many other contacts as you like. The accounts contact can be sent to Xero so invoices go to the right person |
+| **Marketing preferences** | Per contact: marketing by email, phone, text and post, which topics they want, how permission was given and when it changed, and whether they get service alerts |
+| **Service alerts & marketing** | Email customers by the services they have: service type, carrier, product, site postcode (for local outages), dealer. Preview the exact recipients and the email, send a test, then send. Goes through the CRM's email (in batches) or, for marketing, through Mailchimp. One-click unsubscribe in every email |
 | **Services & lines** | Mobile SIMs (MSISDN), broadband (FTTP/SOGEA), VoIP seats, SIP trunks, hosted PBX, leased lines, Ethernet and hardware. Each one records its carrier (EE, Vodafone, O2, Openreach, CityFibre, BT Wholesale, Gamma, Colt…), price, contract start, term and end date |
 | **Contract renewals** | The contract end date is calculated from start date + term. Contracts ending within 90 days (configurable) or already out of contract are flagged, and "Start renewal" creates a renewal opportunity in one click |
 | **Support tickets** | Tickets get references (`TCK-000001`) and a category (fault / billing / order / porting / cancellation). Priorities P1–P4 have SLA timers, and you can record the carrier fault reference. The update thread supports internal and customer-facing notes and logs status changes |
@@ -21,9 +24,10 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Dealers** | Mark any customer as a dealer and put other customers under it: referred by the dealer, or billed via the dealer, optionally covered by the dealer's master services agreement (MSA). Dealer pages show their customers, the group's combined MRR and commission |
 | **Quotes** | Build quotes from your product catalogue and email them. The customer accepts (name, email and a tick box) or declines on a branded web page. You're emailed when they respond |
 | **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and sent for signature via Signable. The signed PDF is saved, and the services can be added to the customer as pending |
-| **Users** | Admin and agent roles. Only admins manage users and the product catalogue |
+| **Roles & approvals** | Eight roles (super admin, admin, manager, staff, sales, support, finance, read only). A super admin decides what each role can see and do. Staff can ask to close or delete a customer; an approver has to agree before anything happens |
+| **Audit trail** | Who did what and when, with before-and-after values for every change, on one page (filter by person, customer, record, action or date, and export) and on each customer's page |
 
-Security is covered in detail in the **Security** section below. In summary: two-factor sign-in, sign-in lockout, session time-outs, encrypted API keys, an audit log, strict browser security headers, and protection against the common web attacks.
+Security is covered in detail in the **Security** section below. In summary: two-factor sign-in, sign-in lockout, session time-outs, encrypted API keys, a full audit trail, role-based permissions, approval for closing or deleting customers, strict browser security headers, and protection against the common web attacks.
 
 ## Installation
 
@@ -94,18 +98,20 @@ For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM
 - **Sessions:** they end after 60 minutes of inactivity (adjustable) and always after 12 hours.
 - **Passwords:** at least 10 characters, not common words, and not containing your email name. They're stored as bcrypt hashes.
 
-**Permissions**
-- **Admins only:** managing users, settings, integrations, contract templates, the product catalogue, the audit log and **deleting customers**. Deleting a customer removes all of their records.
-- **Staff:** can do everything else.
+**Roles and permissions** (Admin → Roles & permissions, super admins only)
+- **Roles:** everyone has one of eight roles. A tick-box grid sets what each role can do: edit customers, close or delete customers without approval, approve requests, services, tickets, sales, delete records, export, see balances and Direct Debit, products, send alerts/marketing, settings, users, and view the audit trail.
+- **Super admins** can always do everything. Only they can change roles, create or edit other super admins, and (by default) view the audit trail. The person who installed the CRM is a super admin; existing admins became super admins when you upgraded, and agents became **Staff**.
+- **Closing and deleting customers:** people with "Close/Delete without approval" do it straight away. Anyone else who can edit customers gets **Request closure / Request deletion** instead. Approvers (Admin → Approvals, with a count in the menu) see the request, the reason and what it affects, and approve or reject it. They're emailed when a request comes in and the requester is emailed the outcome. You can't approve your own request unless you're a super admin. Staff also can't mark a customer as closed by editing it.
 
 **Data**
 - **Encrypted credentials:** the SMTP password, Xero, GoCardless and Signable credentials are encrypted in the database (AES-256-GCM). Two-factor secrets are too.
 - **The key:** it's in `app.key`, next to `config.php`, created automatically. You can instead set `'app_key' => '…'` in `config.php`. **Back up the key separately from the database**: without it, saved API keys can't be read, and you'd need to enter them again.
 - **Storage:** contracts and templates are kept in `storage/`, and the web can't access that folder, `config.php`, `app.key`, logs or the source code.
 
-**Audit log** (Admin → Audit log)
-- **What it records:** sign-ins, failed sign-ins and lockouts; two-factor changes; creates, edits (with the fields changed) and deletes; CSV exports and contract downloads; quote and contract actions; settings and integration changes.
-- **Integrity:** the CRM itself offers no way to edit or delete entries.
+**Audit trail** (Admin → Audit trail)
+- **What it records:** sign-ins, failed sign-ins and lockouts; two-factor changes; every create, edit and delete, **with the old and new value of each field**; close/delete requests and decisions; ticket updates; emails and campaigns sent; unsubscribes; CSV exports and contract downloads; quote and contract actions; syncs; role, user and settings changes. Anything submitted that isn't covered in more detail is still logged.
+- **Finding things:** filter by person, action, date range or text; open **History** on any record or customer (which includes their contacts, sites, services, tickets, quotes and so on); click a person to see everything they did. Export the results to CSV.
+- **Integrity:** the CRM offers no way to edit or delete entries, and a deleted customer's history is kept.
 
 **Web protections**
 - **Common attacks:** prepared SQL statements, escaped output, and anti-forgery codes (CSRF tokens) on every form.
@@ -219,6 +225,31 @@ Staff can also **Record acceptance** for quotes agreed by phone, **Revise** a se
 
 Generated contracts and templates are stored in `storage/`, which the web can't access. **Include this folder in your backups.**
 
+## Customers: head office, sites and contacts
+
+- **Head office:** address, main phone and company email are on the customer form.
+- **Main contact and accounts contact:** filled in on the customer form too. Tick "Send invoices and statements to the main contact", or untick it and enter a separate accounts contact. Both are saved as ordinary contacts marked **Main** and **Accounts**, so they appear on tickets, quotes and so on. Ticking "Main contact" or "Accounts contact" on a contact moves the role to them.
+- **Address book:** add sites from the customer page (**+ Add site**). Give each site its own contact, or leave it blank to use the head office main contact. When adding a service, choose its **Installation site**.
+- **Telling Xero:** once Xero is connected, the customer page has **Send accounts contact to Xero**. It sets the Xero contact's email (and name) so Xero sends invoices and statements there. To do this automatically whenever the accounts contact changes, switch it on at Admin → Xero → Invoice emails, then press **Reconnect**. Xero will ask to approve permission to update contacts. This is the only thing the CRM ever changes in Xero.
+
+## Service alerts and marketing emails
+
+**Preferences (per contact):** *Service alerts* are on by default; they cover faults, maintenance and outages. *Marketing* is off until you record permission: tick email / phone / text / post, pick topics, and say how permission was given (e.g. existing customer soft opt-in, verbally, web form). The date is recorded and changes are in the audit trail. Set the topics under Settings → Marketing.
+
+**Sending** (Marketing → Alerts & marketing, needs the "send alerts and marketing" permission):
+1. Choose **Service alert** or **Marketing**.
+2. Choose who gets it: live services of a type, carrier or product; site postcodes (e.g. `LS1, LS2` for a local outage, using the installation site or head office); customer status and type; a dealer and their customers. Starting from a customer's page ("Send service alert") limits it to that customer.
+   - For alerts, pick who at each customer: the main contact plus the contact at any affected site (the default), the main contact only, or everyone who gets alerts.
+   - For marketing, pick a topic. Only contacts who opted in to email marketing are included.
+3. Write the message. Personalise with `{{first_name}}` `{{name}}` `{{company}}` `{{account_number}}`, and use `{{services}}` to list each customer's affected services.
+4. **Save and check recipients.** You'll see every recipient, any matching customers nobody will hear from (no contact with an email address), and a preview. **Send me a test**, then **Send**.
+
+Emails go out in batches (50 by default; see Settings → Marketing) while the page is open, and the cron job carries on with the rest. Every email has an unsubscribe link and one-click unsubscribe headers (`List-Unsubscribe`, which Gmail and Yahoo require for bulk senders). Unsubscribing only stops that kind of email: marketing or alerts.
+
+**Mailchimp (optional):** Admin → Mailchimp. Paste an API key (Mailchimp → Profile → Extras → API keys) and choose your audience. Marketing emails can then be sent **through Mailchimp**: the CRM adds the recipients to your audience as subscribed (someone who unsubscribed in Mailchimp is never re-subscribed), puts them in a segment, then creates and sends a Mailchimp campaign. Opens and clicks are in Mailchimp's reports. Unsubscribes in Mailchimp are copied back to the CRM before each send and by the cron job. `{{services}}` can't be used through Mailchimp.
+
+**Service alerts through Mailchimp:** Mailchimp's rules don't allow service messages to be sent as marketing campaigns. Its paid **Transactional** add-on (formerly Mandrill) is designed for them. To use it for all email the CRM sends, choose *Mailchimp Transactional* under Settings → Email and paste its API key.
+
 ## Tests
 
 ```bash
@@ -236,7 +267,11 @@ public/            web root: small entry files (index.php, install.php, …) tha
 src/
   bootstrap.php    config + includes
   db.php           PDO helpers
-  auth.php         sessions, login, roles
+  auth.php         sessions, login
+  permissions.php  roles, permissions and the Roles page
+  approvals.php    close/delete requests and approvals
+  campaigns.php    service alerts and marketing: audiences, sending, unsubscribes
+  mailchimp.php    Mailchimp Marketing API
   entities.php     field definitions + business rules (SLA, contract dates, numbering…)
   repository.php   generic validation, CRUD, listing, formatting
   controllers.php  page handlers
@@ -245,16 +280,16 @@ src/
   quotes.php       quotes: totals, sending, acceptance
   contracts.php    contracts: templates, generation, Signable
   docx.php         Word template merge
-  mailer.php       email (PHP mail or SMTP)
+  mailer.php       email (PHP mail, SMTP or Mailchimp Transactional)
   http.php         shared HTTP client
   matching.php     unambiguous customer matching (used by both integrations)
   settings.php     key/value settings stored in the database
   installer.php    shared install logic (CLI + web)
 templates/         PHP view templates
 install/           schema.sql, migrations.php (upgrades), installer, demo data
-cron/              scheduled jobs (sync.php: Xero, GoCardless, and contracts awaiting signature)
+cron/              scheduled jobs (sync.php: Xero, GoCardless, contracts awaiting signature, Mailchimp unsubscribes, queued emails)
 storage/           uploaded templates and generated/signed contracts (created automatically; not web-accessible)
-tests/             integration tests, with local stand-ins for Xero, GoCardless, Signable and an SMTP server
+tests/             integration tests, with local stand-ins for Xero, GoCardless, Signable, Mailchimp and an SMTP server
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

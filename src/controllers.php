@@ -86,7 +86,7 @@ function dashboard_controller(): void
         ORDER BY t.created_at DESC LIMIT 8");
 
     $debtors = [];
-    if (xero_connected()) {
+    if (xero_connected() && can('finance.view')) {
         $stats['xero_overdue'] = (float)db_value('SELECT COALESCE(SUM(overdue),0) FROM xero_contacts');
         $stats['xero_outstanding'] = (float)db_value('SELECT COALESCE(SUM(GREATEST(outstanding,0)),0) FROM xero_contacts');
         $stats['xero_debtors'] = (int)db_value('SELECT COUNT(*) FROM xero_contacts WHERE overdue > 0');
@@ -95,7 +95,7 @@ function dashboard_controller(): void
             WHERE x.overdue > 0 ORDER BY x.overdue DESC LIMIT 8');
     }
 
-    if (gc_configured()) {
+    if (gc_configured() && can('finance.view')) {
         $stats['no_dd'] = list_rows('accounts', ['preset' => 'no_dd', 'per_page' => 1])['total'];
         $stats['dd_pending'] = (int)db_value("SELECT COUNT(*) FROM accounts a JOIN gocardless_customers g ON g.id = a.gocardless_customer_id
             WHERE a.status = 'active' AND g.mandate_status IN ('submitted','pending_submission','pending_customer_approval')");
@@ -127,7 +127,7 @@ function search_controller(): void
     $q = query('q');
     $results = [];
     if ($q !== '') {
-        foreach (['accounts', 'contacts', 'services', 'tickets', 'opportunities'] as $name) {
+        foreach (['accounts', 'contacts', 'sites', 'services', 'tickets', 'opportunities'] as $name) {
             $found = list_rows($name, ['q' => $q, 'per_page' => 10]);
             if ($found['total'] > 0) {
                 $results[$name] = $found;
@@ -143,7 +143,7 @@ function refs_controller(): void
     $ref = query('ref');
     $accountId = query_int('account_id');
     header('Content-Type: application/json');
-    if (!in_array($ref, ['services', 'contacts', 'opportunities'], true) || !$accountId) {
+    if (!in_array($ref, ['services', 'contacts', 'opportunities', 'sites'], true) || !$accountId) {
         echo json_encode([]);
         return;
     }
@@ -156,14 +156,18 @@ function refs_controller(): void
 
 function users_controller(): void
 {
-    require_admin();
+    require_permission('users.manage');
     $action = query('action', 'list');
     $id = query_int('id');
     $errors = [];
-    $values = ['name' => '', 'email' => '', 'role' => 'agent', 'active' => 1];
+    $values = ['name' => '', 'email' => '', 'role' => 'staff', 'active' => 1];
 
     if ($id) {
         $values = db_one('SELECT id, name, email, role, active FROM users WHERE id = ?', [$id]) ?? not_found();
+        // Only super admins can change super admins.
+        if ($values['role'] === 'super_admin' && !is_super_admin() && $action !== 'list') {
+            forbidden();
+        }
     }
 
     if (in_array($action, ['new', 'edit'], true)) {
@@ -172,7 +176,7 @@ function users_controller(): void
             $values = [
                 'name'   => trim((string)($_POST['name'] ?? '')),
                 'email'  => strtolower(trim((string)($_POST['email'] ?? ''))),
-                'role'   => ($_POST['role'] ?? '') === 'admin' ? 'admin' : 'agent',
+                'role'   => isset(ROLES[$_POST['role'] ?? '']) ? $_POST['role'] : 'staff',
                 'active' => empty($_POST['active']) ? 0 : 1,
             ];
             $password = (string)($_POST['password'] ?? '');
@@ -187,9 +191,13 @@ function users_controller(): void
             if ((!$id || $password !== '') && ($problem = password_problem($password, $values['email']))) {
                 $errors['password'] = $problem;
             }
-            if ($id === (int)current_user()['id'] && ($values['role'] !== 'admin' || !$values['active'])) {
-                $errors['role'] = 'You cannot remove your own admin access.';
+            if ($values['role'] === 'super_admin' && !is_super_admin()) {
+                $errors['role'] = 'Only a super admin can create another super admin.';
             }
+            if ($id === (int)current_user()['id'] && ($values['role'] !== current_user()['role'] || !$values['active'])) {
+                $errors['role'] = 'You cannot change your own role or disable yourself. Ask another super admin.';
+            }
+            $before = $id ? db_one('SELECT name, email, role, active FROM users WHERE id = ?', [$id]) : null;
             if (!$errors) {
                 if ($id) {
                     db_exec('UPDATE users SET name = ?, email = ?, role = ?, active = ? WHERE id = ?',
@@ -201,7 +209,17 @@ function users_controller(): void
                     db_exec('INSERT INTO users (name, email, role, active, password_hash) VALUES (?, ?, ?, ?, ?)',
                         [$values['name'], $values['email'], $values['role'], $values['active'], password_hash($password, PASSWORD_DEFAULT)]);
                 }
-                audit($id ? 'user_update' : 'user_create', 'User ' . $values['email'] . ($id ? ' updated' : ' created') . " (role {$values['role']}, " . ($values['active'] ? 'active' : 'disabled') . ')' . ($password !== '' ? ', password set' : ''), 'users', $id ?: (int)db()->lastInsertId());
+                $userChanges = [];
+                foreach (['name', 'email', 'role', 'active'] as $f) {
+                    if ((string)($before[$f] ?? '') !== (string)$values[$f]) {
+                        $userChanges[$f] = ['from' => (string)($before[$f] ?? ''), 'to' => (string)$values[$f]];
+                    }
+                }
+                if ($password !== '') {
+                    $userChanges['password'] = ['from' => '', 'to' => '(set)'];
+                }
+                audit($id ? 'user_update' : 'user_create', 'User ' . $values['email'] . ($id ? ' updated' : ' created') . ' (' . role_label($values['role']) . ', ' . ($values['active'] ? 'active' : 'disabled') . ')' . ($password !== '' ? ', password set' : ''),
+                    'users', $id ?: (int)db()->lastInsertId(), null, $userChanges ?: null);
                 flash('User saved.');
                 redirect(url('users'));
             }
@@ -212,6 +230,9 @@ function users_controller(): void
 
     if ($action === 'reset_2fa' && is_post() && $id) {
         verify_csrf();
+        if ($values['role'] === 'super_admin' && !is_super_admin()) {
+            forbidden();
+        }
         db_exec('UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = 0, recovery_codes = NULL WHERE id = ?', [$id]);
         audit('2fa_reset', 'Two-factor sign-in reset for ' . $values['email'], 'users', $id);
         flash('Two-factor sign-in reset for ' . $values['name'] . '. They can set it up again from their profile.');
@@ -334,7 +355,7 @@ function entity_controller(string $name): void
     $entity = entity($name);
     $action = query('action', 'list');
     $id = query_int('id');
-    $canWrite = empty($entity['admin_write']) || is_admin();
+    $canWrite = empty($entity['perm']) || can($entity['perm']);
 
     switch ($action) {
         case 'list':
@@ -351,6 +372,7 @@ function entity_controller(string $name): void
                 $opts['filters'][$f] = query($f);
             }
             if ($action === 'export') {
+                require_permission('export');
                 export_csv($name, $entity, $opts);
                 return;
             }
@@ -385,6 +407,9 @@ function entity_controller(string $name): void
                 }
             }
             $values = $existing ?? defaults_for($entity);
+            if ($name === 'accounts' && $existing) {
+                $values += account_contact_values($existing);
+            }
             $errors = [];
             if (is_post()) {
                 verify_csrf();
@@ -394,16 +419,32 @@ function entity_controller(string $name): void
                 $values = $data + $values;
                 if (!$errors) {
                     try {
+                        $before = $existing ? record_snapshot($name, $entity, $id) : [];
                         if ($existing) {
                             update_row($name, $id, $data);
                             $savedId = $id;
-                            $changed = array_keys(array_filter($data, fn($v, $k) => (string)$v !== (string)($existing[$k] ?? ''), ARRAY_FILTER_USE_BOTH));
-                            audit('update', $entity['label'] . ' ' . record_label($entity, $existing) . ' updated' . ($changed ? ': ' . implode(', ', $changed) : ''), $name, $id);
                         } else {
                             $savedId = insert_row($name, $data);
-                            audit('create', $entity['label'] . ' ' . record_label($entity, find($name, $savedId) ?? $data) . ' created', $name, $savedId);
                         }
-                        flash($entity['label'] . ' saved.');
+                        $after = record_snapshot($name, $entity, $savedId);
+                        $changes = [];
+                        foreach ($after as $field => $value) {
+                            if ((string)($before[$field] ?? '') !== (string)$value) {
+                                $changes[$field] = ['from' => $before[$field] ?? '', 'to' => $value];
+                            }
+                        }
+                        $label = $entity['label'] . ' ' . record_label($entity, find($name, $savedId) ?? $data);
+                        audit($existing ? 'update' : 'create', $label . ($existing ? ' updated' . ($changes ? ': ' . implode(', ', array_keys($changes)) : ' (no changes)') : ' created'),
+                            $name, $savedId, null, $changes ?: null);
+                        $message = $entity['label'] . ' saved.';
+                        if ($name === 'accounts' && xero_push_enabled() && (isset($changes['Accounts contact']) || isset($changes['Accounts contact email']))) {
+                            try {
+                                $message .= ' Invoice email in Xero updated to ' . xero_push_billing_contact($savedId) . '.';
+                            } catch (IntegrationException $e) {
+                                $message .= ' Couldn\'t update Xero: ' . $e->getMessage();
+                            }
+                        }
+                        flash($message);
                         redirect(safe_return($_POST['_return'] ?? null, url($name, ['action' => 'view', 'id' => $savedId])));
                     } catch (PDOException $e) {
                         if ($e->errorInfo[1] ?? null) {
@@ -426,13 +467,16 @@ function entity_controller(string $name): void
                 redirect(url($name));
             }
             verify_csrf();
-            // Deleting a customer also deletes all their records, so only admins can.
-            if (!$canWrite || ($name === 'accounts' && !is_admin())) {
+            // Customers are closed/deleted through approvals.php (with approval where needed).
+            if (!$canWrite || $name === 'accounts' || !can('records.delete')) {
                 forbidden();
             }
             if ($id && ($row = find($name, $id))) {
+                $snapshot = record_snapshot($name, $entity, $id);
+                $accountId = isset($row['account_id']) ? (int)$row['account_id'] : null;
                 delete_row($name, $id);
-                audit('delete', $entity['label'] . ' ' . record_label($entity, $row) . ' deleted', $name, $id);
+                audit('delete', $entity['label'] . ' ' . record_label($entity, $row) . ' deleted', $name, $id, null,
+                    array_map(fn($v) => ['from' => $v, 'to' => ''], array_filter($snapshot, fn($v) => $v !== '')), $accountId);
             }
             flash($entity['label'] . ' deleted.');
             redirect(safe_return($_POST['_return'] ?? null, url($name)));
@@ -442,6 +486,7 @@ function entity_controller(string $name): void
                 not_found();
             }
             verify_csrf();
+            require_permission('tickets.edit');
             ticket_comment($id);
             return;
 
@@ -475,6 +520,12 @@ function account_view(array $entity, array $account): void
     $children = $account['is_dealer'] ? list_rows('accounts', ['filters' => ['parent_id' => $id], 'per_page' => 0, 'sort' => 'name'])['rows'] : [];
     $quotes = list_rows('quotes', ['filters' => ['account_id' => $id], 'per_page' => 10, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
     $contracts = list_rows('contracts', ['filters' => ['account_id' => $id], 'per_page' => 10, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
+    $sites = list_rows('sites', ['filters' => ['account_id' => $id], 'per_page' => 0, 'sort' => 'name'])['rows'];
+    $mainContact = $account['main_contact_id'] ? db_one('SELECT * FROM contacts WHERE id = ?', [$account['main_contact_id']]) : null;
+    $billingContact = $account['billing_contact_id'] ? db_one('SELECT * FROM contacts WHERE id = ?', [$account['billing_contact_id']]) : null;
+    $pendingRequest = pending_request_for($id);
+    $history = can('audit.view') ? db_all('SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
+        WHERE a.account_id = ? ORDER BY a.id DESC LIMIT 15', [$id]) : [];
 
     $mrr = 0.0;
     $activeCount = 0;
@@ -486,19 +537,20 @@ function account_view(array $entity, array $account): void
     }
     $openTickets = count(array_filter($tickets, fn($t) => !in_array($t['status'], ['resolved', 'closed'], true)));
 
-    $xero = (xero_connected() && $account['xero_contact_id'])
+    $xero = (xero_connected() && can('finance.view') && $account['xero_contact_id'])
         ? db_one('SELECT * FROM xero_contacts WHERE id = ?', [$account['xero_contact_id']])
         : null;
 
     $dd = null;
-    if (gc_configured()) {
+    if (gc_configured() && can('finance.view')) {
         $dd = [
             'customer' => $account['gocardless_customer_id'] ? db_one('SELECT * FROM gocardless_customers WHERE id = ?', [$account['gocardless_customer_id']]) : null,
             'link'     => gc_open_setup_link($id),
         ];
     }
 
-    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts'), $account['name']);
+    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
+        'sites', 'mainContact', 'billingContact', 'pendingRequest', 'history'), $account['name']);
 }
 
 function ticket_view(array $entity, array $ticket): void
@@ -527,6 +579,8 @@ function ticket_comment(int $id): void
     } else {
         db_exec('UPDATE tickets SET updated_at = NOW() WHERE id = ?', [$id]);
     }
+    audit('ticket_update', "Ticket {$ticket['reference']}: " . ($body !== '' ? (empty($_POST['is_internal']) ? 'customer-visible' : 'internal') . ' note added' : 'updated')
+        . ($status !== '' && $status !== $ticket['status'] && isset($statuses[$status]) ? ', status ' . humanize($ticket['status']) . ' → ' . humanize($status) : ''), 'tickets', $id);
     flash($body !== '' ? 'Update added.' : 'Ticket updated.');
     redirect(url('tickets', ['action' => 'view', 'id' => $id]));
 }
@@ -567,8 +621,10 @@ function xero_controller(): void
             redirect(url('xero'));
         }
         verify_csrf();
+        require_permission('finance.view');
         try {
             $s = xero_sync();
+            audit('sync', 'Xero sync run');
             flash(sprintf('Xero sync complete: %d contacts, %d unpaid invoices, %d customers newly linked.', $s['contacts'], $s['invoices'], $s['linked']));
         } catch (XeroException | PDOException $e) {
             flash('Xero sync failed: ' . $e->getMessage(), 'error');
@@ -576,11 +632,38 @@ function xero_controller(): void
         redirect(safe_return($_POST['_return'] ?? null, url('xero')));
     }
 
-    require_admin();
+    if ($action === 'push') {
+        if (!is_post()) {
+            redirect(url('xero'));
+        }
+        verify_csrf();
+        require_permission('customers.edit');
+        $accountId = query_int('id') ?? 0;
+        try {
+            flash('Xero will now send invoices and statements to ' . xero_push_billing_contact($accountId) . '.');
+        } catch (IntegrationException $e) {
+            flash($e->getMessage(), 'error');
+        }
+        redirect(url('accounts', ['action' => 'view', 'id' => $accountId]));
+    }
+
+    require_permission('settings.manage');
 
     if (is_post()) {
         verify_csrf();
         switch ($action) {
+            case 'push_setting':
+                $on = !empty($_POST['push_contacts']);
+                $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
+                $newScopes = $on ? xero_write_scopes($scopes) : $scopes;
+                set_setting('xero_push_contacts', $on ? '1' : null);
+                set_setting('xero_scopes', $newScopes === XERO_DEFAULT_SCOPES ? null : $newScopes);
+                audit('settings', 'Xero: update invoice email from the CRM ' . ($on ? 'on' : 'off'));
+                flash($on && $newScopes !== $scopes
+                    ? 'Saved. Press Reconnect so Xero can grant the CRM permission to update contacts.'
+                    : 'Saved.');
+                break;
+
             case 'credentials':
                 $clientId = trim((string)($_POST['client_id'] ?? ''));
                 $secret = trim((string)($_POST['client_secret'] ?? ''));
@@ -663,10 +746,12 @@ function gocardless_controller(): void
             redirect(url('gocardless'));
         }
         verify_csrf();
+        require_permission('finance.view');
         $back = $accountId ? url('accounts', ['action' => 'view', 'id' => $accountId]) : url('gocardless');
         try {
             if ($action === 'sync') {
                 $s = gc_sync();
+                audit('sync', 'GoCardless sync run');
                 flash(sprintf('GoCardless sync complete: %d customers, %d with an active mandate, %d newly linked.', $s['customers'], $s['active'], $s['linked']));
             } else {
                 $account = $accountId ? db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]) : null;
@@ -675,6 +760,7 @@ function gocardless_controller(): void
                 }
                 if ($action === 'link') {
                     gc_create_setup_link($account);
+                    audit('dd_link', 'Direct Debit setup link created', 'accounts', $accountId);
                     flash('Direct Debit setup link created. Copy it or email it to the customer; it expires in 7 days.');
                 } else {
                     gc_refresh_account($accountId);
@@ -687,7 +773,7 @@ function gocardless_controller(): void
         redirect(safe_return($_POST['_return'] ?? null, $back));
     }
 
-    require_admin();
+    require_permission('settings.manage');
 
     if (is_post()) {
         verify_csrf();
@@ -739,10 +825,39 @@ function gocardless_controller(): void
 }
 
 
+/**
+ * Field values of a record as people read them (labels, not IDs), keyed by field
+ * label, for before/after comparisons in the audit trail.
+ */
+function record_snapshot(string $name, array $entity, int $id): array
+{
+    $row = find($name, $id);
+    if (!$row) {
+        return [];
+    }
+    $out = [];
+    foreach ($entity['fields'] as $field => $def) {
+        if (!empty($def['virtual']) || in_array($field, ['created_at', 'updated_at'], true)) {
+            continue;
+        }
+        $out[$def['label']] = mb_substr(export_value($entity, $field, $row), 0, 300);
+    }
+    if ($name === 'accounts') {
+        // The main and accounts contacts live on the contacts table; include their details.
+        foreach (['main_contact_id' => 'Main contact', 'billing_contact_id' => 'Accounts contact'] as $column => $label) {
+            $c = $row[$column] ? db_one('SELECT name, email, phone FROM contacts WHERE id = ?', [$row[$column]]) : null;
+            $out[$label] = (string)($c['name'] ?? '');
+            $out[$label . ' email'] = (string)($c['email'] ?? '');
+            $out[$label . ' phone'] = (string)($c['phone'] ?? '');
+        }
+    }
+    return $out;
+}
+
 /** A short human label for a record, for the audit log. */
 function record_label(array $entity, array $row): string
 {
-    foreach (['reference', 'account_number', 'name', 'title', 'identifier', 'subject', 'sku'] as $f) {
+    foreach (['reference', 'name', 'title', 'identifier', 'subject', 'sku', 'account_number'] as $f) {
         if (!empty($row[$f])) {
             return '"' . mb_substr((string)$row[$f], 0, 80) . '"';
         }
@@ -753,7 +868,7 @@ function record_label(array $entity, array $row): string
 
 function audit_controller(): void
 {
-    require_admin();
+    require_permission('audit.view');
     $where = [];
     $params = [];
     if ($u = query_int('user_id')) {
@@ -763,6 +878,26 @@ function audit_controller(): void
     if (($action = query('action_type')) !== '') {
         $where[] = 'a.action LIKE ?';
         $params[] = addcslashes($action, '%_\\') . '%';
+    }
+    if (($entity = query('entity')) !== '') {
+        $where[] = 'a.entity = ?';
+        $params[] = $entity;
+        if ($eid = query_int('entity_id')) {
+            $where[] = 'a.entity_id = ?';
+            $params[] = $eid;
+        }
+    }
+    if ($acc = query_int('account_id')) {
+        $where[] = 'a.account_id = ?';
+        $params[] = $acc;
+    }
+    if (($from = query('from')) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+        $where[] = 'a.created_at >= ?';
+        $params[] = $from . ' 00:00:00';
+    }
+    if (($to = query('to')) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+        $where[] = 'a.created_at <= ?';
+        $params[] = $to . ' 23:59:59';
     }
     if (($q = query('q')) !== '') {
         $where[] = '(a.summary LIKE ? OR a.ip LIKE ?)';
@@ -774,5 +909,47 @@ function audit_controller(): void
     $page = max(1, query_int('p') ?? 1);
     $rows = db_all('SELECT a.*, u.name AS user_name' . $sql . ' ORDER BY a.id DESC LIMIT 50 OFFSET ' . (($page - 1) * 50), $params);
     $actions = array_column(db_all('SELECT DISTINCT action FROM audit_log ORDER BY action'), 'action');
-    page('audit', compact('rows', 'total', 'page', 'actions'), 'Audit log');
+    $users = db_all('SELECT id, name FROM users ORDER BY name');
+    $accountName = $acc ? db_value('SELECT name FROM accounts WHERE id = ?', [$acc]) : null;
+    if (query('export') === '1') {
+        audit('export', 'Audit trail exported to CSV');
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="audit-' . date('Y-m-d') . '.csv"');
+        $out = fopen('php://output', 'w');
+        fwrite($out, "\xEF\xBB\xBF");
+        fputcsv($out, ['When', 'Who', 'Action', 'Record', 'Summary', 'Changes', 'IP'], escape: '');
+        foreach (db_all('SELECT a.*, u.name AS user_name' . $sql . ' ORDER BY a.id DESC LIMIT 50000', $params) as $r) {
+            fputcsv($out, array_map('csv_safe', [$r['created_at'], (string)($r['user_name'] ?? 'System'), $r['action'],
+                trim(($r['entity'] ?? '') . ' ' . ($r['entity_id'] ?? '')), (string)$r['summary'], audit_changes_text($r['changes']), (string)$r['ip']]), escape: '');
+        }
+        fclose($out);
+        return;
+    }
+    page('audit', compact('rows', 'total', 'page', 'actions', 'users', 'accountName'), 'Audit trail');
+}
+
+
+/** Decoded audit changes as [[field, from, to], ...]. */
+function audit_changes(?string $json): array
+{
+    $data = json_decode((string)$json, true);
+    if (!is_array($data)) {
+        return [];
+    }
+    $out = [];
+    foreach ($data as $field => $v) {
+        if (is_array($v) && (array_key_exists('from', $v) || array_key_exists('to', $v))) {
+            $out[] = [(string)$field, (string)($v['from'] ?? ''), (string)($v['to'] ?? '')];
+        } elseif (is_array($v)) {
+            $out[] = [(string)$field, '', implode('; ', array_map(fn($k, $x) => "$k: " . (is_scalar($x) ? $x : json_encode($x)), array_keys($v), $v))];
+        } else {
+            $out[] = [(string)$field, '', (string)$v];
+        }
+    }
+    return $out;
+}
+
+function audit_changes_text(?string $json): string
+{
+    return implode("\n", array_map(fn($c) => $c[0] . ': ' . ($c[1] === '' ? '' : $c[1] . ' → ') . $c[2], audit_changes($json)));
 }
