@@ -18,7 +18,7 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
   </div>
   <div class="actions">
     <a class="btn" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a>
-    <?php render('_delete', ['name' => 'accounts', 'id' => $id, 'label' => 'customer and all its records']); ?>
+    <?php if (is_admin()) render('_delete', ['name' => 'accounts', 'id' => $id, 'label' => 'customer and all its records']); ?>
   </div>
 </div>
 

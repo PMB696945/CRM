@@ -13,8 +13,7 @@ declare(strict_types=1);
 require (require dirname(__DIR__) . '/app_root.php') . '/src/bootstrap.php';
 require APP_ROOT . '/src/installer.php';
 
-header('X-Frame-Options: DENY');
-header('X-Content-Type-Options: nosniff');
+security_headers();
 start_session();
 
 $configFile = APP_ROOT . '/config.php';
@@ -23,8 +22,33 @@ $errors = [];
 $notice = null;
 $manualConfig = null;
 
-if ($hasConfig && is_installed()) {
+// Until the CRM is installed, the installer asks for a setup code saved in a file
+// that only someone with access to the hosting account can read.
+$codeFile = APP_ROOT . '/install/setup-code.txt';
+$installed = $hasConfig && is_installed();
+if (!$installed && empty($_SESSION['install_verified'])) {
+    if (!is_file($codeFile)) {
+        @file_put_contents($codeFile, strtoupper(bin2hex(random_bytes(4))) . "\n");
+    }
+    $expected = is_file($codeFile) ? strtoupper(trim((string)file_get_contents($codeFile))) : '';
+    if (is_post() && isset($_POST['setup_code'])) {
+        verify_csrf();
+        $given = strtoupper(trim((string)$_POST['setup_code']));
+        if (strlen($expected) >= 6 && hash_equals($expected, $given)) {
+            session_regenerate_id(true);
+            $_SESSION['install_verified'] = true;
+            redirect('install.php');
+        }
+        usleep(500000); // slow down guessing
+        $errors[] = 'That setup code isn\'t right.';
+    }
+}
+
+if ($installed) {
     $step = 'done';
+    @unlink($codeFile);
+} elseif (empty($_SESSION['install_verified'])) {
+    $step = 'code';
 } elseif (!$hasConfig) {
     $step = 'database';
     $db = [
@@ -95,6 +119,8 @@ if ($hasConfig && is_installed()) {
                 seed_demo_data();
                 ob_end_clean();
             }
+            @unlink($codeFile);
+            unset($_SESSION['install_verified']);
             $_SESSION['flash'] = ['message' => 'Installation complete. Sign in with the account you just created.', 'type' => 'success'];
             redirect(url('login'));
         }
@@ -117,7 +143,13 @@ if ($hasConfig && is_installed()) {
   <?php foreach ($errors as $error): ?><div class="flash flash-error"><?= h($error) ?></div><?php endforeach; ?>
   <?= csrf_field() ?>
 
-  <?php if ($step === 'done'): ?>
+  <?php if ($step === 'code'): ?>
+    <p class="muted">To prove you own this website, enter the setup code. In your hosting control panel, open <b>File Manager</b>, go to the CRM folder, then <code>install/setup-code.txt</code>, and copy the code inside.</p>
+    <?php if (!is_file($codeFile)): ?><p class="text-warning">The installer couldn't create that file. Create <code>install/setup-code.txt</code> yourself, containing a code of at least 6 letters or numbers, then enter it here.</p><?php endif; ?>
+    <label>Setup code<input name="setup_code" required autocomplete="off" spellcheck="false" autofocus></label>
+    <button class="btn btn-primary btn-block">Continue</button>
+
+  <?php elseif ($step === 'done'): ?>
     <div class="flash flash-success">The CRM is already installed.</div>
     <p class="muted">For extra safety you can delete <code>public/install.php</code> from your hosting. It is locked and does nothing now.</p>
     <a class="btn btn-primary btn-block" href="<?= h(url('login')) ?>">Go to sign in</a>
@@ -125,7 +157,7 @@ if ($hasConfig && is_installed()) {
   <?php elseif ($step === 'database' && $manualConfig !== null): ?>
     <div class="flash flash-success">Database connection works.</div>
     <p>The installer can't write <code>config.php</code> because the folder isn't writable. Copy the text below into a new file called <code>config.php</code> in the CRM's top folder (next to <code>config.sample.php</code>), then reload this page.</p>
-    <textarea rows="14" readonly class="code" onclick="this.select()"><?= h($manualConfig) ?></textarea>
+    <textarea rows="14" readonly class="code" data-select-all><?= h($manualConfig) ?></textarea>
     <a class="btn btn-primary btn-block" href="install.php">I've uploaded config.php, continue</a>
 
   <?php elseif ($step === 'database'): ?>

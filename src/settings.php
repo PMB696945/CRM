@@ -6,7 +6,11 @@ declare(strict_types=1);
 function setting(string $name, mixed $default = null): mixed
 {
     $all = settings_cache();
-    return array_key_exists($name, $all) ? $all[$name] : $default;
+    if (!array_key_exists($name, $all)) {
+        return $default;
+    }
+    // Credentials are stored encrypted (see security.php).
+    return in_array($name, SECRET_SETTINGS, true) ? (decrypt_secret($all[$name]) ?? $default) : $all[$name];
 }
 
 function set_setting(string $name, ?string $value): void
@@ -14,6 +18,9 @@ function set_setting(string $name, ?string $value): void
     if ($value === null) {
         db_exec('DELETE FROM settings WHERE name = ?', [$name]);
     } else {
+        if (in_array($name, SECRET_SETTINGS, true)) {
+            $value = encrypt_secret($value);
+        }
         db_exec('INSERT INTO settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', [$name, $value]);
     }
     settings_cache(true);

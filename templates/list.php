@@ -34,7 +34,7 @@ $exportParams = array_merge($_GET, ['page' => $name, 'action' => 'export', 'p' =
           default  => [],
       };
       if ($def['type'] === 'ref' && $def['ref'] === 'accounts' && empty($def['ref_where']) && $opts['filters'][$f] === '') continue; ?>
-    <select name="<?= h($f) ?>" onchange="this.form.submit()">
+    <select name="<?= h($f) ?>" data-autosubmit>
       <option value=""><?= h($def['label']) ?>: any</option>
       <?php foreach ($choices as $val => $label): ?>
         <option value="<?= h($val) ?>" <?= (string)$opts['filters'][$f] === (string)$val ? 'selected' : '' ?>><?= h($label) ?></option>

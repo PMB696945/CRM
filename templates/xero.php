@@ -20,7 +20,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
       <li>Go to <a href="https://developer.xero.com/app/manage" target="_blank" rel="noopener">developer.xero.com/app/manage</a> and sign in with your Xero login.</li>
       <li>Click <b>New app</b>. Choose <b>Web app</b>, give it a name (e.g. “Telecom CRM”), and enter your website as the company URL.</li>
       <li>For <b>Redirect URI</b>, paste exactly:
-        <div class="copy-row"><input readonly value="<?= h($redirectUri) ?>" onclick="this.select()" aria-label="Redirect URI"></div>
+        <div class="copy-row"><input readonly value="<?= h($redirectUri) ?>" data-select-all aria-label="Redirect URI"></div>
         <?php if (str_starts_with($redirectUri, 'http://') && !preg_match('#^http://(localhost|127\.0\.0\.1)#', $redirectUri)): ?>
           <div class="error">Xero only accepts <b>https://</b> redirect URIs (except localhost). Open the CRM over https, or enable SSL on your hosting first.</div>
         <?php endif; ?>
@@ -78,7 +78,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
         <dt>Linked customers</dt><dd><?= number_format($stats['linked']) ?></dd>
       </dl>
       <p class="help">Balances refresh when you press <b>Sync now</b>. To keep them up to date automatically, add a cron job in cPanel (<i>Cron Jobs</i>), e.g. every hour:</p>
-      <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/sync.php" onclick="this.select()" aria-label="Cron command"></div>
+      <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/sync.php" data-select-all aria-label="Cron command"></div>
       <p class="help">Running at least every few weeks also keeps the connection alive. Xero expires it after 60 days without use.</p>
     </section>
   </div>

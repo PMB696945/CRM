@@ -5,7 +5,7 @@ declare(strict_types=1);
 require (require dirname(__DIR__) . '/app_root.php') . '/src/bootstrap.php';
 require APP_ROOT . '/src/controllers.php';
 
-header('X-Content-Type-Options: nosniff');
+security_headers();
 start_session();
 require_login();
 require_admin();

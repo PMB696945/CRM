@@ -5,8 +5,7 @@ declare(strict_types=1);
 require (require dirname(__DIR__) . '/app_root.php') . '/src/bootstrap.php';
 require APP_ROOT . '/src/controllers.php';
 
-header('X-Frame-Options: DENY');
-header('X-Content-Type-Options: nosniff');
+security_headers();
 header('Referrer-Policy: no-referrer');
 header('X-Robots-Tag: noindex, nofollow');
 start_session();

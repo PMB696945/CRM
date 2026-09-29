@@ -24,6 +24,7 @@ if (is_admin()) {
         'users'      => ['key', 'Users'],
         'contract_templates' => ['template', 'Contract templates'],
         'signable'   => ['signature', 'Signable'],
+        'audit'      => ['clipboard', 'Audit log'],
         'xero'       => ['link', 'Xero'],
         'gocardless' => ['bank', 'GoCardless'],
     ];

@@ -40,6 +40,17 @@
     <div class="field wide"><label for="s_qt">Terms shown on quotes</label><textarea id="s_qt" name="quote_terms" rows="4" placeholder="e.g. All prices exclude VAT. Services are subject to survey and our standard terms and conditions."><?= $v('quote_terms') ?></textarea></div>
   </section>
 
+  <section class="card form-grid">
+    <h2 class="wide">Security</h2>
+    <div class="field"><label for="s_idle">Sign out after inactivity (minutes)</label><input id="s_idle" name="session_idle_minutes" value="<?= $v('session_idle_minutes', '60') ?>" inputmode="numeric">
+      <div class="help">Between 5 and 720. Everyone also has to sign in again after <?= SESSION_MAX_HOURS ?> hours.</div></div>
+    <div class="field field-check"><label><input type="checkbox" name="require_2fa" value="1" <?= setting('require_2fa') === '1' ? 'checked' : '' ?>> Require two-factor sign-in for all users</label>
+      <div class="help">Users without it are asked to set it up when they next sign in. Set it up on your own profile first.</div></div>
+    <div class="field field-check"><label><input type="checkbox" name="force_https" value="1" <?= setting('force_https') === '1' ? 'checked' : '' ?> <?= is_https() ? '' : 'disabled' ?>> Always use a secure connection (HTTPS)</label>
+      <div class="help"><?= is_https() ? 'Visitors on http:// are redirected to https://.' : 'Open the CRM over https:// to switch this on. Enable SSL (e.g. AutoSSL) in your hosting first.' ?></div></div>
+    <div class="field"><label>Stored passwords &amp; API keys</label><p class="text-sm">Encrypted (AES-256). The key is in <code><?= config('app_key') ? 'config.php' : 'app.key' ?></code>. Keep a copy with your backups, because without it the saved API keys can't be read.</p></div>
+  </section>
+
   <div class="form-actions"><button class="btn btn-primary">Save settings</button></div>
 </form>
 <form method="post" action="<?= h(url('settings', ['action' => 'test_email'])) ?>" class="mt-4"><?= csrf_field() ?><button class="btn">✉ Send me a test email</button> <span class="help">Save first.</span></form>

@@ -26,7 +26,7 @@
     <div class="card-head"><h2><span class="step <?= setting('signable_webhook_registered') ? 'step-done' : '' ?>">2</span> Instant updates</h2></div>
     <p>Add a webhook so Signable tells the CRM the moment a contract is signed. Without it, contracts are checked by the cron job or the <b>Check status</b> button.</p>
     <?php if ($webhookUrl): ?>
-      <div class="copy-row"><input id="wh" readonly value="<?= h($webhookUrl) ?>" onclick="this.select()"><button type="button" class="btn btn-sm" data-copy="#wh">Copy</button></div>
+      <div class="copy-row"><input id="wh" readonly value="<?= h($webhookUrl) ?>" data-select-all><button type="button" class="btn btn-sm" data-copy="#wh">Copy</button></div>
       <form method="post" action="<?= h(url('signable', ['action' => 'webhook'])) ?>" class="mt-3"><?= csrf_field() ?><button class="btn btn-primary">Add webhook in Signable</button></form>
       <?php if ($w = setting('signable_webhook_registered')): ?><p class="help mt-2">Added <?= h(fmt_datetime($w)) ?>.</p><?php endif; ?>
       <p class="help mt-2">Or add it yourself in Signable under API &amp; Webhooks (type “signed envelope”). The web address must be reachable from the internet.</p>

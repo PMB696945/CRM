@@ -193,5 +193,5 @@ function initials(string $name): string
 function theme_head(): string
 {
     return '<link rel="stylesheet" href="assets/app.css">'
-        . "<script>try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}</script>";
+        . '<script nonce="' . csp_nonce() . '">' . "try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}</script>";
 }

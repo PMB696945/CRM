@@ -16,15 +16,37 @@ function login_controller(): void
     }
     $error = null;
     $email = '';
+    $step = isset($_SESSION['pending_2fa']) ? '2fa' : 'password';
+    if (query('restart') === '1') {
+        unset($_SESSION['pending_2fa']);
+        $step = 'password';
+    }
     if (is_post()) {
         verify_csrf();
-        $email = (string)($_POST['email'] ?? '');
-        if (attempt_login($email, (string)($_POST['password'] ?? ''))) {
-            redirect(url('dashboard'));
+        if (($_POST['step'] ?? '') === '2fa') {
+            $result = verify_second_factor((string)($_POST['code'] ?? ''));
+        } else {
+            $email = (string)($_POST['email'] ?? '');
+            $result = attempt_login($email, (string)($_POST['password'] ?? ''));
         }
-        $error = 'Incorrect email or password.';
+        switch ($result['status']) {
+            case 'ok':
+                redirect(must_set_up_2fa() ? url('profile') : url('dashboard'));
+            case '2fa':
+                $step = '2fa';
+                break;
+            case 'locked':
+                $error = "Too many unsuccessful attempts. For your security, sign-in is paused. Try again in {$result['minutes']} minute" . ($result['minutes'] === 1 ? '' : 's') . '.';
+                break;
+            case 'expired':
+                $step = 'password';
+                $error = 'That took too long. Please sign in again.';
+                break;
+            default:
+                $error = $step === '2fa' ? 'That code didn\'t work. Check your authenticator app and try again.' : 'Incorrect email or password.';
+        }
     }
-    render('login', ['error' => $error, 'email' => $email]);
+    render('login', ['error' => $error, 'email' => $email, 'step' => $step]);
 }
 
 function dashboard_controller(): void
@@ -162,8 +184,8 @@ function users_controller(): void
             } elseif (db_value('SELECT id FROM users WHERE email = ? AND id <> ?', [$values['email'], $id ?? 0])) {
                 $errors['email'] = 'That email is already in use.';
             }
-            if ((!$id || $password !== '') && strlen($password) < 8) {
-                $errors['password'] = 'Password must be at least 8 characters.';
+            if ((!$id || $password !== '') && ($problem = password_problem($password, $values['email']))) {
+                $errors['password'] = $problem;
             }
             if ($id === (int)current_user()['id'] && ($values['role'] !== 'admin' || !$values['active'])) {
                 $errors['role'] = 'You cannot remove your own admin access.';
@@ -179,6 +201,7 @@ function users_controller(): void
                     db_exec('INSERT INTO users (name, email, role, active, password_hash) VALUES (?, ?, ?, ?, ?)',
                         [$values['name'], $values['email'], $values['role'], $values['active'], password_hash($password, PASSWORD_DEFAULT)]);
                 }
+                audit($id ? 'user_update' : 'user_create', 'User ' . $values['email'] . ($id ? ' updated' : ' created') . " (role {$values['role']}, " . ($values['active'] ? 'active' : 'disabled') . ')' . ($password !== '' ? ', password set' : ''), 'users', $id ?: (int)db()->lastInsertId());
                 flash('User saved.');
                 redirect(url('users'));
             }
@@ -187,33 +210,122 @@ function users_controller(): void
         return;
     }
 
-    $users = db_all('SELECT id, name, email, role, active, created_at FROM users ORDER BY name');
+    if ($action === 'reset_2fa' && is_post() && $id) {
+        verify_csrf();
+        db_exec('UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = 0, recovery_codes = NULL WHERE id = ?', [$id]);
+        audit('2fa_reset', 'Two-factor sign-in reset for ' . $values['email'], 'users', $id);
+        flash('Two-factor sign-in reset for ' . $values['name'] . '. They can set it up again from their profile.');
+        redirect(url('users'));
+    }
+    $users = db_all('SELECT id, name, email, role, active, created_at, totp_enabled, last_login_at FROM users ORDER BY name');
     page('users', ['users' => $users], 'Users');
 }
 
 function profile_controller(): void
 {
     $user = current_user();
+    $row = db_one('SELECT password_hash, totp_enabled, recovery_codes, last_login_at FROM users WHERE id = ?', [$user['id']]);
     $errors = [];
+    $action = query('action');
+    $passwordOk = fn() => password_verify((string)($_POST['current_password'] ?? ''), (string)$row['password_hash']);
+
     if (is_post()) {
         verify_csrf();
-        $hash = db_value('SELECT password_hash FROM users WHERE id = ?', [$user['id']]);
-        $new = (string)($_POST['new_password'] ?? '');
-        if (!password_verify((string)($_POST['current_password'] ?? ''), (string)$hash)) {
-            $errors['current_password'] = 'Current password is incorrect.';
-        }
-        if (strlen($new) < 8) {
-            $errors['new_password'] = 'New password must be at least 8 characters.';
-        } elseif ($new !== ($_POST['confirm_password'] ?? '')) {
-            $errors['confirm_password'] = 'Passwords do not match.';
-        }
-        if (!$errors) {
-            db_exec('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $user['id']]);
-            flash('Password changed.');
-            redirect(url('profile'));
+        switch ($action) {
+            case '2fa_start':
+                $_SESSION['pending_totp_secret'] = base32_encode(random_bytes(20));
+                redirect(url('profile'));
+            case '2fa_cancel':
+                unset($_SESSION['pending_totp_secret']);
+                redirect(url('profile'));
+            case '2fa_confirm':
+                $secret = $_SESSION['pending_totp_secret'] ?? null;
+                $step = $secret ? totp_verify($secret, (string)($_POST['code'] ?? '')) : null;
+                if ($step === null) {
+                    $errors['code'] = 'That code didn\'t match. Check the time on your phone is correct and try the newest code.';
+                    break;
+                }
+                [$codes, $hashes] = make_recovery_codes();
+                db_exec('UPDATE users SET totp_secret = ?, totp_enabled = 1, totp_last_step = ?, recovery_codes = ? WHERE id = ?',
+                    [encrypt_secret($secret), $step, $hashes, $user['id']]);
+                unset($_SESSION['pending_totp_secret']);
+                $_SESSION['show_recovery_codes'] = $codes;
+                audit('2fa_enabled', 'Turned on two-factor sign-in', 'users', (int)$user['id']);
+                flash('Two-factor sign-in is on. Save your recovery codes now.');
+                redirect(url('profile'));
+            case '2fa_codes':
+                if (!$passwordOk()) {
+                    $errors['current_password_codes'] = 'Current password is incorrect.';
+                    break;
+                }
+                [$codes, $hashes] = make_recovery_codes();
+                db_exec('UPDATE users SET recovery_codes = ? WHERE id = ?', [$hashes, $user['id']]);
+                $_SESSION['show_recovery_codes'] = $codes;
+                audit('2fa_codes', 'Generated new recovery codes', 'users', (int)$user['id']);
+                flash('New recovery codes created. The old ones no longer work.');
+                redirect(url('profile'));
+            case '2fa_disable':
+                if (setting('require_2fa') === '1') {
+                    $errors['current_password_disable'] = 'Your administrator requires two-factor sign-in, so it can\'t be turned off.';
+                    break;
+                }
+                if (!$passwordOk()) {
+                    $errors['current_password_disable'] = 'Current password is incorrect.';
+                    break;
+                }
+                db_exec('UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = 0, recovery_codes = NULL WHERE id = ?', [$user['id']]);
+                audit('2fa_disabled', 'Turned off two-factor sign-in', 'users', (int)$user['id']);
+                flash('Two-factor sign-in is off.');
+                redirect(url('profile'));
+            default: // change password
+                $new = (string)($_POST['new_password'] ?? '');
+                if (!$passwordOk()) {
+                    $errors['current_password'] = 'Current password is incorrect.';
+                }
+                if ($problem = password_problem($new, $user['email'])) {
+                    $errors['new_password'] = $problem;
+                } elseif ($new !== ($_POST['confirm_password'] ?? '')) {
+                    $errors['confirm_password'] = 'Passwords do not match.';
+                }
+                if (!$errors) {
+                    db_exec('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $user['id']]);
+                    session_regenerate_id(true);
+                    audit('password_change', 'Changed their password', 'users', (int)$user['id']);
+                    flash('Password changed.');
+                    redirect(url('profile'));
+                }
         }
     }
-    page('profile', ['user' => $user, 'errors' => $errors], 'My profile');
+    $recoveryCodes = $_SESSION['show_recovery_codes'] ?? null;
+    unset($_SESSION['show_recovery_codes']);
+    $pendingSecret = $_SESSION['pending_totp_secret'] ?? null;
+    page('profile', [
+        'user' => $user, 'errors' => $errors, 'row' => $row, 'recoveryCodes' => $recoveryCodes, 'pendingSecret' => $pendingSecret,
+        'otpUri' => $pendingSecret ? totp_uri($pendingSecret, $user['email']) : null,
+        'codesLeft' => count(json_decode((string)$row['recovery_codes'], true) ?: []),
+    ], 'My profile');
+}
+
+/** Why a new password isn't acceptable, or null. */
+function password_problem(string $password, string $email = ''): ?string
+{
+    if (strlen($password) < 10) {
+        return 'Use at least 10 characters. A few random words works well.';
+    }
+    $lower = strtolower($password);
+    $common = ['password', 'qwerty', '123456', 'letmein', 'welcome', 'admin', 'changeme', 'iloveyou', 'monkey', 'dragon', 'football', 'passw0rd'];
+    foreach ($common as $c) {
+        if (str_contains($lower, $c) && strlen($password) < 16) {
+            return 'That password is too easy to guess. Avoid common words like "' . $c . '".';
+        }
+    }
+    if ($email !== '' && str_contains($lower, strtolower(strtok($email, '@')))) {
+        return 'Don\'t include your email name in your password.';
+    }
+    if (count(array_unique(str_split($password))) < 5) {
+        return 'That password has too many repeated characters.';
+    }
+    return null;
 }
 
 /** Generic CRUD for everything in entities(). */
@@ -285,8 +397,11 @@ function entity_controller(string $name): void
                         if ($existing) {
                             update_row($name, $id, $data);
                             $savedId = $id;
+                            $changed = array_keys(array_filter($data, fn($v, $k) => (string)$v !== (string)($existing[$k] ?? ''), ARRAY_FILTER_USE_BOTH));
+                            audit('update', $entity['label'] . ' ' . record_label($entity, $existing) . ' updated' . ($changed ? ': ' . implode(', ', $changed) : ''), $name, $id);
                         } else {
                             $savedId = insert_row($name, $data);
+                            audit('create', $entity['label'] . ' ' . record_label($entity, find($name, $savedId) ?? $data) . ' created', $name, $savedId);
                         }
                         flash($entity['label'] . ' saved.');
                         redirect(safe_return($_POST['_return'] ?? null, url($name, ['action' => 'view', 'id' => $savedId])));
@@ -311,11 +426,13 @@ function entity_controller(string $name): void
                 redirect(url($name));
             }
             verify_csrf();
-            if (!$canWrite) {
+            // Deleting a customer also deletes all their records, so only admins can.
+            if (!$canWrite || ($name === 'accounts' && !is_admin())) {
                 forbidden();
             }
-            if ($id) {
+            if ($id && ($row = find($name, $id))) {
                 delete_row($name, $id);
+                audit('delete', $entity['label'] . ' ' . record_label($entity, $row) . ' deleted', $name, $id);
             }
             flash($entity['label'] . ' deleted.');
             redirect(safe_return($_POST['_return'] ?? null, url($name)));
@@ -416,6 +533,7 @@ function ticket_comment(int $id): void
 
 function export_csv(string $name, array $entity, array $opts): void
 {
+    audit('export', $entity['plural'] . ' exported to CSV', $name);
     $opts['per_page'] = 0;
     $rows = list_rows($name, $opts)['rows'];
     $columns = array_keys(array_filter($entity['fields'] + ($entity['computed'] ?? []), 'field_enabled'));
@@ -485,6 +603,7 @@ function xero_controller(): void
                 }
                 set_setting('xero_scopes', $scopes === '' || $scopes === XERO_DEFAULT_SCOPES ? null : $scopes);
                 set_setting('xero_redirect_uri', $redirectUri === '' ? null : $redirectUri);
+                audit('settings', 'Xero app details saved');
                 flash('Xero app details saved.');
                 break;
 
@@ -512,6 +631,7 @@ function xero_controller(): void
 
             case 'disconnect':
                 xero_disconnect();
+                audit('settings', 'Xero disconnected');
                 flash('Disconnected from Xero. Customer links and the last synced balances are kept but hidden until you reconnect.');
                 break;
         }
@@ -589,6 +709,7 @@ function gocardless_controller(): void
             set_setting('gocardless_scheme', $scheme === 'bacs' ? null : $scheme);
             try {
                 set_setting('gocardless_creditor', gc_creditor_name());
+                audit('settings', 'GoCardless access token saved (' . $environment . ')');
                 flash('GoCardless connected to ' . setting('gocardless_creditor') . '. Run a sync to load mandates.');
             } catch (GoCardlessException $e) {
                 // Keep the old, working credentials if the new ones fail.
@@ -600,6 +721,7 @@ function gocardless_controller(): void
             foreach (['gocardless_access_token', 'gocardless_creditor'] as $key) {
                 set_setting($key, null);
             }
+            audit('settings', 'GoCardless access token removed');
             flash('GoCardless access token removed. Customer links are kept but hidden until you add a token again.');
         }
         redirect(url('gocardless'));
@@ -614,4 +736,43 @@ function gocardless_controller(): void
         ],
         'summary' => json_decode((string)setting('gocardless_last_sync_summary', 'null'), true),
     ], 'GoCardless');
+}
+
+
+/** A short human label for a record, for the audit log. */
+function record_label(array $entity, array $row): string
+{
+    foreach (['reference', 'account_number', 'name', 'title', 'identifier', 'subject', 'sku'] as $f) {
+        if (!empty($row[$f])) {
+            return '"' . mb_substr((string)$row[$f], 0, 80) . '"';
+        }
+    }
+    return '#' . ($row['id'] ?? '?');
+}
+
+
+function audit_controller(): void
+{
+    require_admin();
+    $where = [];
+    $params = [];
+    if ($u = query_int('user_id')) {
+        $where[] = 'a.user_id = ?';
+        $params[] = $u;
+    }
+    if (($action = query('action_type')) !== '') {
+        $where[] = 'a.action LIKE ?';
+        $params[] = addcslashes($action, '%_\\') . '%';
+    }
+    if (($q = query('q')) !== '') {
+        $where[] = '(a.summary LIKE ? OR a.ip LIKE ?)';
+        $params[] = '%' . addcslashes($q, '%_\\') . '%';
+        $params[] = '%' . addcslashes($q, '%_\\') . '%';
+    }
+    $sql = ' FROM audit_log a LEFT JOIN users u ON u.id = a.user_id' . ($where ? ' WHERE ' . implode(' AND ', $where) : '');
+    $total = (int)db_value('SELECT COUNT(*)' . $sql, $params);
+    $page = max(1, query_int('p') ?? 1);
+    $rows = db_all('SELECT a.*, u.name AS user_name' . $sql . ' ORDER BY a.id DESC LIMIT 50 OFFSET ' . (($page - 1) * 50), $params);
+    $actions = array_column(db_all('SELECT DISTINCT action FROM audit_log ORDER BY action'), 'action');
+    page('audit', compact('rows', 'total', 'page', 'actions'), 'Audit log');
 }

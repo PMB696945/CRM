@@ -32,7 +32,7 @@ $here = url('accounts', ['action' => 'view', 'id' => $id]);
       <div class="dd-link">
         <label for="dd-url-<?= $id ?>">Setup link <small class="muted">· expires <?= h($link['expires_at'] ? fmt_datetime($link['expires_at']) : 'in 7 days') ?></small></label>
         <div class="copy-row">
-          <input id="dd-url-<?= $id ?>" readonly value="<?= h($link['url']) ?>" onclick="this.select()">
+          <input id="dd-url-<?= $id ?>" readonly value="<?= h($link['url']) ?>" data-select-all>
           <button type="button" class="btn btn-sm" data-copy="#dd-url-<?= $id ?>">Copy</button>
         </div>
         <div class="actions">

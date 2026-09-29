@@ -445,6 +445,13 @@
   .quote-totals { @apply mt-4 text-right text-theme-sm text-gray-500 dark:text-gray-400; }
   .quote-totals b { @apply ml-1 mr-3 text-base text-gray-800 dark:text-white/90; }
 
+  /* ---- Security ---- */
+  .qr-box { @apply flex flex-col items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800; }
+  .qr-box [data-qr] { @apply w-48 max-w-full; }
+  .qr-box svg { @apply h-auto w-full; }
+  .recovery-codes { @apply m-0 grid list-none grid-cols-2 gap-2 p-0 font-mono text-sm text-gray-800 dark:text-white/90; }
+  .sr-only-input { @apply sr-only; }
+
   /* ---- Sign-in and installer ---- */
   .auth-page { @apply flex min-h-screen bg-white dark:bg-gray-900; }
   .auth-form { @apply flex w-full flex-1 flex-col justify-center px-6 py-10 lg:w-1/2; }

@@ -74,6 +74,7 @@ function quotes_controller(): void
         redirect($back);
     }
     verify_csrf();
+    audit('quote_' . $action, "Quote {$quote['reference']}: $action", 'quotes', (int)$quote['id']);
     try {
         switch ($action) {
             case 'send':
@@ -186,6 +187,7 @@ function contracts_controller(): void
         if (!in_array($file, $names, true) || !is_file($path = storage_path('contracts') . '/' . basename($file))) {
             not_found('File not found.');
         }
+        audit('download', "Downloaded a document from contract {$contract['reference']}", 'contracts', (int)$contract['id']);
         $title = array_column(contract_documents($contract), 'title', 'file')[$file] ?? 'signed';
         send_download($path, $contract['reference'] . ' ' . preg_replace('/[^A-Za-z0-9 _-]/', '', $title) . (str_ends_with($file, '.pdf') ? '.pdf' : '.docx'));
     }
@@ -222,6 +224,7 @@ function contracts_controller(): void
                         db_all("SELECT * FROM services WHERE account_id = ? AND status IN ('active','pending')", [$account['id']]));
                     $contract = contract_generate($account, [[$template, $lines]], $values['title'], $values['kind'] === 'msa' ? 'msa' : 'services',
                         $values['signer_name'], $values['signer_email']);
+                    audit('contract_create', "Contract {$contract['reference']} created", 'contracts', (int)$contract['id']);
                     flash("Contract {$contract['reference']} created. Check the document, then send it for signature.");
                     redirect(url('contracts', ['action' => 'view', 'id' => $contract['id']]));
                 } catch (IntegrationException $e) {
@@ -237,6 +240,7 @@ function contracts_controller(): void
         redirect($back);
     }
     verify_csrf();
+    audit('contract_' . $action, "Contract {$contract['reference']}: $action", 'contracts', (int)$contract['id']);
     try {
         switch ($action) {
             case 'send':
@@ -330,6 +334,7 @@ function contract_templates_controller(): void
                 }
                 db_exec('INSERT INTO contract_templates (name, service_type, file_name, stored_name, uploaded_by, notes) VALUES (?, ?, ?, ?, ?, ?)',
                     [$name, $type, mb_substr(basename($file['name']), 0, 255), $stored, current_user()['id'], trim((string)($_POST['notes'] ?? '')) ?: null]);
+                audit('template_upload', "Contract template \"$name\" uploaded ($type)", 'contract_templates', (int)db()->lastInsertId());
                 $fields = docx_placeholders(storage_path('templates') . '/' . $stored);
                 $unknown = array_diff($fields, array_keys(contract_merge_field_help()));
                 flash('Template uploaded' . ($fields ? ' with ' . count($fields) . ' merge field(s)' : ' (no {{merge_fields}} found)') . '.'
@@ -345,6 +350,7 @@ function contract_templates_controller(): void
             if ($t) {
                 @unlink(template_file($t));
                 db_exec('DELETE FROM contract_templates WHERE id = ?', [$id]);
+                audit('template_delete', "Contract template \"{$t['name']}\" deleted", 'contract_templates', $id);
                 flash('Template deleted.');
             }
         }
@@ -375,7 +381,7 @@ function settings_controller(): void
     require_admin();
     $keys = ['company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
-        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept'];
+        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https'];
     if (is_post()) {
         verify_csrf();
         if (query('action') === 'test_email') {
@@ -390,8 +396,18 @@ function settings_controller(): void
         }
         foreach ($keys as $key) {
             $value = trim((string)($_POST[$key] ?? ''));
-            if ($key === 'contracts_auto_on_accept') {
+            if (in_array($key, ['contracts_auto_on_accept', 'require_2fa', 'force_https'], true)) {
                 $value = empty($_POST[$key]) ? '0' : '1';
+            }
+            if ($key === 'force_https' && $value === '1' && !is_https()) {
+                $value = '0'; // can't be switched on over plain HTTP, or you'd be locked out
+            }
+            if ($key === 'require_2fa' && $value === '1' && !current_user()['totp_enabled']) {
+                $value = '0'; // set it up yourself first
+                flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
+            }
+            if ($key === 'session_idle_minutes') {
+                $value = ctype_digit($value) ? (string)max(5, min(720, (int)$value)) : '';
             }
             set_setting($key, $value === '' ? null : $value);
         }
@@ -404,7 +420,10 @@ function settings_controller(): void
                 redirect(url('settings'));
             }
         }
-        flash('Settings saved.');
+        audit('settings', 'Settings saved (sign-out after ' . (setting('session_idle_minutes') ?: 60) . ' min idle, 2FA ' . (setting('require_2fa') === '1' ? 'required' : 'optional') . ', HTTPS ' . (setting('force_https') === '1' ? 'forced' : 'not forced') . ')');
+        if (empty($_SESSION['flash'])) {
+            flash('Settings saved.');
+        }
         redirect(url('settings'));
     }
     page('settings', ['detectedUrl' => preg_replace('#/xero-callback\.php$#', '', xero_redirect_uri())], 'Settings');
@@ -429,6 +448,7 @@ function signable_controller(): void
                     set_setting('signable_webhook_secret', bin2hex(random_bytes(16)));
                 }
                 signable_request('GET', 'envelopes', ['offset' => 0, 'limit' => 1]); // test the key
+                audit('settings', 'Signable settings saved');
                 flash('Signable connected.');
             } elseif ($action === 'webhook') {
                 signable_request('POST', 'webhooks', ['webhook_type' => 'signed-envelope', 'webhook_url' => signable_webhook_url()]);

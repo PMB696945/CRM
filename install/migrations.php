@@ -187,4 +187,50 @@ return [
             db()->exec('ALTER TABLE quotes ADD COLUMN response_email VARCHAR(190) NULL AFTER response_name');
         }
     },
+
+    6 => function (): void {
+        // Security: sign-in throttling, audit log, two-factor sign-in.
+        db()->exec("CREATE TABLE IF NOT EXISTS login_attempts (
+            id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            email        VARCHAR(190) NOT NULL,
+            ip           VARCHAR(45) NOT NULL,
+            success      TINYINT(1) NOT NULL DEFAULT 0,
+            attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_la_email (email, attempted_at),
+            KEY idx_la_ip (ip, attempted_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS audit_log (
+            id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id    INT UNSIGNED NULL,
+            action     VARCHAR(50) NOT NULL,
+            entity     VARCHAR(50) NULL,
+            entity_id  INT UNSIGNED NULL,
+            summary    VARCHAR(500) NULL,
+            ip         VARCHAR(45) NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_audit_created (created_at),
+            KEY idx_audit_entity (entity, entity_id),
+            CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $columns = [
+            'totp_secret'    => 'TEXT NULL',
+            'totp_enabled'   => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'totp_last_step' => 'BIGINT UNSIGNED NOT NULL DEFAULT 0',
+            'recovery_codes' => 'TEXT NULL',
+            'last_login_at'  => 'DATETIME NULL',
+        ];
+        foreach ($columns as $column => $definition) {
+            if (!column_exists('users', $column)) {
+                db()->exec("ALTER TABLE users ADD COLUMN $column $definition");
+            }
+        }
+        // Encrypt credentials that were stored in plain text.
+        foreach (SECRET_SETTINGS as $name) {
+            $value = db_value('SELECT value FROM settings WHERE name = ?', [$name]);
+            if ($value !== null && !str_starts_with((string)$value, 'enc:v1:')) {
+                db_exec('UPDATE settings SET value = ? WHERE name = ?', [encrypt_secret((string)$value), $name]);
+            }
+        }
+        settings_cache(true);
+    },
 ];

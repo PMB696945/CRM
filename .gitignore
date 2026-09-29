@@ -5,3 +5,5 @@ node_modules/
 crm-error.log
 error_log
 storage/
+app.key
+install/setup-code.txt

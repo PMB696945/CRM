@@ -47,11 +47,26 @@ if ($crmProblems) {
 // ---- Readable errors instead of a blank 500 ---------------------------------
 function crm_error_page($message, $file, $line)
 {
-    error_log('CRM error: ' . $message . ' in ' . $file . ':' . $line);
+    $ref = strtoupper(substr(md5(uniqid('', true)), 0, 8));
+    error_log('CRM error [' . $ref . ']: ' . $message . ' in ' . $file . ':' . $line);
+
+    // Technical details only for a signed-in admin; everyone else gets a reference.
+    $isAdmin = false;
+    if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent() && isset($_COOKIE['telecomcrm'])) {
+        session_name('telecomcrm');
+        @session_start();
+    }
+    if (session_status() === PHP_SESSION_ACTIVE && !empty($_SESSION['is_admin']) && !empty($_SESSION['user_id'])) {
+        $isAdmin = true;
+    }
+    if (!$isAdmin) {
+        crm_fail_page('Something went wrong', '<p>Sorry, the CRM hit an unexpected error. Please try again in a moment.</p>'
+            . '<p>If it keeps happening, give your administrator this reference: <b>' . $ref . '</b></p>');
+    }
     crm_fail_page('Something went wrong', '<p>The CRM hit an error it couldn\'t recover from:</p>'
         . '<pre style="white-space:pre-wrap;background:#f2f4f7;padding:1rem;border-radius:8px">' . htmlspecialchars($message)
         . "\n\n" . htmlspecialchars(basename(dirname($file)) . '/' . basename($file) . ' line ' . $line) . '</pre>'
-        . '<p>This has also been saved in <code>public/app/crm-error.log</code>. If you need help, send that message to your developer.</p>');
+        . '<p>Reference <b>' . $ref . '</b>, also saved in <code>public/app/crm-error.log</code>. Only admins see these details.</p>');
 }
 
 set_exception_handler(function ($e) {

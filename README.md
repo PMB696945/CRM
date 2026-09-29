@@ -23,7 +23,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and sent for signature via Signable. The signed PDF is saved, and the services can be added to the customer as pending |
 | **Users** | Admin and agent roles. Only admins manage users and the product catalogue |
 
-Security: prepared statements throughout, CSRF tokens on every form, output escaping, bcrypt password hashing, session fixation protection, protection against open redirects and CSV formula injection, and security headers.
+Security is covered in detail in the **Security** section below. In summary: two-factor sign-in, sign-in lockout, session time-outs, encrypted API keys, an audit log, strict browser security headers, and protection against the common web attacks.
 
 ## Installation
 
@@ -40,7 +40,7 @@ You don't need root or SSH access. Pick whichever of these fits your hosting.
    - The same `.htaccess` files block web access to `config.php`, the source code and the installer scripts.
    - **Alternative:** upload only the *contents* of `public/` into your web folder, and put everything else in a folder named `crm` next to `public_html` (outside the web root). The pages find it automatically, and show where they looked if they can't.
    - If your host lets you point a domain or subdomain at a folder (cPanel → *Domains*), you can also use `crm/public` as its document root.
-4. **Run the web installer.** Visit your site address (e.g. `https://yourdomain/crm/`) and you'll be taken to the installer. Don't open `crm/install/`: that folder holds the command-line installer and is deliberately blocked (403). The installer asks for:
+4. **Run the web installer.** Visit your site address (e.g. `https://yourdomain/crm/`) and you'll be taken to the installer. It first asks for a **setup code**: open File Manager and copy the code from `crm/install/setup-code.txt`. This proves you control the hosting account, so a stranger who finds the installer can't take over. Don't open `crm/install/`: that folder holds the command-line installer and is deliberately blocked (403). The installer asks for:
    1. **The database details** from step 2. It tests the connection and writes `config.php` for you. If the folder isn't writable, it shows you the file's contents to copy into a new `config.php` via File Manager instead.
    2. **Your admin name, email and password.** Tick *Load demo data* to try it out with sample customers.
 5. Sign in. The installer locks itself once an admin account exists. You can also delete `public/install.php` for extra peace of mind.
@@ -85,6 +85,35 @@ For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM
 1. Look in cPanel → *Metrics → Errors* (or the `error_log` file in the folder) for the exact reason.
 2. Temporarily rename the `.htaccess` in the CRM's top folder, then open `…/crm/public/`. If that works, the host doesn't allow one of the settings in that file, usually `Options -Indexes`. Delete that line and restore the file.
 3. Make sure folders are permission `755` and files `644`. Some hosts refuse to run files that are writable by other users (e.g. `777`).
+
+## Security
+
+**Signing in**
+- **Lockout:** after 5 wrong passwords for an account (or 20 from one IP address) within 15 minutes, sign-in pauses for 15 minutes. Every attempt is logged.
+- **Two-factor sign-in (TOTP):** set it up under **My profile** with any authenticator app. You get 10 single-use recovery codes. Admins can require it for everyone (Settings → Security) and reset it for someone who has lost their phone (Users).
+- **Sessions:** they end after 60 minutes of inactivity (adjustable) and always after 12 hours.
+- **Passwords:** at least 10 characters, not common words, and not containing your email name. They're stored as bcrypt hashes.
+
+**Permissions**
+- **Admins only:** managing users, settings, integrations, contract templates, the product catalogue, the audit log and **deleting customers**. Deleting a customer removes all of their records.
+- **Staff:** can do everything else.
+
+**Data**
+- **Encrypted credentials:** the SMTP password, Xero, GoCardless and Signable credentials are encrypted in the database (AES-256-GCM). Two-factor secrets are too.
+- **The key:** it's in `app.key`, next to `config.php`, created automatically. You can instead set `'app_key' => '…'` in `config.php`. **Back up the key separately from the database**: without it, saved API keys can't be read, and you'd need to enter them again.
+- **Storage:** contracts and templates are kept in `storage/`, and the web can't access that folder, `config.php`, `app.key`, logs or the source code.
+
+**Audit log** (Admin → Audit log)
+- **What it records:** sign-ins, failed sign-ins and lockouts; two-factor changes; creates, edits (with the fields changed) and deletes; CSV exports and contract downloads; quote and contract actions; settings and integration changes.
+- **Integrity:** the CRM itself offers no way to edit or delete entries.
+
+**Web protections**
+- **Common attacks:** prepared SQL statements, escaped output, and anti-forgery codes (CSRF tokens) on every form.
+- **Browser headers:** a strict content security policy (no inline scripts), clickjacking protection, and HSTS when on HTTPS.
+- **HTTPS:** switch on **Always use HTTPS** in Settings → Security once SSL is working.
+- **Errors:** error details appear only to signed-in admins. Everyone else sees a reference code that matches the entry in `public/app/crm-error.log`.
+
+**Your part:** use HTTPS; keep PHP updated; limit the database user's privileges; keep backups of the database, `storage/` and `app.key` somewhere secure; and disable users when people leave.
 
 ## Configuration
 

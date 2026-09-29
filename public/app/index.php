@@ -4,9 +4,7 @@ declare(strict_types=1);
 require (require dirname(__DIR__) . '/app_root.php') . '/src/bootstrap.php';
 require APP_ROOT . '/src/controllers.php';
 
-header('X-Frame-Options: DENY');
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: same-origin');
+security_headers();
 
 if (!is_file(APP_ROOT . '/config.php')) {
     redirect('install.php');
@@ -48,6 +46,12 @@ if ($page === 'logout') {
 
 require_login();
 
+// Two-factor sign-in required but not set up yet: only the profile page is available.
+if (must_set_up_2fa() && !in_array($page, ['profile', 'logout'], true)) {
+    flash('Your administrator requires two-factor sign-in. Please set it up to continue.', 'error');
+    redirect(url('profile'));
+}
+
 match (true) {
     $page === 'dashboard' => dashboard_controller(),
     $page === 'pipeline'  => pipeline_controller(),
@@ -62,6 +66,7 @@ match (true) {
     $page === 'contract_templates' => contract_templates_controller(),
     $page === 'settings'  => settings_controller(),
     $page === 'signable'  => signable_controller(),
+    $page === 'audit'     => audit_controller(),
     entity($page) !== null => entity_controller($page),
     default               => not_found(),
 };

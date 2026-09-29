@@ -3,7 +3,7 @@
   <div class="actions">
     <form method="get" action="index.php" class="inline">
       <input type="hidden" name="page" value="pipeline">
-      <select name="owner_id" onchange="this.form.submit()">
+      <select name="owner_id" data-autosubmit>
         <option value="">All owners</option>
         <?php foreach ($users as $uid => $uname): ?><option value="<?= (int)$uid ?>" <?= $owner === (int)$uid ? 'selected' : '' ?>><?= h($uname) ?></option><?php endforeach; ?>
       </select>

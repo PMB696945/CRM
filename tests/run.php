@@ -726,6 +726,81 @@ array_map('unlink', glob("$smtpDir/*") ?: []);
 exec('rm -rf ' . escapeshellarg($cfg['storage_path']));
 @rmdir($smtpDir);
 
+echo "Security\n";
+test('secrets are encrypted at rest and decrypted transparently', function () {
+    set_setting('smtp_password', 'hunter2-very-secret');
+    $raw = db_value("SELECT value FROM settings WHERE name = 'smtp_password'");
+    ok(str_starts_with($raw, 'enc:v1:') && !str_contains($raw, 'hunter2'), 'stored encrypted');
+    eq('hunter2-very-secret', setting('smtp_password'));
+    $tampered = substr($raw, 0, -4) . (substr($raw, -4) === 'AAAA' ? 'BBBB' : 'AAAA');
+    eq(null, decrypt_secret($tampered), 'tampering detected');
+    eq('plain', decrypt_secret('plain'), 'legacy plain values still readable');
+    db_exec("UPDATE settings SET value = 'legacy-plain' WHERE name = 'smtp_password'");
+    set_setting('schema_version', '5');
+    migrate();
+    ok(str_starts_with((string)db_value("SELECT value FROM settings WHERE name = 'smtp_password'"), 'enc:v1:'), 'migration encrypts old values');
+    eq('legacy-plain', setting('smtp_password'));
+});
+test('TOTP matches the RFC 6238 test vectors, allows drift, blocks replay', function () {
+    $secret = base32_encode('12345678901234567890');
+    eq('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', $secret);
+    eq('287082', totp_code($secret, intdiv(59, 30)));
+    eq('081804', totp_code($secret, intdiv(1111111109, 30)));
+    eq('005924', totp_code($secret, intdiv(1234567890, 30)));
+    $now = 1234567890;
+    $step = totp_verify($secret, '005924', 0, $now);
+    eq(intdiv($now, 30), $step);
+    ok(totp_verify($secret, totp_code($secret, intdiv($now, 30) - 1), 0, $now) !== null, 'previous code accepted (clock drift)');
+    eq(null, totp_verify($secret, totp_code($secret, intdiv($now, 30) - 3), 0, $now), 'old code rejected');
+    eq(null, totp_verify($secret, '005924', $step, $now), 'same code can\'t be used twice');
+    eq(null, totp_verify($secret, 'abcdef', 0, $now));
+    eq('12345678901234567890', base32_decode($secret));
+});
+test('recovery codes work once each', function () {
+    [$codes, $hashes] = make_recovery_codes();
+    eq(10, count($codes));
+    $left = use_recovery_code($hashes, strtolower(str_replace('-', '', $codes[3])));
+    ok($left !== null, 'accepted without dash, any case');
+    eq(9, count(json_decode($left, true)));
+    eq(null, use_recovery_code($left, $codes[3]), 'can\'t reuse');
+});
+test('sign-in locks after repeated failures and unlocks on success', function () {
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Lock Test', 'lock@example.com', ?, 'agent')", [password_hash('Correct-horse-9', PASSWORD_DEFAULT)]);
+    db_exec('DELETE FROM login_attempts');
+    for ($n = 0; $n < LOGIN_MAX_PER_EMAIL; $n++) {
+        eq('invalid', attempt_login('lock@example.com', 'wrong')['status']);
+    }
+    $r = attempt_login('lock@example.com', 'Correct-horse-9');
+    eq('locked', $r['status'], 'correct password refused while locked');
+    ok($r['minutes'] >= 1 && $r['minutes'] <= LOGIN_WINDOW_MINUTES);
+    db_exec('UPDATE login_attempts SET attempted_at = NOW() - INTERVAL 20 MINUTE');
+    eq('ok', attempt_login('lock@example.com', 'Correct-horse-9')['status'], 'unlocked after the window');
+    eq(0, (int)db_value("SELECT COUNT(*) FROM login_attempts WHERE email = 'lock@example.com' AND success = 0"), 'failures cleared');
+    eq('invalid', attempt_login('nobody@example.com', 'x')['status'], 'unknown email just fails');
+    ok((int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'login_failed'") >= 6, 'failures audited');
+    ok((int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'login_locked'") >= 1, 'lockout audited');
+});
+test('two-factor sign-in: password then code', function () {
+    $secret = base32_encode(random_bytes(20));
+    db_exec("UPDATE users SET totp_secret = ?, totp_enabled = 1, totp_last_step = 0 WHERE email = 'lock@example.com'", [encrypt_secret($secret)]);
+    unset($_SESSION['user_id']);
+    eq('2fa', attempt_login('lock@example.com', 'Correct-horse-9')['status']);
+    ok(empty($_SESSION['user_id']), 'not signed in yet');
+    eq('invalid', verify_second_factor('000000')['status']);
+    eq('ok', verify_second_factor(totp_code($secret, intdiv(time(), 30)))['status']);
+    eq((int)db_value("SELECT id FROM users WHERE email = 'lock@example.com'"), $_SESSION['user_id']);
+    $_SESSION['pending_2fa'] = ['user_id' => $_SESSION['user_id'], 'email' => 'lock@example.com', 'at' => time() - 600];
+    eq('expired', verify_second_factor(totp_code($secret, intdiv(time(), 30)))['status'], 'code step times out');
+    $_SESSION['user_id'] = 1;
+});
+test('password rules', function () {
+    ok(password_problem('short') !== null);
+    ok(password_problem('password12') !== null, 'common word');
+    ok(password_problem('aaaaaaaaaaaa') !== null, 'repeated');
+    ok(password_problem('jsmith-rocks-99', 'jsmith@example.com') !== null, 'contains email name');
+    eq(null, password_problem('orange-kettle-river'));
+});
+
 echo "Demo data\n";
 test('demo data loads', function () {
     require_once APP_ROOT . '/install/demo_data.php';

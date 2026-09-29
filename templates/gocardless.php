@@ -55,7 +55,7 @@ $lastError = setting('gocardless_last_sync_error');
     </dl>
     <p class="help">Customers are linked automatically when they complete a setup link from the CRM. Existing GoCardless customers are matched on sync by email (account or any contact) or company name, only when the match is unambiguous. You can also choose one by editing the customer.</p>
     <p class="help">To keep statuses current, add a cron job (cPanel → <i>Cron Jobs</i>), e.g. hourly. It syncs Xero and GoCardless:</p>
-    <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/sync.php" onclick="this.select()" aria-label="Cron command"></div>
+    <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/sync.php" data-select-all aria-label="Cron command"></div>
     <p class="help">Each customer page also has a <b>Check now</b> button for an instant update.</p>
   </section>
 </div>

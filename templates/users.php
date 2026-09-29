@@ -1,6 +1,6 @@
-<div class="page-head"><h1>Users</h1><a class="btn btn-primary" href="<?= h(url('users', ['action' => 'new'])) ?>">+ New user</a></div>
+<div class="page-head"><h1>Users</h1><div class="actions"><a class="btn" href="<?= h(url('audit')) ?>">Audit log</a><a class="btn btn-primary" href="<?= h(url('users', ['action' => 'new'])) ?>">+ New user</a></div></div>
 <div class="table-wrap"><table class="table">
-  <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th></tr></thead>
+  <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Two-factor</th><th>Last sign-in</th><th></th></tr></thead>
   <tbody>
   <?php foreach ($users as $u): ?>
     <tr>
@@ -8,7 +8,11 @@
       <td><?= h($u['email']) ?></td>
       <td><?= badge($u['role']) ?></td>
       <td><?= $u['active'] ? badge('active') : badge('disabled') ?></td>
-      <td><?= h(fmt_date($u['created_at'])) ?></td>
+      <td><?= $u['totp_enabled'] ? badge('active') : '<span class="muted">Off</span>' ?></td>
+      <td><?= $u['last_login_at'] ? h(fmt_datetime($u['last_login_at'])) : '<span class="muted">Never</span>' ?></td>
+      <td class="right"><?php if ($u['totp_enabled']): ?>
+        <form method="post" action="<?= h(url('users', ['action' => 'reset_2fa', 'id' => $u['id']])) ?>" class="inline" data-confirm="Reset two-factor sign-in for <?= h($u['name']) ?>? Use this if they've lost their phone and recovery codes."><?= csrf_field() ?><button class="btn btn-sm">Reset 2FA</button></form>
+      <?php endif; ?></td>
     </tr>
   <?php endforeach; ?>
   </tbody>

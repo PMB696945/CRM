@@ -109,3 +109,22 @@ document.querySelectorAll('[data-recipient-pick]').forEach((sel) => {
     form.querySelector('[name=recipient_email]').value = o.dataset.email;
   });
 });
+
+// Select-all on click for copyable fields, and auto-submitting filters
+// (kept here rather than inline so the Content Security Policy can block inline scripts).
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-select-all]');
+  if (el) el.select();
+});
+document.addEventListener('change', (e) => {
+  if (e.target.matches('select[data-autosubmit]')) e.target.form.submit();
+});
+
+// QR codes (two-factor setup) drawn locally; the secret never leaves the browser.
+document.querySelectorAll('[data-qr]').forEach((el) => {
+  if (typeof qrcode !== 'function') return;
+  const qr = qrcode(0, 'M');
+  qr.addData(el.dataset.qr);
+  qr.make();
+  el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+});

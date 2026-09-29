@@ -84,7 +84,7 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
     <?php if ($status === 'sent' && $quote['token_hash']): ?>
     <section class="card">
       <div class="card-head"><h2>Customer link</h2></div>
-      <div class="copy-row"><input id="quote-link" readonly value="<?= h(quote_public_url($quote)) ?>" onclick="this.select()"><button type="button" class="btn btn-sm" data-copy="#quote-link">Copy</button></div>
+      <div class="copy-row"><input id="quote-link" readonly value="<?= h(quote_public_url($quote)) ?>" data-select-all><button type="button" class="btn btn-sm" data-copy="#quote-link">Copy</button></div>
       <p class="help mt-2">Anyone with this link can view and respond to the quote.</p>
     </section>
     <?php endif; ?>
