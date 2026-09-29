@@ -5,7 +5,7 @@
 Options -Indexes
 DirectoryIndex index.php
 
-<FilesMatch "^(config(\.sample)?\.php|README\.md|\.gitignore|.*\.sql|package(-lock)?\.json)$">
+<FilesMatch "^(config(\.sample)?\.php|README\.md|\.gitignore|.*\.sql|.*\.log|error_log|package(-lock)?\.json)$">
     Require all denied
 </FilesMatch>
 
@@ -22,5 +22,7 @@ DirectoryIndex index.php
     RewriteCond %{REQUEST_URI}::$0 ^(/.+)/(.*)::\2$
     RewriteRule .* - [E=CRM_BASE:%1]
 
-    RewriteRule ^(.*)$ %{ENV:CRM_BASE}/public/$1 [END]
+    # [L] rather than [END] so this also works on older Apache and LiteSpeed; the
+    # ^public rule above stops the rewritten request from being rewritten again.
+    RewriteRule ^(.*)$ %{ENV:CRM_BASE}/public/$1 [L]
 </IfModule>

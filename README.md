@@ -72,6 +72,17 @@ GRANT ALL ON telecom_crm.* TO 'crm'@'localhost';
 
 For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM). With Apache, allow `.htaccess` overrides (`AllowOverride All`).
 
+## Troubleshooting
+
+**The page shows a message instead of the CRM.** The CRM checks the server on every page load and explains what's wrong. The most common problems are an old PHP version (8.1+ is needed; change it in cPanel → *MultiPHP Manager* / *Select PHP Version*) and a missing PHP extension (`pdo_mysql`, `curl`, `mbstring`).
+
+**"Something went wrong".** The error is shown on the page and saved in `public/app/crm-error.log`. That file can't be opened from the web; use File Manager.
+
+**"500 Internal Server Error" with no details.** This means the web server stopped before PHP ran, which is almost always an `.htaccess` setting the host doesn't allow. Check in this order:
+1. Look in cPanel → *Metrics → Errors* (or the `error_log` file in the folder) for the exact reason.
+2. Temporarily rename the `.htaccess` in the CRM's top folder, then open `…/crm/public/`. If that works, the host doesn't allow one of the settings in that file, usually `Options -Indexes`. Delete that line and restore the file.
+3. Make sure folders are permission `755` and files `644`. Some hosts refuse to run files that are writable by other users (e.g. `777`).
+
 ## Configuration
 
 `config.php` also controls:
@@ -160,7 +171,8 @@ The tests run against a throwaway `<db_name>_test` database, which is created an
 
 ```
 resources/css/     stylesheet source (Tailwind + TailAdmin design tokens)
-public/            web root: index.php (front controller), install.php (web installer), assets/
+public/            web root: small entry files (index.php, install.php, …) that check the server,
+                   then load the app from public/app/ (not web-accessible); assets/
 src/
   bootstrap.php    config + includes
   db.php           PDO helpers

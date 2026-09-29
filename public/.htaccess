@@ -1,2 +1,6 @@
 Options -Indexes
 DirectoryIndex index.php
+
+<FilesMatch "(\.log|^error_log)$">
+    Require all denied
+</FilesMatch>
