@@ -55,3 +55,57 @@ document.addEventListener('click', (e) => {
   const dark = document.documentElement.classList.toggle('dark');
   try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (err) { /* private mode */ }
 });
+
+// Quote line editor: add/remove rows, fill from products, live totals.
+document.querySelectorAll('.quote-form').forEach((form) => {
+  const body = form.querySelector('[data-lines]');
+  const money = (n) => '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const totals = () => {
+    let monthly = 0, setup = 0, tcv = 0;
+    body.querySelectorAll('tr').forEach((tr) => {
+      const v = (n) => parseFloat(tr.querySelector(`[name="${n}[]"]`).value) || 0;
+      const qty = v('line_quantity');
+      monthly += qty * v('line_monthly_price');
+      setup += qty * v('line_setup_fee');
+      tcv += qty * (v('line_monthly_price') * v('line_term_months') + v('line_setup_fee'));
+    });
+    form.querySelector('[data-total-monthly]').textContent = money(monthly);
+    form.querySelector('[data-total-setup]').textContent = money(setup);
+    form.querySelector('[data-total-tcv]').textContent = money(tcv);
+  };
+  form.addEventListener('input', totals);
+  form.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-product]');
+    if (sel && sel.value) {
+      const o = sel.selectedOptions[0], tr = sel.closest('tr');
+      tr.querySelector('[name="line_service_type[]"]').value = o.dataset.type;
+      tr.querySelector('[name="line_description[]"]').value = o.dataset.name;
+      tr.querySelector('[name="line_monthly_price[]"]').value = o.dataset.monthly;
+      tr.querySelector('[name="line_setup_fee[]"]').value = o.dataset.setup;
+      tr.querySelector('[name="line_term_months[]"]').value = o.dataset.term;
+    }
+    totals();
+  });
+  form.addEventListener('click', (e) => {
+    if (e.target.closest('[data-add-line]')) {
+      const row = body.querySelector('tr').cloneNode(true);
+      row.querySelectorAll('input').forEach((i) => { i.value = i.name.startsWith('line_quantity') ? 1 : (i.name.startsWith('line_term') ? 24 : ''); });
+      row.querySelector('[data-product]').value = '';
+      body.appendChild(row);
+      row.querySelector('[data-product]').focus();
+    }
+    const rm = e.target.closest('[data-remove-line]');
+    if (rm && body.querySelectorAll('tr').length > 1) { rm.closest('tr').remove(); totals(); }
+  });
+  totals();
+});
+
+// Quote recipient picker fills name/email.
+document.querySelectorAll('[data-recipient-pick]').forEach((sel) => {
+  sel.addEventListener('change', () => {
+    const o = sel.selectedOptions[0], form = sel.closest('form');
+    if (!o.dataset.email) return;
+    form.querySelector('[name=recipient_name]').value = o.dataset.name;
+    form.querySelector('[name=recipient_email]').value = o.dataset.email;
+  });
+});

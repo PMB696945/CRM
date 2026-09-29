@@ -10,6 +10,8 @@ $nav = [
         'tickets'       => ['ticket', 'Support tickets'],
     ],
     'Sales' => [
+        'quotes'        => ['document', 'Quotes'],
+        'contracts'     => ['signature', 'Contracts'],
         'pipeline'      => ['pipeline', 'Pipeline'],
         'opportunities' => ['pound', 'Opportunities'],
         'activities'    => ['clipboard', 'Activities'],
@@ -18,7 +20,10 @@ $nav = [
 ];
 if (is_admin()) {
     $nav['Admin'] = [
+        'settings'   => ['cog', 'Settings'],
         'users'      => ['key', 'Users'],
+        'contract_templates' => ['template', 'Contract templates'],
+        'signable'   => ['signature', 'Signable'],
         'xero'       => ['link', 'Xero'],
         'gocardless' => ['bank', 'GoCardless'],
     ];

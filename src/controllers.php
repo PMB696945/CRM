@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/controllers_sales.php';
+
 /** Only allow redirects back into the app. */
 function safe_return(?string $to, string $fallback): string
 {
@@ -119,7 +121,7 @@ function refs_controller(): void
     $ref = query('ref');
     $accountId = query_int('account_id');
     header('Content-Type: application/json');
-    if (!in_array($ref, ['services', 'contacts'], true) || !$accountId) {
+    if (!in_array($ref, ['services', 'contacts', 'opportunities'], true) || !$accountId) {
         echo json_encode([]);
         return;
     }
@@ -276,6 +278,7 @@ function entity_controller(string $name): void
                 verify_csrf();
                 [$data, $errors] = validate($entity, $_POST);
                 $errors += validate_scoped_refs($entity, $data);
+                $errors += validate_rules($name, $data, $existing ? (int)$existing['id'] : null);
                 $values = $data + $values;
                 if (!$errors) {
                     try {
@@ -352,6 +355,9 @@ function account_view(array $entity, array $account): void
     $tickets = list_rows('tickets', ['filters' => ['account_id' => $id], 'per_page' => 20, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
     $opps = list_rows('opportunities', ['filters' => ['account_id' => $id], 'per_page' => 0])['rows'];
     $activities = list_rows('activities', ['filters' => ['account_id' => $id], 'per_page' => 30])['rows'];
+    $children = $account['is_dealer'] ? list_rows('accounts', ['filters' => ['parent_id' => $id], 'per_page' => 0, 'sort' => 'name'])['rows'] : [];
+    $quotes = list_rows('quotes', ['filters' => ['account_id' => $id], 'per_page' => 10, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
+    $contracts = list_rows('contracts', ['filters' => ['account_id' => $id], 'per_page' => 10, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
 
     $mrr = 0.0;
     $activeCount = 0;
@@ -375,7 +381,7 @@ function account_view(array $entity, array $account): void
         ];
     }
 
-    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd'), $account['name']);
+    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts'), $account['name']);
 }
 
 function ticket_view(array $entity, array $ticket): void

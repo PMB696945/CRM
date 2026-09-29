@@ -38,4 +38,14 @@ if (gc_configured()) {
     }
 }
 
+if (signable_configured()) {
+    try {
+        $r = contracts_sync_open();
+        echo date('c') . " Signable OK: {$r['checked']} contracts awaiting signature, {$r['changed']} changed\n";
+    } catch (Throwable $e) {
+        fwrite(STDERR, date('c') . ' Signable check failed: ' . $e->getMessage() . "\n");
+        $failed = true;
+    }
+}
+
 exit($failed ? 1 : 0);

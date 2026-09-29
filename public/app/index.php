@@ -57,6 +57,11 @@ match (true) {
     $page === 'profile'   => profile_controller(),
     $page === 'xero'      => xero_controller(),
     $page === 'gocardless' => gocardless_controller(),
+    $page === 'quotes'    => quotes_controller(),
+    $page === 'contracts' => contracts_controller(),
+    $page === 'contract_templates' => contract_templates_controller(),
+    $page === 'settings'  => settings_controller(),
+    $page === 'signable'  => signable_controller(),
     entity($page) !== null => entity_controller($page),
     default               => not_found(),
 };

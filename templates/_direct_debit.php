@@ -18,6 +18,11 @@ $here = url('accounts', ['action' => 'view', 'id' => $id]);
     </dl>
   <?php elseif ($state === 'pending'): ?>
     <p class="dd-summary">The customer has signed up and the mandate is being set up with their bank (<?= h(humanize($status)) ?>). This usually takes a few working days.</p>
+  <?php elseif ($account['parent_relationship'] === 'billed_via_dealer' && !$link): ?>
+    <p class="dd-summary">This customer is billed via their dealer, so Direct Debit is normally collected from the dealer.</p>
+    <form method="post" action="<?= h(url('gocardless', ['action' => 'link', 'id' => $id])) ?>">
+      <?= csrf_field() ?><button class="btn btn-sm btn-ghost">Create a setup link for this customer anyway</button>
+    </form>
   <?php else: ?>
     <p class="dd-summary"><?= $state === 'inactive'
         ? 'The last mandate is <b>' . h(strtolower(humanize($status))) . '</b>. The customer needs to set up a new one.'

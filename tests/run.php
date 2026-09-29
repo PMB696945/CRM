@@ -507,6 +507,225 @@ test('read-only token explains it cannot create links', function () use (&$gcIds
 proc_terminate($gcMock);
 @unlink($gcState);
 
+echo "Dealers\n";
+$dealerIds = [];
+test('dealer rules: must be a dealer, no self or loops, can\'t un-dealer with customers', function () use (&$dealerIds) {
+    $mk = fn($name, $extra = []) => create('accounts', ['name' => $name, 'type' => 'business', 'status' => 'active'] + $extra);
+    $a = $mk('Alpha IT Ltd', ['is_dealer' => '1', 'dealer_commission_pct' => '10']);
+    $b = $mk('Bravo Dental', ['parent_id' => $a, 'parent_relationship' => 'billed_via_dealer', 'msa_covered' => '1']);
+    $plain = $mk('Plain Co');
+    $dealerIds = ['a' => $a, 'b' => $b];
+
+    [$data] = validate(entity('accounts'), ['name' => 'X', 'type' => 'business', 'status' => 'active', 'parent_id' => $plain, 'parent_relationship' => 'referral']);
+    ok(isset(validate_rules('accounts', $data, null)['parent_id']), 'parent must be a dealer');
+
+    [$data] = validate(entity('accounts'), ['name' => 'Alpha IT Ltd', 'type' => 'business', 'status' => 'active', 'is_dealer' => '1', 'parent_id' => $a, 'parent_relationship' => 'referral']);
+    ok(isset(validate_rules('accounts', $data, $a)['parent_id']), 'not its own dealer');
+
+    db_exec('UPDATE accounts SET is_dealer = 1 WHERE id = ?', [$b]);
+    [$data] = validate(entity('accounts'), ['name' => 'Alpha IT Ltd', 'type' => 'business', 'status' => 'active', 'is_dealer' => '1', 'parent_id' => $b, 'parent_relationship' => 'referral']);
+    ok(str_contains(validate_rules('accounts', $data, $a)['parent_id'] ?? '', 'loop'), 'loop detected');
+    db_exec('UPDATE accounts SET is_dealer = 0 WHERE id = ?', [$b]);
+
+    [$data] = validate(entity('accounts'), ['name' => 'Alpha IT Ltd', 'type' => 'business', 'status' => 'active']);
+    ok(isset(validate_rules('accounts', $data, $a)['is_dealer']), 'dealer with customers can\'t be un-marked');
+
+    [$data] = validate(entity('accounts'), ['name' => 'Y', 'type' => 'business', 'status' => 'active', 'parent_id' => $a]);
+    ok(isset(validate_rules('accounts', $data, null)['parent_relationship']), 'relationship required');
+
+    eq(1, list_rows('accounts', ['preset' => 'dealers'])['total']);
+    eq(1, list_rows('accounts', ['filters' => ['parent_id' => $a]])['total']);
+});
+test('removing the dealer clears relationship and MSA flag', function () use (&$dealerIds) {
+    $id = create('accounts', ['name' => 'Charlie', 'type' => 'business', 'status' => 'active', 'parent_id' => $dealerIds['a'], 'parent_relationship' => 'referral', 'msa_covered' => '1']);
+    [$data] = validate(entity('accounts'), ['name' => 'Charlie', 'type' => 'business', 'status' => 'active', 'parent_id' => '']);
+    update_row('accounts', $id, $data);
+    $row = find('accounts', $id);
+    eq(null, $row['parent_relationship']);
+    eq(0, (int)$row['msa_covered']);
+});
+
+echo "Word templates\n";
+test('merges fields split across runs, escapes XML, keeps Signable tags, builds table', function () {
+    $xml = '<w:document><w:body>'
+        . '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Agreement with {{cust</w:t></w:r><w:r><w:t>omer_name}} ({{account_number}})</w:t></w:r></w:p>'
+        . '<w:p><w:r><w:t>{{services_table}}</w:t></w:r></w:p>'
+        . '<w:p><w:r><w:t>{{customer_address}}</w:t></w:r></w:p>'
+        . '<w:p><w:r><w:t>Sign: {signature:signer1:Customer+Signature} {{unknown_field}}</w:t></w:r></w:p>'
+        . '<w:p><w:r><w:t>Untouched text</w:t></w:r></w:p></w:body></w:document>';
+    $out = docx_merge_xml($xml, ['customer_name' => 'Smith & Sons <Ltd>', 'account_number' => 'ACC-1', 'customer_address' => "1 High St\nYork"],
+        [['Service', 'Qty'], ['Broadband', '1'], ['Total', '']]);
+    ok(str_contains($out, 'Agreement with Smith &amp; Sons &lt;Ltd&gt; (ACC-1)'), 'split placeholder merged + escaped');
+    ok(str_contains($out, '<w:pStyle w:val="Heading1"/>') && str_contains($out, '<w:rPr><w:b/></w:rPr>'), 'paragraph and run formatting kept');
+    ok(str_contains($out, '<w:tbl>') && str_contains($out, '>Broadband<'), 'services table inserted');
+    ok(str_contains($out, '1 High St</w:t><w:br/><w:t xml:space="preserve">York'), 'multi-line value uses line breaks');
+    ok(str_contains($out, '{signature:signer1:Customer+Signature}'), 'Signable tag untouched');
+    ok(str_contains($out, '{{unknown_field}}'), 'unknown fields left as-is');
+    ok(str_contains($out, '<w:p><w:r><w:t>Untouched text</w:t></w:r></w:p>'), 'other paragraphs unchanged');
+    $dom = new DOMDocument();
+    ok(@$dom->loadXML(str_replace('<w:document>', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">', $out)), 'result is valid XML');
+});
+test('example template round-trips through merge', function () {
+    $tpl = sys_get_temp_dir() . '/crm_tpl_' . getmypid() . '.docx';
+    $out = sys_get_temp_dir() . '/crm_out_' . getmypid() . '.docx';
+    docx_example_template($tpl);
+    ok(docx_validate($tpl) === null);
+    $fields = docx_placeholders($tpl);
+    ok(in_array('services_table', $fields, true) && in_array('customer_name', $fields, true));
+    eq([], array_values(array_diff($fields, array_keys(contract_merge_field_help()))), 'example only uses known fields');
+    docx_merge($tpl, $out, ['customer_name' => 'Zulu Ltd', 'our_company_name' => 'Netcomm'], [['A', 'B'], ['x', 'y']]);
+    $zip = new ZipArchive();
+    $zip->open($out);
+    $doc = $zip->getFromName('word/document.xml');
+    $zip->close();
+    ok(str_contains($doc, 'Zulu Ltd') && str_contains($doc, 'Netcomm') && str_contains($doc, '<w:tbl>'));
+    ok(!str_contains($doc, '{{customer_name}}'));
+    @unlink($tpl); @unlink($out);
+    ok(docx_validate(__FILE__) !== null, 'non-docx rejected');
+});
+
+echo "Quotes & contracts\n";
+test('quote line parsing and totals', function () {
+    [$lines, $errors] = quote_parse_lines(['line_description' => ['Fibre', '', 'SIMs'], 'line_product_id' => ['', '', ''], 'line_service_type' => ['broadband', '', 'mobile'],
+        'line_quantity' => ['1', '', '3'], 'line_monthly_price' => ['50', '', '£10.50'], 'line_setup_fee' => ['99', '', '0'], 'line_term_months' => ['24', '', '12']]);
+    eq([], $errors);
+    eq(2, count($lines), 'blank row skipped');
+    $t = quote_totals($lines);
+    eq(81.5, $t['monthly']);
+    eq(99.0, $t['setup']);
+    eq(50 * 24 + 99 + 3 * 10.5 * 12, $t['tcv']);
+    eq(24, $t['term']);
+    [, $errors] = quote_parse_lines(['line_description' => ['X'], 'line_quantity' => ['0'], 'line_monthly_price' => ['-1'], 'line_setup_fee' => ['0'], 'line_term_months' => ['500']]);
+    eq(3, count($errors));
+});
+
+$smtpDir = sys_get_temp_dir() . '/crm_smtp_' . getmypid();
+$smtpPort = 16000 + getmypid() % 1000;
+$sinkProc = proc_open(['python3', APP_ROOT . '/tests/smtp_sink.py', (string)$smtpPort, $smtpDir], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p1);
+$sgState = sys_get_temp_dir() . '/crm_sg_' . getmypid() . '.json';
+$sgPort = 15000 + getmypid() % 1000;
+$sgProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$sgPort", APP_ROOT . '/tests/signable_mock.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p2, null, ['MOCK_STATE' => $sgState] + getenv());
+for ($i = 0; $i < 50 && (!@fsockopen('127.0.0.1', $smtpPort) || !@fsockopen('127.0.0.1', $sgPort)); $i++) {
+    usleep(100000);
+}
+$cfg = &config_ref();
+$cfg['signable_url'] = "http://127.0.0.1:$sgPort/v1";
+$cfg['storage_path'] = sys_get_temp_dir() . '/crm_storage_' . getmypid();
+function sent_mails(): array { global $smtpDir; $files = glob("$smtpDir/*.eml") ?: []; sort($files); return array_map('file_get_contents', $files); }
+function mail_body(string $raw): string { preg_match_all('/Content-Transfer-Encoding: base64\r?\n\r?\n([A-Za-z0-9+\/=\r\n]+)/', $raw, $m); return implode("\n", array_map(fn($b) => base64_decode(preg_replace('/\s+/', '', $b)), $m[1])); }
+function sg_state(): array { global $sgState; return json_decode(file_get_contents($sgState), true); }
+
+$flow = [];
+test('SMTP: email sent with login, encoded subject and both text and HTML parts', function () use ($smtpPort) {
+    foreach (['mail_from_email' => 'sales@example.co.uk', 'mail_from_name' => 'Netcomm Sales', 'mail_transport' => 'smtp', 'smtp_host' => '127.0.0.1',
+        'smtp_port' => (string)$smtpPort, 'smtp_encryption' => 'none', 'smtp_username' => 'user', 'smtp_password' => 'pw', 'company_name' => 'Netcomm UK',
+        'app_url' => 'https://crm.example.co.uk/crm'] as $k => $v) {
+        set_setting($k, $v);
+    }
+    send_mail('test@example.com', 'Tëst Person', 'Quote – £100 ✓', '<p>Hello <b>there</b></p>');
+    usleep(300000);
+    $all = sent_mails();
+    $raw = end($all);
+    ok(str_contains($raw, 'X-Rcpt: test@example.com'));
+    ok(str_contains($raw, 'Subject: =?UTF-8?B?'), 'UTF-8 subject encoded');
+    ok(str_contains($raw, 'text/plain') && str_contains($raw, 'text/html'));
+    ok(str_contains(mail_body($raw), 'Hello there'), 'plain-text version generated');
+    try { send_mail('not-an-email', '', 's', 'b'); throw new Exception('expected failure'); } catch (IntegrationException) {}
+});
+
+test('quote is emailed with a working link, accepted, and the contract goes to Signable', function () use (&$flow, &$dealerIds) {
+    set_setting('signable_api_key', 'signable-test-key');
+    // Templates: broadband + general
+    foreach (['broadband' => 'Broadband agreement', 'general' => 'General terms'] as $type => $name) {
+        $stored = bin2hex(random_bytes(6)) . '.docx';
+        docx_example_template(storage_path('templates') . '/' . $stored);
+        db_exec('INSERT INTO contract_templates (name, service_type, file_name, stored_name) VALUES (?, ?, ?, ?)', [$name, $type, "$name.docx", $stored]);
+    }
+    $acct = create('accounts', ['name' => 'Echo Logistics Ltd', 'type' => 'business', 'status' => 'prospect', 'address' => '5 Dock Rd', 'city' => 'Hull', 'postcode' => 'HU1 1AA']);
+    create('contacts', ['account_id' => $acct, 'name' => 'Erin Echo', 'email' => 'erin@echo.example', 'is_billing' => '1']);
+    db_exec('INSERT INTO quotes (account_id, title, created_by) VALUES (?, ?, 1)', [$acct, 'Fibre and mobiles']);
+    $qid = (int)db()->lastInsertId();
+    db_exec("UPDATE quotes SET reference = 'Q-TEST1' WHERE id = ?", [$qid]);
+    quote_save_lines($qid, [
+        ['product_id' => null, 'service_type' => 'broadband', 'description' => 'FTTP 900', 'quantity' => 1, 'monthly_price' => 55, 'setup_fee' => 99, 'term_months' => 24],
+        ['product_id' => null, 'service_type' => 'mobile', 'description' => '5G SIM', 'quantity' => 2, 'monthly_price' => 20, 'setup_fee' => 0, 'term_months' => 24],
+    ]);
+    $quote = db_one('SELECT * FROM quotes WHERE id = ?', [$qid]);
+    $before = count(sent_mails());
+    quote_send($quote, 'erin@echo.example', 'Erin Echo');
+    usleep(300000);
+    $mails = sent_mails();
+    eq($before + 1, count($mails));
+    $body = mail_body(end($mails));
+    ok(preg_match('#https://crm\.example\.co\.uk/crm/quote\.php\?t=([a-f0-9]{48})#', $body, $m) === 1, 'email contains quote link');
+    $quote = quote_by_token($m[1]);
+    eq('sent', $quote['status']);
+    ok($quote['valid_until'] > date('Y-m-d'), 'validity set');
+    eq(null, quote_by_token(str_repeat('0', 48)));
+
+    $contract = quote_accept($quote, 'Eve Echo', '203.0.113.9', false, 'Eve@Echo.example');
+    eq('accepted', db_value('SELECT status FROM quotes WHERE id = ?', [$qid]));
+    ok($contract !== null, 'contract created');
+    eq('sent', $contract['status'], 'sent to Signable automatically');
+    $docs = contract_documents($contract);
+    eq(['Broadband agreement', 'General terms'], array_column($docs, 'title'), 'one document per template (mobile uses General)');
+    $env = sg_state()['envelopes'][$contract['signable_fingerprint']];
+    eq('Eve Echo', $env['parties'][0]['party_name'], 'the person who accepted signs');
+    eq('eve@echo.example', $env['parties'][0]['party_email'], 'at the email they gave');
+    $zip = sys_get_temp_dir() . '/crm_sent_' . getmypid() . '.docx';
+    file_put_contents($zip, base64_decode($env['documents'][0]['document_file_content']));
+    $z = new ZipArchive(); $z->open($zip); $xml = $z->getFromName('word/document.xml'); $z->close(); @unlink($zip);
+    ok(str_contains($xml, 'Echo Logistics Ltd') && str_contains($xml, 'FTTP 900') && !str_contains($xml, '5G SIM'), 'broadband doc has only broadband lines');
+    ok(str_contains($xml, '{signature:signer1:Customer+Signature}'), 'Signable tag present');
+    ok(str_contains($xml, 'HU1 1AA'), 'address merged');
+    eq(1, json_decode($env['meta'], true)['crm_contract_id'] === (int)$contract['id'] ? 1 : 0, 'contract id in envelope meta');
+    $flow = ['quote' => $qid, 'contract' => (int)$contract['id'], 'fp' => $contract['signable_fingerprint'], 'account' => $acct];
+    // Staff notification email
+    ok(str_contains(implode('', array_map('mail_body', array_slice(sent_mails(), -1))), 'accepted'), 'staff notified');
+});
+
+test('signing is picked up, signed PDF saved, pending services created', function () use (&$flow, $sgPort) {
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$flow['contract']]);
+    eq('sent', contract_sync($c)['status'], 'still sent before signing');
+    http_request('POST', "http://127.0.0.1:$sgPort/__sign/{$flow['fp']}");
+    $c = contract_sync($c);
+    eq('signed', $c['status']);
+    ok($c['signed_file'] && str_starts_with((string)file_get_contents(storage_path('contracts') . '/' . $c['signed_file']), '%PDF'), 'signed PDF stored');
+    eq(3, contract_create_services($c), '1 broadband + 2 mobile');
+    eq(3, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status = 'pending'", [$flow['account']]));
+});
+
+test('MSA-covered customer gets one service schedule; missing templates are explained', function () use (&$dealerIds) {
+    $b = db_one('SELECT * FROM accounts WHERE id = ?', [$dealerIds['b']]);
+    $lines = [['service_type' => 'leased_line', 'description' => 'LL', 'quantity' => 1, 'monthly_price' => 300, 'setup_fee' => 0, 'term_months' => 36]];
+    db_exec("DELETE FROM contract_templates WHERE service_type = 'general'");
+    try { contract_templates_for($b + ['msa_covered' => 0], $lines); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Leased line'), $e->getMessage()); }
+    $stored = bin2hex(random_bytes(6)) . '.docx';
+    docx_example_template(storage_path('templates') . '/' . $stored);
+    db_exec("INSERT INTO contract_templates (name, service_type, file_name, stored_name) VALUES ('Schedule', 'msa_schedule', 's.docx', ?)", [$stored]);
+    $groups = contract_templates_for($b, $lines);
+    eq('msa_schedule', $groups[0][0]['service_type']);
+});
+
+test('bad Signable key is reported; contract marked failed', function () use (&$flow) {
+    set_setting('signable_api_key', 'wrong');
+    $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$flow['account']]);
+    $tpl = db_one("SELECT * FROM contract_templates WHERE service_type = 'broadband'");
+    $c = contract_generate($acct, [[$tpl, []]], 'Test', 'services', 'Erin', 'erin@echo.example');
+    try { contract_send($c); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'API key'), $e->getMessage()); }
+    eq('failed', db_value('SELECT status FROM contracts WHERE id = ?', [$c['id']]));
+    set_setting('signable_api_key', 'signable-test-key');
+});
+
+proc_terminate($sinkProc);
+proc_terminate($sgProc);
+@unlink($sgState);
+array_map('unlink', glob("$smtpDir/*") ?: []);
+exec('rm -rf ' . escapeshellarg($cfg['storage_path']));
+@rmdir($smtpDir);
+
 echo "Demo data\n";
 test('demo data loads', function () {
     require_once APP_ROOT . '/install/demo_data.php';

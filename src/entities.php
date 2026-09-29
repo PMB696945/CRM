@@ -33,6 +33,8 @@ const REF_LABELS = [
     'users'    => 'name',
     'xero_contacts' => 'name',
     'gocardless_customers' => 'name',
+    'quotes'        => 'reference',
+    'opportunities' => 'title',
 ];
 
 /** Refs to external systems: [table => [id column, function building a URL to it]]. */
@@ -71,6 +73,11 @@ function entities(): array
                 'name'           => ['label' => 'Name', 'type' => 'text', 'required' => true],
                 'type'           => ['label' => 'Type', 'type' => 'select', 'options' => opts(['business', 'residential']), 'required' => true],
                 'status'         => ['label' => 'Status', 'type' => 'select', 'options' => opts(['prospect', 'active', 'suspended', 'churned']), 'required' => true],
+                'is_dealer'      => ['label' => 'This customer is a dealer', 'type' => 'bool', 'help' => 'Dealers can have other customers under them'],
+                'parent_id'      => ['label' => 'Dealer', 'type' => 'ref', 'ref' => 'accounts', 'ref_where' => 'is_dealer = 1', 'help' => 'The dealer this customer came through or is billed via'],
+                'parent_relationship' => ['label' => 'Relationship to dealer', 'type' => 'select', 'options' => ['referral' => 'Referred by the dealer', 'billed_via_dealer' => 'Billed via the dealer']],
+                'msa_covered'    => ['label' => "Covered by the dealer's MSA", 'type' => 'bool', 'help' => "Contracts become service schedules under the dealer's master services agreement"],
+                'dealer_commission_pct' => ['label' => 'Dealer commission %', 'type' => 'int', 'min' => 0, 'max' => 100, 'help' => 'For dealers: % of their customers\' MRR'],
                 'industry'       => ['label' => 'Industry', 'type' => 'text'],
                 'company_number' => ['label' => 'Company no.', 'type' => 'text'],
                 'email'          => ['label' => 'Email', 'type' => 'email'],
@@ -86,9 +93,12 @@ function entities(): array
                     'help' => 'Linked automatically when they complete a setup link, or on sync when the email or name matches'],
                 'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
             ],
-            'list'    => ['account_number', 'name', 'type', 'status', 'city', 'owner_id', '_mrr'],
+            'list'    => ['account_number', 'name', 'type', 'status', 'parent_id', 'owner_id', '_mrr'],
             'search'  => ['name', 'account_number', 'email', 'phone', 'postcode', 'company_number'],
-            'filters' => ['status', 'type', 'owner_id'],
+            'filters' => ['status', 'type', 'owner_id', 'parent_id'],
+            'presets' => [
+                'dealers' => ['label' => 'Dealers', 'sql' => 't.is_dealer = 1'],
+            ],
             'default_sort' => ['name', 'asc'],
             'computed' => [
                 '_mrr' => ['label' => 'MRR', 'type' => 'money',
@@ -216,6 +226,60 @@ function entities(): array
             'default_sort' => ['expected_close', 'asc'],
         ],
 
+        'quotes' => [
+            'label' => 'Quote', 'plural' => 'Quotes', 'icon' => '📝',
+            'fields' => [
+                'reference'       => ['label' => 'Ref', 'type' => 'text', 'readonly' => true],
+                'account_id'      => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
+                'title'           => ['label' => 'Title', 'type' => 'text', 'required' => true],
+                'status'          => ['label' => 'Status', 'type' => 'select', 'options' => opts(['draft', 'sent', 'accepted', 'declined', 'expired', 'cancelled']), 'readonly' => true],
+                'valid_until'     => ['label' => 'Valid until', 'type' => 'date'],
+                'opportunity_id'  => ['label' => 'Opportunity', 'type' => 'ref', 'ref' => 'opportunities', 'scoped' => true],
+                'intro'           => ['label' => 'Message to the customer', 'type' => 'textarea', 'help' => 'Shown at the top of the quote page'],
+                'recipient_name'  => ['label' => 'Sent to', 'type' => 'text', 'readonly' => true],
+                'sent_at'         => ['label' => 'Sent', 'type' => 'datetime', 'readonly' => true],
+                'created_at'      => ['label' => 'Created', 'type' => 'datetime', 'readonly' => true],
+            ],
+            'list'    => ['reference', 'title', 'account_id', 'status', '_monthly', '_setup', 'valid_until', 'sent_at'],
+            'search'  => ['reference', 'title', 'recipient_name', 'recipient_email'],
+            'filters' => ['status', 'account_id'],
+            'presets' => [
+                'awaiting' => ['label' => 'Awaiting response', 'sql' => "t.status = 'sent'"],
+                'accepted' => ['label' => 'Accepted', 'sql' => "t.status = 'accepted'"],
+                'drafts'   => ['label' => 'Drafts', 'sql' => "t.status = 'draft'"],
+            ],
+            'computed' => [
+                '_monthly' => ['label' => 'Monthly', 'type' => 'money', 'sql' => '(SELECT COALESCE(SUM(l.quantity * l.monthly_price),0) FROM quote_lines l WHERE l.quote_id = t.id)'],
+                '_setup'   => ['label' => 'One-off', 'type' => 'money', 'sql' => '(SELECT COALESCE(SUM(l.quantity * l.setup_fee),0) FROM quote_lines l WHERE l.quote_id = t.id)'],
+            ],
+            'default_sort' => ['created_at', 'desc'],
+        ],
+
+        'contracts' => [
+            'label' => 'Contract', 'plural' => 'Contracts', 'icon' => '✍️',
+            'fields' => [
+                'reference'    => ['label' => 'Ref', 'type' => 'text', 'readonly' => true],
+                'account_id'   => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
+                'title'        => ['label' => 'Title', 'type' => 'text', 'required' => true],
+                'kind'         => ['label' => 'Kind', 'type' => 'select', 'options' => ['services' => 'Services', 'msa' => 'Master services agreement']],
+                'status'       => ['label' => 'Status', 'type' => 'select', 'options' => opts(['draft', 'sent', 'signed', 'rejected', 'cancelled', 'expired', 'failed']), 'readonly' => true],
+                'quote_id'     => ['label' => 'Quote', 'type' => 'ref', 'ref' => 'quotes', 'readonly' => true],
+                'signer_name'  => ['label' => 'Signer', 'type' => 'text'],
+                'signer_email' => ['label' => 'Signer email', 'type' => 'email'],
+                'sent_at'      => ['label' => 'Sent', 'type' => 'datetime', 'readonly' => true],
+                'signed_at'    => ['label' => 'Signed', 'type' => 'datetime', 'readonly' => true],
+            ],
+            'list'    => ['reference', 'title', 'account_id', 'kind', 'status', 'signer_name', 'sent_at', 'signed_at'],
+            'search'  => ['reference', 'title', 'signer_name', 'signer_email'],
+            'filters' => ['status', 'kind', 'account_id'],
+            'presets' => [
+                'awaiting' => ['label' => 'Awaiting signature', 'sql' => "t.status = 'sent'"],
+                'signed'   => ['label' => 'Signed', 'sql' => "t.status = 'signed'"],
+                'problems' => ['label' => 'Needs attention', 'sql' => "t.status IN ('failed','rejected','expired') OR (t.status = 'draft' AND t.last_error IS NOT NULL)"],
+            ],
+            'default_sort' => ['created_at', 'desc'],
+        ],
+
         'activities' => [
             'label' => 'Activity', 'plural' => 'Activities', 'icon' => '🗒️',
             'fields' => [
@@ -260,7 +324,7 @@ function entities(): array
             'sql' => '(SELECT g.mandate_status FROM gocardless_customers g WHERE g.id = t.gocardless_customer_id)'];
         $entities['accounts']['list'][] = '_dd';
         $entities['accounts']['presets'] = ($entities['accounts']['presets'] ?? []) + [
-            'no_dd' => ['label' => 'No Direct Debit', 'sql' => "t.status = 'active' AND NOT EXISTS (SELECT 1 FROM gocardless_customers g WHERE g.id = t.gocardless_customer_id
+            'no_dd' => ['label' => 'No Direct Debit', 'sql' => "t.status = 'active' AND NOT (t.parent_relationship <=> 'billed_via_dealer') AND NOT EXISTS (SELECT 1 FROM gocardless_customers g WHERE g.id = t.gocardless_customer_id
                 AND g.mandate_status IN ('active','submitted','pending_submission','pending_customer_approval'))"],
         ];
     }
@@ -306,6 +370,13 @@ function before_save(string $name, array $data, ?array $existing): array
             }
             if (!empty($data['postcode'])) {
                 $data['postcode'] = strtoupper($data['postcode']);
+            }
+            if (array_key_exists('parent_id', $data) && empty($data['parent_id'])) {
+                $data['parent_relationship'] = null;
+                $data['msa_covered'] = 0;
+            }
+            if (array_key_exists('is_dealer', $data) && empty($data['is_dealer'])) {
+                $data['dealer_commission_pct'] = null;
             }
             break;
 
@@ -401,4 +472,41 @@ function contract_end_date(string $start, int $months): string
     $day = min((int)$d->format('j'), (int)$target->format('t'));
     return $target->setDate((int)$target->format('Y'), (int)$target->format('n'), $day)
         ->modify('-1 day')->format('Y-m-d');
+}
+
+
+/** Business-rule validation that needs the database. Returns [field => message]. */
+function validate_rules(string $name, array $data, ?int $id): array
+{
+    $errors = [];
+    if ($name === 'accounts') {
+        $parent = $data['parent_id'] ?? null;
+        if ($parent) {
+            if ($id && (int)$parent === $id) {
+                $errors['parent_id'] = 'A customer can\'t be its own dealer.';
+            } elseif (!db_value('SELECT is_dealer FROM accounts WHERE id = ?', [$parent])) {
+                $errors['parent_id'] = 'The chosen customer isn\'t marked as a dealer.';
+            } elseif ($id) {
+                // Walk up the chain to stop loops (A under B under A).
+                $seen = [];
+                for ($p = (int)$parent; $p && !isset($seen[$p]); $p = (int)db_value('SELECT parent_id FROM accounts WHERE id = ?', [$p])) {
+                    if ($p === $id) {
+                        $errors['parent_id'] = 'That would create a loop: the dealer is already under this customer.';
+                        break;
+                    }
+                    $seen[$p] = true;
+                }
+            }
+            if (empty($data['parent_relationship'])) {
+                $errors['parent_relationship'] = 'Choose how this customer relates to the dealer.';
+            }
+        }
+        if ($id && array_key_exists('is_dealer', $data) && empty($data['is_dealer'])) {
+            $children = (int)db_value('SELECT COUNT(*) FROM accounts WHERE parent_id = ?', [$id]);
+            if ($children) {
+                $errors['is_dealer'] = "This dealer has $children customer" . ($children === 1 ? '' : 's') . ' under it. Move them first.';
+            }
+        }
+    }
+    return $errors;
 }

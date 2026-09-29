@@ -7,7 +7,14 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
 <div class="page-head">
   <div>
     <div class="crumbs"><a href="<?= h(url('accounts')) ?>">Customers</a> · <?= h($account['account_number']) ?></div>
-    <h1><?= h($account['name']) ?> <?= badge($account['status']) ?> <?= badge($account['type']) ?></h1>
+    <h1><?= h($account['name']) ?> <?= badge($account['status']) ?> <?= badge($account['type']) ?><?= $account['is_dealer'] ? ' <span class="badge badge-dealer">Dealer</span>' : '' ?></h1>
+    <?php if ($account['parent_id']): ?>
+      <p class="dealer-line">
+        <?= $account['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referred by dealer' ?>
+        <?= display_value($entity, 'parent_id', $account) ?>
+        <?php if ($account['msa_covered']): ?> · <span class="badge badge-msa">Covered by dealer's MSA</span><?php endif; ?>
+      </p>
+    <?php endif; ?>
   </div>
   <div class="actions">
     <a class="btn" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a>
@@ -46,9 +53,46 @@ $primary = array_values(array_filter($contacts, fn($c) => $c['is_primary']))[0] 
 
 <div class="grid-side">
   <div>
+    <?php if ($account['is_dealer']):
+        $groupMrr = array_sum(array_map(fn($c) => (float)$c['_mrr'], $children));
+        $commission = $account['dealer_commission_pct'] !== null ? $groupMrr * (float)$account['dealer_commission_pct'] / 100 : null; ?>
+    <section class="card">
+      <div class="card-head"><h2>Dealer's customers <span class="count"><?= count($children) ?></span></h2>
+        <a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a></div>
+      <p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
+        <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p>
+      <?php if ($children): ?>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>Customer</th><th>Status</th><th>Relationship</th><th>MSA</th><th class="num">MRR</th></tr></thead>
+          <tbody>
+          <?php foreach ($children as $c): ?>
+            <tr>
+              <td><a class="row-link" href="<?= h(url('accounts', ['action' => 'view', 'id' => $c['id']])) ?>"><?= h($c['name']) ?></a> <span class="muted"><?= h($c['account_number']) ?></span></td>
+              <td><?= badge($c['status']) ?></td>
+              <td><?= $c['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referral' ?></td>
+              <td><?= $c['msa_covered'] ? '✔' : '<span class="muted">—</span>' ?></td>
+              <td class="num"><?= h(money($c['_mrr'])) ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table></div>
+      <?php endif; ?>
+    </section>
+    <?php endif; ?>
+
     <section class="card">
       <div class="card-head"><h2>Services &amp; lines</h2><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a></div>
       <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Quotes</h2><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a></div>
+      <?php render('_table', ['entity' => entity('quotes'), 'name' => 'quotes', 'rows' => $quotes, 'columns' => ['reference', 'title', 'status', '_monthly', 'valid_until', 'sent_at']]); ?>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Contracts</h2><a class="btn btn-sm" href="<?= h(url('contracts', ['action' => 'new', 'account_id' => $id])) ?>">+ New contract<?= $account['is_dealer'] ? ' / MSA' : '' ?></a></div>
+      <?php render('_table', ['entity' => entity('contracts'), 'name' => 'contracts', 'rows' => $contracts, 'columns' => ['reference', 'title', 'kind', 'status', 'sent_at', 'signed_at']]); ?>
     </section>
 
     <section class="card">

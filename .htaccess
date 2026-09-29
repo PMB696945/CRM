@@ -12,7 +12,7 @@ DirectoryIndex index.php
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    RewriteRule ^(src|templates|install|tests|cron|resources|node_modules|\.git)(/|$) - [F,L]
+    RewriteRule ^(src|templates|install|tests|cron|resources|node_modules|storage|\.git)(/|$) - [F,L]
 
     # Already addressed to public/ (old links, or the rewrite below): leave alone.
     RewriteRule ^public(/|$) - [L]

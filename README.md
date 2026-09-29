@@ -18,6 +18,9 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Everywhere** | Global search (names, postcodes, phone numbers, circuit IDs, ticket refs), filters, sorting, pagination and CSV export on every list. Works on mobile and supports dark mode |
 | **Xero balances** | Connect Xero read-only to see each customer's outstanding and overdue balance and number of unpaid invoices. Adds an "In arrears" and "Over credit limit" filter, an overdue-debt total on the dashboard, and a link to the contact in Xero. Syncs on demand or by cron |
 | **GoCardless Direct Debit** | Shows whether each customer has an active, pending or failed Direct Debit mandate. If they don't have one, creates a personal GoCardless setup link, prefilled with their details, that you can copy or email in one click. When they complete it, the CRM links them automatically. Adds a "No Direct Debit" filter and a dashboard count |
+| **Dealers** | Mark any customer as a dealer and put other customers under it: referred by the dealer, or billed via the dealer, optionally covered by the dealer's master services agreement (MSA). Dealer pages show their customers, the group's combined MRR and commission |
+| **Quotes** | Build quotes from your product catalogue and email them. The customer accepts (name, email and a tick box) or declines on a branded web page. You're emailed when they respond |
+| **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and sent for signature via Signable. The signed PDF is saved, and the services can be added to the customer as pending |
 | **Users** | Admin and agent roles. Only admins manage users and the product catalogue |
 
 Security: prepared statements throughout, CSRF tokens on every form, output escaping, bcrypt password hashing, session fixation protection, protection against open redirects and CSV formula injection, and security headers.
@@ -159,6 +162,34 @@ npm run watch:css    # or rebuild automatically while you edit
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
 
+## Dealers
+
+Edit a customer and tick **This customer is a dealer** (optionally set a commission %). For any other customer, choose the **Dealer** and the **Relationship**:
+- **Referred by the dealer:** you bill the customer directly.
+- **Billed via the dealer:** the dealer pays. These customers don't count as "No Direct Debit".
+
+Tick **Covered by the dealer's MSA** when the dealer's master services agreement covers this customer's services. Their contracts then use your *Service schedule under a dealer MSA* template, and `{{msa_reference}}` fills in the dealer's signed MSA. To create a dealer's MSA, open the dealer and use **New contract / MSA**.
+
+The CRM won't let a customer be its own dealer, sit under a customer that isn't a dealer, or form a loop.
+
+## Quotes, contracts and Signable
+
+1. **Settings → Email:** set a "send from" address and, ideally, SMTP details (Microsoft 365, Google Workspace or your host). Use **Send me a test email** to check.
+2. **Settings → Your company:** your details appear on quotes, emails and contracts.
+3. **Contract templates:** upload a Word `.docx` for each service type (mobile, broadband, leased line and so on). Add a **General** template for anything else, and optionally a **Service schedule under a dealer MSA**. Start from **Download example template**. Use `{{merge_fields}}` (the full list is on that page) and put `{{services_table}}` on its own line. Mark where to sign with Signable tags, e.g. `{signature:signer1:Customer+Signature}` and `{date:signer1:Date+Signed}`.
+4. **Signable:** paste an API key (Signable → Company Settings → API & Webhooks), then click **Add webhook** so signatures show up instantly.
+
+**How a sale flows:**
+
+1. Open a customer → **New quote** and add lines from your products. Save, then **Email quote** to a contact (the dealer's contacts are offered too).
+2. The customer clicks the link and sees a branded quote page. To accept, they type their name and email and tick to confirm; they can also decline with a reason. Email security scanners that "click" links can't accept a quote by accident, because accepting needs that deliberate form.
+3. On acceptance you're emailed. The contract is generated (one document per template, each with only its own services) and sent through Signable to the person who accepted. Both steps can be switched off in Settings / Signable, and you can do them by hand from the quote.
+4. When they sign, the webhook (or the cron job, or **Check status**) marks the contract signed and saves the signed PDF. Click **Create pending services** to add the services to the customer.
+
+Staff can also **Record acceptance** for quotes agreed by phone, **Revise** a sent quote (the old link stops working), and send reminders or cancel contracts.
+
+Generated contracts and templates are stored in `storage/`, which the web can't access. **Include this folder in your backups.**
+
 ## Tests
 
 ```bash
@@ -182,14 +213,19 @@ src/
   controllers.php  page handlers
   xero.php         Xero OAuth, API client and balance sync
   gocardless.php   GoCardless mandates, setup links and sync
+  quotes.php       quotes: totals, sending, acceptance
+  contracts.php    contracts: templates, generation, Signable
+  docx.php         Word template merge
+  mailer.php       email (PHP mail or SMTP)
   http.php         shared HTTP client
   matching.php     unambiguous customer matching (used by both integrations)
   settings.php     key/value settings stored in the database
   installer.php    shared install logic (CLI + web)
 templates/         PHP view templates
 install/           schema.sql, migrations.php (upgrades), installer, demo data
-cron/              scheduled jobs (sync.php runs every connected integration)
-tests/             integration tests (+ xero_mock.php and gocardless_mock.php, local stand-ins for their APIs)
+cron/              scheduled jobs (sync.php: Xero, GoCardless, and contracts awaiting signature)
+storage/           uploaded templates and generated/signed contracts (created automatically; not web-accessible)
+tests/             integration tests, with local stand-ins for Xero, GoCardless, Signable and an SMTP server
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

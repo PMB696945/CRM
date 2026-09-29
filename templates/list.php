@@ -29,11 +29,11 @@ $exportParams = array_merge($_GET, ['page' => $name, 'action' => 'export', 'p' =
       $def = $entity['fields'][$f];
       $choices = match ($def['type']) {
           'select' => $def['options'],
-          'ref'    => ref_options($def['ref']),
+          'ref'    => ref_options($def['ref'], null, $def['ref_where'] ?? null),
           'bool'   => ['1' => 'Yes', '0' => 'No'],
           default  => [],
       };
-      if ($def['type'] === 'ref' && $def['ref'] === 'accounts' && $opts['filters'][$f] === '') continue; ?>
+      if ($def['type'] === 'ref' && $def['ref'] === 'accounts' && empty($def['ref_where']) && $opts['filters'][$f] === '') continue; ?>
     <select name="<?= h($f) ?>" onchange="this.form.submit()">
       <option value=""><?= h($def['label']) ?>: any</option>
       <?php foreach ($choices as $val => $label): ?>

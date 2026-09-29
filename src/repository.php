@@ -246,7 +246,7 @@ function delete_row(string $name, int $id): void
 }
 
 /** Options for a ref <select>, optionally limited to one customer. */
-function ref_options(string $ref, ?int $accountId = null): array
+function ref_options(string $ref, ?int $accountId = null, ?string $extraWhere = null): array
 {
     $label = REF_LABELS[$ref];
     $where = [];
@@ -257,7 +257,10 @@ function ref_options(string $ref, ?int $accountId = null): array
     if ($ref === 'products') {
         $where[] = 'active = 1';
     }
-    if ($accountId !== null && in_array($ref, ['services', 'contacts'], true)) {
+    if ($extraWhere !== null) {
+        $where[] = $extraWhere; // from entity definitions only, never user input
+    }
+    if ($accountId !== null && in_array($ref, ['services', 'contacts', 'opportunities'], true)) {
         $where[] = 'account_id = ?';
         $params[] = $accountId;
     }

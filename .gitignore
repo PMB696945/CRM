@@ -4,3 +4,4 @@ config.php
 node_modules/
 crm-error.log
 error_log
+storage/

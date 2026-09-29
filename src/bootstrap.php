@@ -32,3 +32,7 @@ require_once __DIR__ . '/matching.php';
 require_once __DIR__ . '/http.php';
 require_once __DIR__ . '/xero.php';
 require_once __DIR__ . '/gocardless.php';
+require_once __DIR__ . '/mailer.php';
+require_once __DIR__ . '/docx.php';
+require_once __DIR__ . '/quotes.php';
+require_once __DIR__ . '/contracts.php';

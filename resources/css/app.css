@@ -310,11 +310,13 @@
 
   /* ---- Badges ---- */
   .badge { @apply inline-flex items-center justify-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-theme-xs font-medium whitespace-nowrap text-gray-700 dark:bg-white/5 dark:text-white/80; }
-  .badge-active, .badge-won, .badge-resolved, .badge-customer { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
-  .badge-prospect, .badge-lead, .badge-pending, .badge-open, .badge-new_business { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400; }
+  .badge-active, .badge-won, .badge-resolved, .badge-customer, .badge-signed, .badge-accepted { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
+  .badge-prospect, .badge-lead, .badge-pending, .badge-open, .badge-new_business, .badge-sent { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400; }
   .badge-qualified, .badge-proposal, .badge-in_progress, .badge-upsell, .badge-billing, .badge-business { @apply bg-blue-light-50 text-blue-light-500 dark:bg-blue-light-500/15 dark:text-blue-light-500; }
-  .badge-negotiation, .badge-awaiting_customer, .badge-awaiting_carrier, .badge-suspended, .badge-p2, .badge-renewal, .badge-task, .badge-sandbox { @apply bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400; }
-  .badge-churned, .badge-lost, .badge-ceased, .badge-p1, .badge-disabled { @apply bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500; }
+  .badge-negotiation, .badge-awaiting_customer, .badge-awaiting_carrier, .badge-suspended, .badge-p2, .badge-renewal, .badge-task, .badge-sandbox, .badge-expired { @apply bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400; }
+  .badge-churned, .badge-lost, .badge-ceased, .badge-p1, .badge-disabled, .badge-declined, .badge-rejected, .badge-failed { @apply bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500; }
+  .badge-dealer, .badge-msa { @apply bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400; }
+  .dealer-line { @apply mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400; }
   .badge-admin, .badge-internal { @apply bg-theme-purple-500/10 text-theme-purple-500 dark:bg-theme-purple-500/15; }
 
   /* ---- Tables ---- */
@@ -433,6 +435,15 @@
   .dd-link .copy-row { @apply m-0; }
   .dd-foot { @apply mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-3 text-theme-xs dark:border-gray-800; }
   .dd-foot .btn { @apply pl-0; }
+
+  /* ---- Quote line editor ---- */
+  .lines-table td { @apply px-2 py-2 first:pl-5 last:pr-5; }
+  .lines-table td input, .lines-table td select { @apply h-10 w-full min-w-24; }
+  .lines-table td input[name="line_description[]"] { @apply min-w-56; }
+  .lines-table td select[name="line_product_id[]"] { @apply min-w-44; }
+  .lines-table td select[name="line_service_type[]"] { @apply min-w-36; }
+  .quote-totals { @apply mt-4 text-right text-theme-sm text-gray-500 dark:text-gray-400; }
+  .quote-totals b { @apply ml-1 mr-3 text-base text-gray-800 dark:text-white/90; }
 
   /* ---- Sign-in and installer ---- */
   .auth-page { @apply flex min-h-screen bg-white dark:bg-gray-900; }
