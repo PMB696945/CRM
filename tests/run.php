@@ -847,7 +847,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    eq(['customers.edit', 'orders.check', 'orders.place', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
     eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));
@@ -872,7 +872,8 @@ test('custom roles get their own permissions and survive a reset of the built-in
     eq('Provisioning', role_label('c_provisioning'));
     eq('Orders and installs', role_description('c_provisioning'));
     eq(['services.edit', 'tickets.edit'], role_permissions()['c_provisioning']);
-    eq(DEFAULT_ROLE_PERMISSIONS['staff'], role_permissions()['staff'], 'built-in roles not in the saved grid keep defaults');
+    $staff = role_permissions()['staff']; $want = DEFAULT_ROLE_PERMISSIONS['staff']; sort($staff); sort($want);
+    eq($want, $staff, 'built-in roles not in the saved grid keep defaults');
     as_role('c_provisioning');
     ok(can('services.edit') && !can('customers.edit') && !can('audit.view'));
     as_role('super_admin');
@@ -1163,6 +1164,123 @@ test('Mailchimp Transactional sends one-to-one email and reports rejections', fu
 proc_terminate($mcProc);
 @unlink($mcState);
 foreach (['mailchimp_api_key', 'mailchimp_list_id'] as $k) { set_setting($k, null); }
+
+
+echo "Giacom\n";
+$gState = sys_get_temp_dir() . '/crm_giacom_' . getmypid() . '.json';
+$gPort = 13000 + getmypid() % 1000;
+$gProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$gPort", APP_ROOT . '/tests/giacom_mock.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p4, null, ['MOCK_STATE' => $gState] + getenv());
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $gPort); $i++) {
+    usleep(100000);
+}
+config_ref()['giacom_url'] = "http://127.0.0.1:$gPort/";
+function g_state(): array { global $gState; return json_decode(file_get_contents($gState), true); }
+$g = [];
+test('Giacom: request XML is well formed and escaped; errors are explained', function () {
+    $xml = giacom_request_xml('provide', ['order' => ['client-ref' => 'A&B <1>', 'attributes' => ['care-level' => 'standard']]], '1.0', ['username' => 'u', 'password' => 'p']);
+    $doc = simplexml_load_string($xml);
+    eq('provide', (string)$doc['call']);
+    eq('A&B <1>', (string)$doc->xpath('//a[@name="client-ref"]')[0]);
+    eq(['auth' => ['username' => 'u', 'password' => 'p'], 'order' => ['client-ref' => 'A&B <1>', 'attributes' => ['care-level' => 'standard']]], giacom_xml_to_array($doc));
+    ok(!giacom_configured());
+    try { giacom_call('check_api_service_status'); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'isn\'t set up')); }
+    try { giacom_call('check_api_service_status', [], '1.0', ['username' => 'bad', 'password' => 'x']); throw new Exception('expected failure'); }
+    catch (GiacomException $e) { eq('Giacom said: Un-authorised user: bad', $e->getMessage()); }
+    set_setting('giacom_username', 'crm-api');
+    set_setting('giacom_password', 'secret-pw');
+    ok(str_starts_with((string)db_value("SELECT value FROM settings WHERE name = 'giacom_password'"), 'enc:v1:'), 'password encrypted');
+    eq('OK', giacom_call('check_api_service_status')['check'][0]['status']);
+});
+test('Giacom: address search and availability check are saved and summarised', function () use (&$g) {
+    $g['acc'] = create('accounts', ['name' => 'Canal Street Clinic', 'type' => 'business', 'status' => 'active', 'postcode' => 'M1 3HE', 'main_name' => 'Rita Reception', 'main_phone' => '0161 496 0000', 'main_email' => 'rita@canal.example', 'billing_same' => '1']);
+    try { giacom_address_search('not a postcode'); throw new Exception('expected failure'); } catch (GiacomException) {}
+    eq([], giacom_address_search('ZZ99 0ZZ'));
+    $addresses = giacom_address_search('m1 3he');
+    eq('M13HE', g_state()['last']['address_search']['postcode']);
+    eq('12 Canal Street, Manchester, M1 3HE', $addresses[0]['label']);
+    eq('Unit 2 Bramble <Dental> & Co, 10 Canal Street, Manchester, M1 3HE', $addresses[1]['label']);
+    $g['check'] = giacom_check($addresses[1], null, $g['acc'], null);
+    $c = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
+    $r = json_decode($c['result'], true);
+    eq(5, $r['quick_result']); ok(str_contains($r['quick_text'], 'new provide'));
+    eq('MANCHESTER CENTRAL', $r['exchange']['name']); eq('Enabled', $r['exchange']['state']);
+    eq(2, count($r['products']));
+    eq(['34350', 'Business FTTC 80/20', 'fttc'], [$r['products'][0]['product_id'], $r['products'][0]['name'], $r['products'][0]['technology']]);
+    eq(['standard', 'enhanced'], $r['products'][0]['care_levels']);
+    eq('68400.00', $r['products'][0]['estimate']['down']);
+    eq(10, (int)$r['products'][0]['leadtime']['days']);
+    eq('80 Mbps', giacom_mbps($r['products'][0]['speed']));
+    eq('68 Mbps', giacom_mbps($r['products'][0]['estimate']['down'], 'kbps'));
+    eq('A00012345679', g_state()['last']['availability']['address-reference']);
+    eq('Y', g_state()['last']['availability']['detailed']);
+    eq(1, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'giacom_check' AND account_id = ?", [$g['acc']]));
+});
+test('Giacom: placing an order sends the right details and adds a pending service', function () use (&$g) {
+    $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
+    $product = json_decode($check['result'], true)['products'][0];
+    $o = ['order_type' => 'provide', 'cli' => '', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-1@isp.example', 'bb_password' => 'Pa55word!',
+        'realm' => 'isp.example', 'care_level' => 'enhanced', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => 'PO 77', 'force_new_ont' => '',
+        'title' => '', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '0161 496 0000', 'email' => 'rita@canal.example', 'crm_product_id' => ''];
+    $g['order'] = giacom_place_order($check, $product, $o);
+    $sent = g_state()['last']['provide'];
+    eq('34350', $sent['order']['prod-id']); eq('A00012345679', $sent['order']['address-reference']);
+    eq('enhanced', $sent['order']['attributes']['care-level']); eq('Pa55word!', $sent['order']['attributes']['password']);
+    ok(str_starts_with($sent['order']['client-ref'], 'ACC-') && str_ends_with($sent['order']['client-ref'], ' PO 77'));
+    eq('Canal Street Clinic', $sent['customer']['company']); eq('01614960000', $sent['customer']['telephone']); eq('Unit 2', $sent['customer']['sub-premise']);
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
+    eq('700100', $order['giacom_order_id']); eq('9700100', $order['giacom_service_id']); eq('Placed', $order['status']);
+    $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
+    eq('pending', $svc['status']); eq('Giacom', $svc['carrier']); eq('broadband', $svc['service_type']); eq('acc10001-1@isp.example', $svc['identifier']);
+    ok(str_contains($svc['notes'], '700100'));
+    ok(!str_contains((string)db_value("SELECT changes FROM audit_log WHERE action = 'giacom_order' ORDER BY id DESC LIMIT 1"), 'Pa55word'), 'password not in the audit trail');
+    ok(!str_contains((string)$order['details'], 'Pa55word'), 'password not stored');
+    // Giacom's own validation errors come back readably and nothing is saved.
+    try { giacom_place_order($check, $product, ['surname' => ''] + $o); throw new Exception('expected failure'); }
+    catch (GiacomException $e) { eq('Giacom said: Customer surname is required', $e->getMessage()); }
+    eq(1, (int)db_value('SELECT COUNT(*) FROM giacom_orders WHERE account_id = ?', [$g['acc']]));
+    try { giacom_place_order($check, $product, ['order_type' => 'migrate'] + $o); throw new Exception('expected failure'); }
+    catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'CLI or access line ID')); }
+});
+test('Giacom: status updates are picked up; completion makes the service live', function () use (&$g, &$gPort) {
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
+    $order = giacom_refresh_order($order);
+    eq('Awaiting Processing', $order['status']);
+    ok((int)db_value('SELECT COUNT(*) FROM giacom_order_events WHERE order_id = ?', [$g['order']]) >= 1, 'history saved');
+    http_request('POST', "http://127.0.0.1:$gPort/__status/700100/In%20Progress%20(Supplier%20Committed)");
+    http_request('POST', "http://127.0.0.1:$gPort/__status/700100/Completed");
+    $r = giacom_sync();
+    eq(2, $r['status_changes'], json_encode(g_state()['events']));
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
+    eq('Completed', $order['status']); ok($order['completed_at'] !== null);
+    $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
+    eq('active', $svc['status']); eq(date('Y-m-d'), $svc['start_date']);
+    ok(setting('giacom_events_since') !== null);
+    eq(['events' => 0, 'status_changes' => 0], giacom_sync(), 'events already seen are not applied again');
+    eq('Completed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$g['order']]));
+    eq(3, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'giacom_status' AND account_id = ?", [$g['acc']]), 'placed → awaiting → in progress → completed');
+    eq(['Dr', 'Priya', 'Shah'], giacom_split_name('Dr. Priya Shah'));
+    eq(['', 'Mary Jane', 'Smith'], giacom_split_name('Mary Jane Smith'));
+    eq(['', 'Cher', ''], giacom_split_name('Cher'));
+    ok(giacom_is_complete('Completed') && !giacom_is_complete('Awaiting completion date') && giacom_is_cancelled('Order Cancelled'));
+});
+test('Giacom: cancelling an order ceases its pending service', function () use (&$g) {
+    $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
+    $product = json_decode($check['result'], true)['products'][1];
+    $o = ['order_type' => 'migrate', 'cli' => '01614960001', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-2', 'bb_password' => 'secret12',
+        'realm' => '', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => 'N',
+        'title' => 'Ms', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '01614960000', 'email' => '', 'crm_product_id' => ''];
+    $id = giacom_place_order($check, $product, $o);
+    eq('01614960001', g_state()['last']['migrate']['order']['cli']);
+    eq('N', g_state()['last']['migrate']['order']['attributes']['force-new-ont']);
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
+    eq('Cancelled', giacom_abort_order($order, 'Customer changed their mind'));
+    eq('Cancelled', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$id]));
+    eq('ceased', db_value('SELECT status FROM services WHERE id = ?', [$order['service_id']]));
+    eq('Customer changed their mind', g_state()['last']['order_abort']['reason']);
+});
+proc_terminate($gProc);
+@unlink($gState);
+foreach (['giacom_username', 'giacom_password', 'giacom_events_since', 'giacom_last_sync_at'] as $k) { set_setting($k, null); }
 
 proc_terminate($sinkProc);
 proc_terminate($sgProc);

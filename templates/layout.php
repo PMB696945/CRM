@@ -9,7 +9,7 @@ $nav = [
         'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
         'tickets'       => ['ticket', 'Support tickets'],
-    ],
+    ] + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'contracts'     => ['signature', 'Contracts'],
@@ -34,6 +34,7 @@ $admin = array_filter([
     'xero'       => can('settings.manage') ? ['link', 'Xero'] : null,
     'gocardless' => can('settings.manage') ? ['bank', 'GoCardless'] : null,
     'mailchimp'  => can('settings.manage') ? ['megaphone', 'Mailchimp'] : null,
+    'giacom_settings' => can('settings.manage') ? ['bolt', 'Giacom'] : null,
 ]);
 if ($admin) {
     $nav['Admin'] = $admin;

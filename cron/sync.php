@@ -59,6 +59,16 @@ if (mailchimp_configured()) {
     }
 }
 
+if (giacom_configured()) {
+    try {
+        $r = giacom_sync();
+        echo date('c') . " Giacom OK: {$r['events']} order updates, {$r['status_changes']} status changes\n";
+    } catch (Throwable $e) {
+        fwrite(STDERR, date('c') . ' Giacom check failed: ' . $e->getMessage() . "\n");
+        $failed = true;
+    }
+}
+
 // Carry on sending service alerts / marketing emails that are part-way through.
 try {
     $n = campaigns_process_queue();

@@ -554,6 +554,8 @@ function account_view(array $entity, array $account): void
     $mainContact = $account['main_contact_id'] ? db_one('SELECT * FROM contacts WHERE id = ?', [$account['main_contact_id']]) : null;
     $billingContact = $account['billing_contact_id'] ? db_one('SELECT * FROM contacts WHERE id = ?', [$account['billing_contact_id']]) : null;
     $pendingRequest = pending_request_for($id);
+    $giacomOrders = can('orders.check') ? db_all('SELECT * FROM giacom_orders WHERE account_id = ? ORDER BY id DESC LIMIT 10', [$id]) : [];
+    $giacomChecks = can('orders.check') ? db_all('SELECT id, address_label, result, created_at FROM giacom_checks WHERE account_id = ? ORDER BY id DESC LIMIT 5', [$id]) : [];
     $history = can('audit.view') ? db_all('SELECT a.*, u.name AS user_name FROM audit_log a LEFT JOIN users u ON u.id = a.user_id
         WHERE a.account_id = ? ORDER BY a.id DESC LIMIT 15', [$id]) : [];
 
@@ -580,7 +582,7 @@ function account_view(array $entity, array $account): void
     }
 
     page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
-        'sites', 'mainContact', 'billingContact', 'pendingRequest', 'history'), $account['name']);
+        'sites', 'mainContact', 'billingContact', 'pendingRequest', 'history', 'giacomOrders', 'giacomChecks'), $account['name']);
 }
 
 function ticket_view(array $entity, array $ticket): void

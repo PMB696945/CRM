@@ -505,4 +505,5 @@
   .choice-cards b { @apply block text-gray-800 dark:text-white/90; }
   .bulk-bar { @apply mb-3 flex flex-wrap items-center gap-3; }
   .check-col { @apply w-10 pr-0!; }
+  .address-list { @apply flex max-h-96 flex-col gap-2 overflow-y-auto rounded-xl border border-gray-200 p-3 dark:border-gray-800; }
 }

@@ -80,6 +80,8 @@ match (true) {
     $page === 'approvals' => approvals_controller(),
     $page === 'campaigns' => campaigns_controller(),
     $page === 'mailchimp' => mailchimp_controller(),
+    $page === 'giacom'    => giacom_controller(),
+    $page === 'giacom_settings' => (function () { $_GET['action'] = 'settings'; giacom_controller(); })(),
     entity($page) !== null => entity_controller($page),
     default               => not_found(),
 };

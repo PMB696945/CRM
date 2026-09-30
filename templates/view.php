@@ -6,6 +6,7 @@
   </div>
   <div class="actions">
     <?php if (can('audit.view')): ?><a class="btn btn-ghost" href="<?= h(url('audit', ['entity' => $name, 'entity_id' => $row['id']])) ?>">History</a><?php endif; ?>
+    <?php if ($name === 'sites' && can('orders.check') && giacom_configured()): ?><a class="btn" href="<?= h(url('giacom', ['action' => 'check', 'account_id' => $row['account_id'], 'site_id' => $row['id']])) ?>">Check broadband</a><?php endif; ?>
     <?php if ($name === 'products' && xero_connected() && can('products.edit')): ?>
       <form method="post" action="<?= h(url('products', ['action' => 'xero_push', 'id' => $row['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn"><?= $row['xero_synced_at'] ? 'Update in Xero' : 'Send to Xero' ?></button></form>
     <?php endif; ?>

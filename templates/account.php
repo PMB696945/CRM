@@ -125,6 +125,27 @@ $canEdit = can('customers.edit');
       <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => $sites ? ['identifier', 'service_type', 'site_id', 'carrier', 'status', 'monthly_price', 'contract_end_date'] : ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
     </section>
 
+    <?php if (can('orders.check') && (giacom_configured() || $giacomOrders)): ?>
+    <section class="card">
+      <div class="card-head"><h2>Broadband orders <span class="muted small">Giacom</span></h2>
+        <?php if (giacom_configured()): ?><a class="btn btn-sm" href="<?= h(url('giacom', ['action' => 'check', 'account_id' => $id])) ?>">Check broadband</a><?php endif; ?></div>
+      <?php if ($giacomOrders): ?>
+        <div class="table-wrap"><table class="table table-compact">
+          <thead><tr><th>Order</th><th>Product</th><th>Address</th><th>Required by</th><th>Status</th></tr></thead>
+          <tbody><?php foreach ($giacomOrders as $o): ?>
+            <tr><td><a href="<?= h(url('giacom', ['action' => 'view', 'id' => $o['id']])) ?>"><?= h($o['giacom_order_id']) ?></a></td><td><?= h($o['product_name']) ?></td>
+              <td class="small"><?= h($o['address_label']) ?></td><td><?= h(fmt_date($o['crd'])) ?></td>
+              <td><span class="badge <?= $o['completed_at'] ? 'badge-active' : (giacom_is_cancelled((string)$o['status']) ? 'badge-failed' : 'badge-pending') ?>"><?= h($o['status'] ?: 'Placed') ?></span></td></tr>
+          <?php endforeach; ?></tbody>
+        </table></div>
+      <?php endif; ?>
+      <?php if ($giacomChecks): ?>
+        <p class="small muted" style="margin-top:.75rem">Recent checks:
+          <?php foreach ($giacomChecks as $i => $c): ?><?= $i ? ' · ' : '' ?><a href="<?= h(url('giacom', ['action' => 'result', 'id' => $c['id']])) ?>"><?= h(mb_strimwidth((string)$c['address_label'], 0, 40, '…')) ?></a> (<?= h(fmt_date($c['created_at'])) ?>)<?php endforeach; ?></p>
+      <?php elseif (!$giacomOrders): ?><p class="muted">Check what broadband is available at the head office or any site, and order it from here.</p><?php endif; ?>
+    </section>
+    <?php endif; ?>
+
     <section class="card">
       <div class="card-head"><h2>Quotes</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('quotes'), 'name' => 'quotes', 'rows' => $quotes, 'columns' => ['reference', 'title', 'status', '_monthly', 'valid_until', 'sent_at']]); ?>

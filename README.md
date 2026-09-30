@@ -24,6 +24,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Dealers** | Mark any customer as a dealer and put other customers under it: referred by the dealer, or billed via the dealer, optionally covered by the dealer's master services agreement (MSA). Dealer pages show their customers, the group's combined MRR and commission |
 | **Quotes** | Build quotes from your product catalogue and email them. The customer accepts (name, email and a tick box) or declines on a branded web page. You're emailed when they respond |
 | **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and sent for signature via Signable. The signed PDF is saved, and the services can be added to the customer as pending |
+| **Giacom broadband ordering** | Check broadband availability at a customer's head office or any site (products, speeds, earliest dates, what's on the line), place provide or migrate orders with Giacom, and follow them to completion. Completed orders make the customer's service live |
 | **Roles & approvals** | Eight roles (super admin, admin, manager, staff, sales, support, finance, read only). A super admin decides what each role can see and do. Staff can ask to close or delete a customer; an approver has to agree before anything happens |
 | **Audit trail** | Who did what and when, with before-and-after values for every change, on one page (filter by person, customer, record, action or date, and export) and on each customer's page |
 
@@ -240,6 +241,18 @@ Products & tariffs can be created in Xero as **items**, so they can be picked on
 
 The SKU becomes the Xero item code (Xero allows up to 30 characters), the name its name (first 50 characters), the sale price its sales price and the cost price its purchase price. Each product's **sales and purchases nominal codes** become the item's accounts (the codes on the Xero page are defaults for new products). Press **Load nominal codes from Xero** to have product forms offer your chart of accounts and reject codes that don't exist. The description notes the billing cycle. Sending again updates the same item. The product list shows whether each product is in Xero, has changed since it was sent, or had a problem, with tabs to find them. Xero's reason is shown on the product.
 
+## Giacom: broadband availability and orders
+
+**Set up** (Admin → Giacom): enter the API username and password Giacom gave you (and client ID if you have one), your broadband realm (for usernames like `acc10001-1@yourisp.net`) and default care level. The login is tested with Giacom before it's saved, and the password is stored encrypted. The server's PHP needs the `dom` and `simplexml` extensions (standard on almost all hosting).
+
+**Permissions:** "Run broadband availability checks" (admin, manager, staff, sales and support by default) and "Place and cancel broadband orders" (admin and manager). Change them on Roles & permissions.
+
+**Checking:** on a customer's page (Broadband orders → **Check broadband**) or a site's page, enter the postcode, pick the address from Giacom's list, and optionally the existing phone number. The results show the exchange, what's on the line (e.g. "use a migrate order"), and each product with its speed, estimated speeds, care levels and earliest date. Every check is saved on the customer and in the audit trail.
+
+**Ordering:** press **Order** next to a product. Choose a new provide or a migrate (take-over), the required-by date, care level, engineer visit, broadband username and password, and the contact at the address (filled in from the site or main contact). The order goes to Giacom's `provide` or `migrate` call, the Giacom order number is saved, and a **pending** service is added to the customer (at the site, if you checked from one), optionally linked to one of your products for its price.
+
+**Tracking:** the hourly cron job (`cron/sync.php`) and **Check for updates** on the Broadband orders page fetch status changes from Giacom. Each order's page shows its history and has **Refresh from Giacom**. When Giacom completes an order its service becomes **active**; a cancelled order's pending service is marked ceased. People who can place orders can also ask Giacom to cancel one in progress (Giacom confirms whether it could).
+
 ## Customers: head office, sites and contacts
 
 - **Head office:** address, main phone and company email are on the customer form.
@@ -287,6 +300,7 @@ src/
   approvals.php    close/delete requests and approvals
   campaigns.php    service alerts and marketing: audiences, sending, unsubscribes
   mailchimp.php    Mailchimp Marketing API
+  giacom.php       Giacom comms API: availability checks, orders and tracking
   entities.php     field definitions + business rules (SLA, contract dates, numbering…)
   repository.php   generic validation, CRUD, listing, formatting
   controllers.php  page handlers
@@ -302,9 +316,9 @@ src/
   installer.php    shared install logic (CLI + web)
 templates/         PHP view templates
 install/           schema.sql, migrations.php (upgrades), installer, demo data
-cron/              scheduled jobs (sync.php: Xero, GoCardless, contracts awaiting signature, Mailchimp unsubscribes, queued emails)
+cron/              scheduled jobs (sync.php: Xero, GoCardless, contracts awaiting signature, Mailchimp unsubscribes, Giacom orders, queued emails)
 storage/           uploaded templates and generated/signed contracts (created automatically; not web-accessible)
-tests/             integration tests, with local stand-ins for Xero, GoCardless, Signable, Mailchimp and an SMTP server
+tests/             integration tests, with local stand-ins for Xero, GoCardless, Signable, Mailchimp, Giacom and an SMTP server
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

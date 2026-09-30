@@ -11,7 +11,7 @@ declare(strict_types=1);
 /** Settings that hold credentials; stored encrypted in the database. */
 const SECRET_SETTINGS = [
     'xero_client_secret', 'xero_access_token', 'xero_refresh_token',
-    'gocardless_access_token', 'signable_api_key', 'signable_webhook_secret', 'smtp_password', 'mailchimp_api_key', 'mandrill_api_key',
+    'gocardless_access_token', 'signable_api_key', 'signable_webhook_secret', 'smtp_password', 'mailchimp_api_key', 'mandrill_api_key', 'giacom_password',
 ];
 
 /**

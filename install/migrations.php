@@ -406,4 +406,68 @@ return [
             }
         }
     },
+
+    10 => function (): void {
+        // Giacom: availability checks and broadband orders placed from the CRM.
+        db()->exec("CREATE TABLE IF NOT EXISTS giacom_checks (
+            id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id        INT UNSIGNED NULL,
+            site_id           INT UNSIGNED NULL,
+            postcode          VARCHAR(12) NULL,
+            cli               VARCHAR(20) NULL,
+            address_label     VARCHAR(255) NULL,
+            address_reference VARCHAR(40) NULL,
+            css_database_code VARCHAR(10) NULL,
+            uprn              VARCHAR(20) NULL,
+            address           TEXT NULL,
+            result            MEDIUMTEXT NULL,
+            created_by        INT UNSIGNED NULL,
+            created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_gc_account (account_id, created_at),
+            CONSTRAINT fk_gchk_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            CONSTRAINT fk_gchk_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL,
+            CONSTRAINT fk_gchk_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS giacom_orders (
+            id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id         INT UNSIGNED NULL,
+            site_id            INT UNSIGNED NULL,
+            service_id         INT UNSIGNED NULL,
+            check_id           INT UNSIGNED NULL,
+            order_type         VARCHAR(20) NOT NULL,
+            giacom_order_id    VARCHAR(20) NULL,
+            giacom_service_id  VARCHAR(20) NULL,
+            cli                VARCHAR(20) NULL,
+            product_id         VARCHAR(20) NOT NULL,
+            product_name       VARCHAR(190) NULL,
+            technology_type    VARCHAR(40) NULL,
+            broadband_username VARCHAR(190) NULL,
+            address_label      VARCHAR(255) NULL,
+            crd                DATE NULL,
+            client_ref         VARCHAR(60) NULL,
+            status             VARCHAR(100) NULL,
+            status_updated_at  DATETIME NULL,
+            completed_at       DATETIME NULL,
+            details            TEXT NULL,
+            last_error         VARCHAR(500) NULL,
+            created_by         INT UNSIGNED NULL,
+            created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_giacom_order (giacom_order_id),
+            KEY idx_go_account (account_id),
+            CONSTRAINT fk_gord_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            CONSTRAINT fk_gord_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL,
+            CONSTRAINT fk_gord_service FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE SET NULL,
+            CONSTRAINT fk_gord_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS giacom_order_events (
+            id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            order_id   INT UNSIGNED NOT NULL,
+            event_date DATETIME NULL,
+            name       VARCHAR(60) NULL,
+            value      VARCHAR(500) NULL,
+            UNIQUE KEY uq_goe (order_id, event_date, name, value(150)),
+            CONSTRAINT fk_goe_order FOREIGN KEY (order_id) REFERENCES giacom_orders(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];

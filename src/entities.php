@@ -18,7 +18,7 @@ const SERVICE_TYPES = [
 
 const CARRIERS = [
     'EE', 'Vodafone', 'O2', 'Three', 'BT Wholesale', 'Openreach', 'TalkTalk Wholesale',
-    'CityFibre', 'Virgin Media Business', 'Gamma', 'Colt', 'Other',
+    'CityFibre', 'Virgin Media Business', 'Gamma', 'Colt', 'Giacom', 'Other',
 ];
 
 const OPP_STAGES = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
