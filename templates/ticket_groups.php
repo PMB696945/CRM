@@ -9,6 +9,10 @@
   <div class="field"><label for="tg_desc">Description</label><input id="tg_desc" name="description" value="<?= h($group['description'] ?? '') ?>" maxlength="255"></div>
   <div class="field"><label for="tg_email">Shared email (optional)</label><input id="tg_email" type="email" name="email" value="<?= h($group['email'] ?? '') ?>" placeholder="e.g. faults@yourcompany.co.uk">
     <div class="help">New tickets are emailed here. Leave blank to email each member instead.</div></div>
+  <div class="field"><label for="tg_pick">Alert if not picked up within (minutes)</label><input id="tg_pick" type="number" min="0" max="10080" name="pickup_minutes" value="<?= h($group['pickup_minutes'] ?? '') ?>" placeholder="<?= (int)ticket_pickup_minutes(null) ?> (the default)">
+    <div class="help">Leave blank for the default below; 0 turns alerts off for this group.</div></div>
+  <div class="field"><label for="tg_alert">Also alert (optional)</label><input id="tg_alert" type="email" name="alert_email" value="<?= h($group['alert_email'] ?? '') ?>" placeholder="e.g. team-leader@yourcompany.co.uk">
+    <div class="help">As well as the people whose role gets ticket alerts.</div></div>
   <div class="field field-check"><label><input type="checkbox" name="active" value="1" <?= ($group['active'] ?? 1) ? 'checked' : '' ?>> Active</label></div>
   <div class="field wide">
     <fieldset class="checkbox-group"><legend>Tickets in these categories go to this group</legend>
@@ -33,16 +37,29 @@
 <?php endif; ?>
 
 <div class="table-wrap" style="margin-top:1.5rem"><table class="table">
-  <thead><tr><th>Group</th><th>Categories</th><th>Members</th><th class="num">Waiting</th><th>Status</th></tr></thead>
+  <thead><tr><th>Group</th><th>Categories</th><th>Members</th><th>Alert after</th><th class="num">Waiting</th><th>Status</th></tr></thead>
   <tbody>
   <?php foreach ($groups as $g): ?>
     <tr>
       <td><a class="row-link" href="<?= h(url('ticket_groups', ['id' => $g['id']])) ?>"><?= h($g['name']) ?></a><div class="muted small"><?= h($g['description']) ?></div></td>
       <td class="small"><?= h(implode(', ', array_map(fn($c) => $categories[$c] ?? $c, array_filter(explode(',', (string)$g['categories']))))) ?: '<span class="muted">—</span>' ?></td>
       <td class="small"><?= h(implode(', ', $memberNames[(int)$g['id']] ?? [])) ?: '<span class="text-warning">No members</span>' ?></td>
+      <td class="small"><?= ($m = ticket_pickup_minutes($g)) ? h(duration_label($m)) . ($g['pickup_minutes'] === null ? ' <span class="muted">(default)</span>' : '') : '<span class="muted">Off</span>' ?></td>
       <td class="num"><a href="<?= h(url('queue', ['group' => $g['id']])) ?>"><?= (int)($waiting[(int)$g['id']] ?? 0) ?></a></td>
       <td><?= $g['active'] ? badge('active') : badge('disabled') ?></td>
     </tr>
   <?php endforeach; ?>
   </tbody>
 </table></div>
+
+<section class="card" style="margin-top:1.5rem">
+  <div class="card-head"><h2>Tickets nobody picks up</h2></div>
+  <p>If a ticket waits in a group's queue longer than the group's limit, an alert is emailed and shown at the top of the CRM to people whose role can "Get alerts about tickets nobody has picked up"<?= $alertees ? ' (currently ' . h(implode(', ', array_column($alertees, 'name'))) . ')' : '' ?>. Each ticket is alerted once, and a note is added to it.</p>
+  <form method="post" action="<?= h(url('ticket_groups', ['action' => 'default_pickup'])) ?>" class="inline-form">
+    <?= csrf_field() ?>
+    <label class="check" for="tg_default">Default limit</label>
+    <input id="tg_default" type="number" min="0" max="10080" name="default_minutes" value="<?= (int)ticket_pickup_minutes(null) ?>" style="max-width:7rem"> <span class="muted">minutes (0 = off)</span>
+    <button class="btn btn-sm">Save</button>
+  </form>
+  <p class="help" style="margin-top:.75rem">The check runs every minute while anyone is using the CRM, and on every run of the cron job.</p>
+</section>

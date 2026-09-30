@@ -46,6 +46,15 @@ if ($page === 'logout') {
 
 require_login();
 
+// After the page has been sent, check for tickets waiting too long in a queue
+// (at most once a minute), so alerts go out even without a frequent cron job.
+register_shutdown_function(function (): void {
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+    }
+    ticket_pickup_alerts_throttled();
+});
+
 // Safety net for the audit trail: record any change (POST) that wasn't logged in more detail.
 register_shutdown_function(function () use ($page): void {
     if (is_post() && empty($GLOBALS['audit_written']) && http_response_code() < 400 && !in_array($page, ['refs', 'logout'], true)) {

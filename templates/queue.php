@@ -3,6 +3,7 @@ $waitingAge = function (string $created): string {
     $mins = max(0, (int)round((time() - strtotime($created)) / 60));
     return $mins < 60 ? $mins . 'm' : ($mins < 2880 ? intdiv($mins, 60) . 'h ' . ($mins % 60) . 'm' : intdiv($mins, 1440) . 'd');
 };
+$overdueIds = array_flip(array_map(fn($t) => (int)$t['id'], tickets_overdue_pickup()));
 $groupName = $groupId ? (array_values(array_filter($groups, fn($g) => (int)$g['id'] === $groupId))[0]['name'] ?? '') : null;
 ?>
 <div class="page-head">
@@ -17,7 +18,7 @@ $groupName = $groupId ? (array_values(array_filter($groups, fn($g) => (int)$g['i
   <div class="card empty"><p>You're not in any ticket groups yet.</p><p class="muted">Ask an admin to add you under Admin → Ticket groups.</p></div>
 <?php else: ?>
 <nav class="tabs">
-  <a href="<?= h(url('queue')) ?>" class="<?= !$groupId ? 'active' : '' ?>">All my groups</a>
+  <a href="<?= h(url('queue')) ?>" class="<?= !$groupId ? 'active' : '' ?>"><?= can('tickets.all') ? 'All groups' : 'All my groups' ?></a>
   <?php foreach ($groups as $g): ?>
     <a href="<?= h(url('queue', ['group' => $g['id']])) ?>" class="<?= $groupId === (int)$g['id'] ? 'active' : '' ?>"><?= h($g['name']) ?> <span class="count"><?= (int)($counts[(int)$g['id']] ?? 0) ?></span></a>
   <?php endforeach; ?>
@@ -33,7 +34,7 @@ $groupName = $groupId ? (array_values(array_filter($groups, fn($g) => (int)$g['i
       <td><?= h($t['account_name']) ?></td>
       <td><?= h($t['group_name']) ?></td>
       <td><?= badge($t['priority']) ?></td>
-      <td><?= h($waitingAge($t['created_at'])) ?><div class="muted small"><?= h(fmt_datetime($t['created_at'])) ?></div></td>
+      <td class="<?= isset($overdueIds[(int)$t['id']]) ? 'text-danger' : '' ?>"><?= h($waitingAge($t['created_at'])) ?><?= isset($overdueIds[(int)$t['id']]) ? ' · too long' : '' ?><div class="muted small"><?= h(fmt_datetime($t['created_at'])) ?></div></td>
       <td><?= sla_html($t['sla_due_at'], $t['status'], null) ?></td>
       <td class="right"><form method="post" class="inline"><?= csrf_field() ?><input type="hidden" name="id" value="<?= (int)$t['id'] ?>"><button class="btn btn-sm">Pick up</button></form></td>
     </tr>

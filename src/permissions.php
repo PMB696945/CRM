@@ -43,6 +43,7 @@ const PERMISSIONS = [
         'orders.place'  => 'Place and cancel broadband orders (Giacom)',
         'tickets.edit'  => 'Log and update support tickets',
         'tickets.all'   => 'See tickets in every group (not just their own)',
+        'tickets.alerts' => 'Get alerts about tickets nobody has picked up',
         'sales.edit'    => 'Quotes, contracts and opportunities',
         'records.delete' => 'Delete contacts, services, tickets and other records',
         'export'        => 'Export lists to CSV',
@@ -64,7 +65,7 @@ const PERMISSIONS = [
 ];
 
 const DEFAULT_ROLE_PERMISSIONS = [
-    'admin'     => ['tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'customers.delete', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
+    'admin'     => ['tickets.alerts', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'customers.delete', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
                     'records.delete', 'export', 'finance.view', 'products.edit', 'costs.view', 'costs.edit', 'marketing.send', 'settings.manage', 'users.manage'],
     'manager'   => ['tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
                     'records.delete', 'export', 'finance.view', 'costs.view', 'costs.edit', 'marketing.send'],
@@ -76,7 +77,7 @@ const DEFAULT_ROLE_PERMISSIONS = [
 ];
 
 /** Permissions added after the Roles page existed: roles saved before then get the defaults for these. */
-const PERMISSIONS_ADDED_LATER = ['costs.view', 'costs.edit', 'orders.check', 'orders.place', 'tickets.all'];
+const PERMISSIONS_ADDED_LATER = ['costs.view', 'costs.edit', 'orders.check', 'orders.place', 'tickets.all', 'tickets.alerts'];
 
 /** Built-in roles plus any custom roles created on the Roles page: [key => label]. */
 function roles(): array

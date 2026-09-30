@@ -69,6 +69,15 @@ if (giacom_configured()) {
     }
 }
 
+try {
+    if ($n = ticket_pickup_alerts()) {
+        echo date('c') . " Tickets: alerted admins about $n ticket(s) not picked up\n";
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, date('c') . ' Ticket pick-up check failed: ' . $e->getMessage() . "\n");
+    $failed = true;
+}
+
 // Carry on sending service alerts / marketing emails that are part-way through.
 try {
     $n = campaigns_process_queue();

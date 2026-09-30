@@ -9,7 +9,7 @@ $nav = [
         'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
         'tickets'       => ['ticket', 'Support tickets'],
-    ] + (can('tickets.edit') && user_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []) + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
+    ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []) + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'contracts'     => ['signature', 'Contracts'],
@@ -88,6 +88,9 @@ $flash = flash();
       </div>
     </header>
     <main class="content">
+      <?php if (can('tickets.alerts') && ($overduePickup = count(tickets_overdue_pickup()))): ?>
+        <div class="flash flash-warning" role="status"><?= $overduePickup ?> ticket<?= $overduePickup === 1 ? ' has' : 's have' ?> waited too long without being picked up. <a href="<?= h(url('queue')) ?>">See the queue</a></div>
+      <?php endif; ?>
       <?php if ($flash): ?>
         <div class="flash flash-<?= h($flash['type']) ?>" role="status"><?= h($flash['message']) ?></div>
       <?php endif; ?>

@@ -1369,6 +1369,49 @@ proc_terminate($gProc);
 @unlink($gState);
 foreach (['giacom_username', 'giacom_password', 'giacom_events_since', 'giacom_last_sync_at'] as $k) { set_setting($k, null); }
 
+
+echo "Ticket pick-up alerts\n";
+test('tickets waiting too long alert admins once; per-group limits', function () {
+    $acc = create('accounts', ['name' => 'Alert Co', 'type' => 'business', 'status' => 'active']);
+    $faults = (int)db_value("SELECT id FROM ticket_groups WHERE name = 'Faults'");
+    $billing = (int)db_value("SELECT id FROM ticket_groups WHERE name = 'Billing'");
+    db_exec('UPDATE tickets SET pickup_alerted_at = NOW() WHERE pickup_alerted_at IS NULL'); // earlier tests' tickets
+    set_setting('ticket_pickup_minutes', '30');
+    db_exec('UPDATE ticket_groups SET pickup_minutes = NULL, alert_email = ? WHERE id = ?', ['faults-lead@example.com', $faults]);
+    db_exec('UPDATE ticket_groups SET pickup_minutes = 0 WHERE id = ?', [$billing]);
+    $late = create('tickets', ['account_id' => $acc, 'subject' => 'Late fault', 'category' => 'fault', 'priority' => 'P2', 'status' => 'open']);
+    $fresh = create('tickets', ['account_id' => $acc, 'subject' => 'Fresh fault', 'category' => 'fault', 'priority' => 'P2', 'status' => 'open']);
+    $bill = create('tickets', ['account_id' => $acc, 'subject' => 'Old billing', 'category' => 'billing', 'priority' => 'P3', 'status' => 'open']);
+    db_exec('UPDATE tickets SET created_at = DATE_SUB(NOW(), INTERVAL 45 MINUTE) WHERE id IN (?, ?)', [$late, $bill]);
+    $overdue = array_map(fn($t) => (int)$t['id'], tickets_overdue_pickup());
+    eq([$late], $overdue, 'only past the limit, and not in groups with alerts off');
+    ok(can('tickets.alerts'));
+    $before = count(sent_mails());
+    eq(1, ticket_pickup_alerts());
+    usleep(300000);
+    $mails = array_slice(sent_mails(), $before);
+    $to = array_map(fn($m) => preg_match('/X-Rcpt: (\S+)/', $m, $x) ? $x[1] : '', $mails);
+    ok(in_array('test@example.com', $to, true), 'admin emailed');
+    ok(in_array('faults-lead@example.com', $to, true), 'group alert address emailed');
+    ok(str_contains(mail_body($mails[0]), 'Late fault'));
+    ok(db_value('SELECT pickup_alerted_at FROM tickets WHERE id = ?', [$late]) !== null);
+    ok(str_contains((string)db_value('SELECT body FROM ticket_comments WHERE ticket_id = ? ORDER BY id DESC LIMIT 1', [$late]), 'admins alerted'));
+    eq(0, ticket_pickup_alerts(), 'each ticket is alerted once');
+    eq([$late], array_map(fn($t) => (int)$t['id'], tickets_overdue_pickup()), 'still shown as waiting too long until picked up');
+    ticket_pick_up($late);
+    eq([], tickets_overdue_pickup(), 'picked up: no longer overdue');
+    db_exec('UPDATE ticket_groups SET pickup_minutes = 10 WHERE id = ?', [$billing]);
+    eq([$bill], array_map(fn($t) => (int)$t['id'], tickets_overdue_pickup(true)), 'group limit overrides the default');
+    eq(10, ticket_pickup_minutes(db_one('SELECT * FROM ticket_groups WHERE id = ?', [$billing])));
+    eq(30, ticket_pickup_minutes(null));
+    set_setting('ticket_pickup_checked_at', (string)time());
+    ticket_pickup_alerts_throttled();
+    eq(null, db_value('SELECT pickup_alerted_at FROM tickets WHERE id = ?', [$bill]), 'throttled: at most one check a minute');
+    set_setting('ticket_pickup_checked_at', null);
+    ticket_pickup_alerts_throttled();
+    ok(db_value('SELECT pickup_alerted_at FROM tickets WHERE id = ?', [$bill]) !== null);
+});
+
 proc_terminate($sinkProc);
 proc_terminate($sgProc);
 @unlink($sgState);

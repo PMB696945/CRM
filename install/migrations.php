@@ -502,4 +502,17 @@ return [
             }
         }
     },
+
+    12 => function (): void {
+        // Alert when a ticket waits too long in a queue without being picked up.
+        if (!column_exists('ticket_groups', 'pickup_minutes')) {
+            db()->exec('ALTER TABLE ticket_groups ADD COLUMN pickup_minutes INT UNSIGNED NULL AFTER email');
+        }
+        if (!column_exists('ticket_groups', 'alert_email')) {
+            db()->exec('ALTER TABLE ticket_groups ADD COLUMN alert_email VARCHAR(190) NULL AFTER pickup_minutes');
+        }
+        if (!column_exists('tickets', 'pickup_alerted_at')) {
+            db()->exec('ALTER TABLE tickets ADD COLUMN pickup_alerted_at DATETIME NULL AFTER group_id');
+        }
+    },
 ];
