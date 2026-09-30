@@ -109,6 +109,13 @@ function query_int(string $key): ?int
     return ctype_digit($value) ? (int)$value : null;
 }
 
+/** This page's address as used for "return to" links (index.php?...). */
+function current_url(): string
+{
+    $q = (string)($_SERVER['QUERY_STRING'] ?? '');
+    return 'index.php' . ($q !== '' ? '?' . $q : '');
+}
+
 function render(string $template, array $vars = []): void
 {
     extract($vars, EXTR_SKIP);

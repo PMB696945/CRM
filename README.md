@@ -287,6 +287,22 @@ Emails go out in batches (50 by default; see Settings → Marketing) while the p
 
 **Service alerts through Mailchimp:** Mailchimp's rules don't allow service messages to be sent as marketing campaigns. Its paid **Transactional** add-on (formerly Mandrill) is designed for them. To use it for all email the CRM sends, choose *Mailchimp Transactional* under Settings → Email and paste its API key.
 
+## Documents
+
+**Documents** (under Sales) is a library of spec sheets, brochures and the like, in folders. People whose role can "Upload and organise documents" (admins and managers by default) add folders and upload files; everyone can view and download them. When you email a quote, tick any library documents (or the customer's own files) to attach them; up to 15 MB in total.
+
+Each customer and supplier also has a **Files** card for documents kept against them (signed order forms, contracts, price lists). Files are stored privately in `storage/documents` and only served to signed-in users. Uploads are limited by your host's PHP settings (`upload_max_filesize` and `post_max_size`); raise them in cPanel's *MultiPHP INI Editor* if larger files are refused.
+
+## Suppliers and purchase orders
+
+**Suppliers** (under Purchasing) records who you buy from, their contacts and your account number, their **products and cost prices**, **purchase orders** and **files**. Link a supplier's product to one of your products and tick *Preferred supplier*: that price becomes the product's cost price and follows any price changes (converted to the product's billing cycle).
+
+- **Price files**: on a supplier, *Import price file* reads a CSV or Excel (.xlsx) price list, lets you say which columns hold the code, description, cost and setup cost (remembered for next time), and shows every price change before anything is saved.
+- **Purchase orders**: raise one from a supplier, pick lines from their products, then email it to them (or mark it as ordered through their portal) and mark it received when it arrives.
+- **Xero**: *Bring in from Xero* on the Suppliers list (or switch it on for every sync under Admin → Xero) adds the contacts Xero marks as suppliers, linking any with the same name instead of duplicating them.
+
+Permissions: *See suppliers* (staff, support, finance), *Add and edit suppliers* and *Raise purchase orders* (admins, managers, finance).
+
 ## Tests
 
 ```bash

@@ -1,7 +1,7 @@
 <?php
 /* Files kept against a customer or supplier: $docs, $where (['account_id' => n] or ['supplier_id' => n]). */
 $canAdd = document_can('add', $where);
-$return = $_SERVER['REQUEST_URI'] ?? '';
+$return = current_url();
 ?>
 <section class="card" id="files">
   <div class="card-head"><h2>Files <span class="count"><?= count($docs) ?></span></h2></div>

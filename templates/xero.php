@@ -57,12 +57,12 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
           </form>
         <?php endif; ?>
         <div class="actions" style="margin-top:.75rem">
-          <form method="post" action="<?= h(url('xero', ['action' => 'connect'])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm">Reconnect</button></form>
+          <a class="btn btn-sm" href="<?= h(url('xero', ['action' => 'connect', 'token' => csrf_token()])) ?>">Reconnect</a>
           <form method="post" action="<?= h(url('xero', ['action' => 'disconnect'])) ?>" class="inline" data-confirm="Disconnect from Xero?"><?= csrf_field() ?><button class="btn btn-sm btn-danger">Disconnect</button></form>
         </div>
       <?php elseif ($configured): ?>
         <p>You'll be sent to Xero to log in and choose which organisation to share. The CRM asks for <b>read-only</b> access to contacts and invoices<?= xero_can_write_contacts() ? ', plus permission to update contact email addresses' : '' ?>.</p>
-        <form method="post" action="<?= h(url('xero', ['action' => 'connect'])) ?>"><?= csrf_field() ?><button class="btn btn-primary">Connect to Xero</button></form>
+        <p><a class="btn btn-primary" href="<?= h(url('xero', ['action' => 'connect', 'token' => csrf_token()])) ?>">Connect to Xero</a></p>
       <?php else: ?>
         <p class="muted">Save your Xero app details first.</p>
       <?php endif; ?>

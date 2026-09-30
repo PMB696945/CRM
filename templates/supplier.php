@@ -1,6 +1,6 @@
 <?php
 $id = (int)$supplier['id'];
-$here = $_SERVER['REQUEST_URI'] ?? '';
+$here = current_url();
 $xeroContact = !empty($supplier['xero_contact_id']) && xero_connected() ? db_one('SELECT contact_id, name FROM xero_contacts WHERE id = ?', [$supplier['xero_contact_id']]) : null;
 $line = fn(...$parts) => implode(', ', array_filter(array_map(fn($v) => trim((string)$v), $parts)));
 $link = fn($u) => $u ? '<a href="' . h(preg_match('#^https?://#i', $u) ? $u : 'https://' . $u) . '" target="_blank" rel="noopener">' . h(preg_replace('#^https?://#i', '', $u)) . ' ↗</a>' : '';

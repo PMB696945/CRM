@@ -714,6 +714,23 @@ function xero_controller(): void
 {
     $action = query('action');
 
+    // Connect is a plain link rather than a form: browsers apply the page's form-action
+    // rule to every redirect after a form is sent, which can stop the hop to Xero's login.
+    if ($action === 'connect' && !is_post()) {
+        require_permission('settings.manage');
+        if (!hash_equals(csrf_token(), (string)query('token'))) {
+            flash('That link has expired. Press Connect to Xero again.', 'error');
+            redirect(url('xero'));
+        }
+        if (!xero_configured()) {
+            flash('Enter your Xero app\'s Client ID and Client Secret first.', 'error');
+            redirect(url('xero'));
+        }
+        $_SESSION['xero_oauth_state'] = bin2hex(random_bytes(16));
+        $_SESSION['xero_redirect_uri'] = xero_redirect_uri();
+        redirect(xero_authorize_url($_SESSION['xero_oauth_state'], $_SESSION['xero_redirect_uri']));
+    }
+
     if ($action === 'sync') {
         if (!is_post()) {
             redirect(url('xero'));

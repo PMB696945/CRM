@@ -255,7 +255,7 @@ function security_headers(): void
     header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()');
     header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-" . csp_nonce() . "'; style-src 'self' 'unsafe-inline'; "
         . "img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; "
-        . "form-action 'self' https://login.xero.com");
+        . "form-action 'self' https://login.xero.com https://*.xero.com");
     if (is_https()) {
         header('Strict-Transport-Security: max-age=31536000');
     }

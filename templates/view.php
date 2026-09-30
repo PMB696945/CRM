@@ -26,7 +26,7 @@
 <?php if ($name === 'products' && can('suppliers.view')): $prices = product_supplier_prices((int)$row['id']); ?>
 <section class="card">
   <div class="card-head"><h2>Suppliers</h2>
-    <?php if (can('suppliers.edit')): ?><a class="btn btn-sm" href="<?= h(url('supplier_products', ['action' => 'new', 'product_id' => $row['id'], 'description' => $row['name'], 'billing_frequency' => $row['billing_frequency'], 'return' => $_SERVER['REQUEST_URI'] ?? ''])) ?>">+ Add supplier price</a><?php endif; ?></div>
+    <?php if (can('suppliers.edit')): ?><a class="btn btn-sm" href="<?= h(url('supplier_products', ['action' => 'new', 'product_id' => $row['id'], 'description' => $row['name'], 'billing_frequency' => $row['billing_frequency'], 'return' => current_url()])) ?>">+ Add supplier price</a><?php endif; ?></div>
   <?php if ($prices): ?>
     <div class="table-wrap"><table class="table">
       <thead><tr><th>Supplier</th><th>Their code</th><th class="num">Cost</th><th class="num">Setup</th><th>Lead time</th><th>Price changed</th></tr></thead>

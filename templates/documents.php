@@ -32,14 +32,14 @@
             <?php if ($manage): ?>
               <details class="dropdown inline"><summary class="btn btn-sm btn-ghost">Edit</summary>
                 <form method="post" action="<?= h(url('documents', ['action' => 'edit', 'id' => $d['id']])) ?>" class="dropdown-panel card stack text-left">
-                  <?= csrf_field() ?><input type="hidden" name="_return" value="<?= h($_SERVER['REQUEST_URI'] ?? '') ?>">
+                  <?= csrf_field() ?><input type="hidden" name="_return" value="<?= h(current_url()) ?>">
                   <label>Name<input name="title" value="<?= h($d['title']) ?>" required maxlength="190"></label>
                   <label>Description<input name="description" value="<?= h($d['description'] ?? '') ?>" maxlength="500"></label>
                   <label>Folder<select name="folder_id"><?php foreach ($folders as $f): ?><option value="<?= (int)$f['id'] ?>" <?= (int)$f['id'] === (int)$d['folder_id'] ? 'selected' : '' ?>><?= h($f['name']) ?></option><?php endforeach; ?></select></label>
                   <button class="btn btn-primary btn-sm">Save</button>
                 </form>
               </details>
-              <form method="post" action="<?= h(url('documents', ['action' => 'delete', 'id' => $d['id']])) ?>" class="inline" data-confirm="Delete &quot;<?= h($d['title']) ?>&quot;? It will also be removed from any quotes it was picked for."><?= csrf_field() ?><input type="hidden" name="_return" value="<?= h($_SERVER['REQUEST_URI'] ?? '') ?>"><button class="btn btn-sm btn-danger-ghost" aria-label="Delete">✕</button></form>
+              <form method="post" action="<?= h(url('documents', ['action' => 'delete', 'id' => $d['id']])) ?>" class="inline" data-confirm="Delete &quot;<?= h($d['title']) ?>&quot;? It will also be removed from any quotes it was picked for."><?= csrf_field() ?><input type="hidden" name="_return" value="<?= h(current_url()) ?>"><button class="btn btn-sm btn-danger-ghost" aria-label="Delete">✕</button></form>
             <?php endif; ?>
           </td>
         </tr>
@@ -73,7 +73,7 @@
     <section class="card">
       <div class="card-head"><h2>Upload</h2></div>
       <form method="post" action="<?= h(url('documents', ['action' => 'upload'])) ?>" enctype="multipart/form-data" class="stack">
-        <?= csrf_field() ?><input type="hidden" name="_return" value="<?= h($_SERVER['REQUEST_URI'] ?? '') ?>">
+        <?= csrf_field() ?><input type="hidden" name="_return" value="<?= h(current_url()) ?>">
         <label>Folder<select name="folder_id" required><?php foreach ($folders as $f): ?><option value="<?= (int)$f['id'] ?>" <?= (int)($folder['id'] ?? 0) === (int)$f['id'] ? 'selected' : '' ?>><?= h($f['name']) ?></option><?php endforeach; ?></select></label>
         <label>File(s)<input type="file" name="files[]" multiple required accept="<?= h(implode(',', array_map(fn($e) => ".$e", array_keys(DOC_TYPES)))) ?>"></label>
         <label>Name (optional)<input name="title" maxlength="190" placeholder="Defaults to the file name"></label>

@@ -495,6 +495,8 @@
   .attach-list label { @apply flex items-start gap-2 text-theme-sm font-normal; }
   .attach-list input { @apply mt-0.5 w-auto; }
   .dropdown { @apply relative; }
+  details.dropdown.inline { @apply inline-block align-middle; }
+  .dropdown-panel.text-left { @apply text-left whitespace-normal; }
   .dropdown > summary { @apply list-none cursor-pointer; }
   .dropdown > summary::-webkit-details-marker { display: none; }
   .dropdown-panel { @apply absolute right-0 z-40 mt-2 mb-0 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-6 shadow-theme-lg; }
