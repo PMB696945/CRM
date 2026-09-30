@@ -83,6 +83,15 @@ function validate(array $entity, array $input): array
                 $data[$field] = $value;
                 break;
 
+            case 'term':
+                // One of the set terms; an older value already on the record can be kept.
+                if (!preg_match('/^\d+$/', $raw) || (int)$raw > 120) {
+                    $errors[$field] = "Choose a $label.";
+                    break;
+                }
+                $data[$field] = (int)$raw;
+                break;
+
             case 'date':
                 $d = DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
                 if (!$d || $d->format('Y-m-d') !== $raw) {
@@ -324,6 +333,8 @@ function display_value(array $entity, string $column, array $row, bool $link = t
                 : h($def['options'][$value] ?? humanize($value));
         case 'money':
             return $value === null ? '<span class="muted">—</span>' : h(money($value));
+        case 'term':
+            return $value === null ? '<span class="muted">—</span>' : h(term_label($value));
         case 'mandate':
             return gc_mandate_badge($value);
         case 'percent':
@@ -405,6 +416,7 @@ function export_value(array $entity, string $column, array $row): string
         'ref'    => (string)($row[$column . '__label'] ?? ''),
         'select' => (string)($def['options'][$value] ?? $value ?? ''),
         'bool'   => $value ? 'Yes' : 'No',
+        'term'   => term_label($value),
         'money'  => $value === null ? '' : number_format((float)$value, 2, '.', ''),
         'mandate' => gc_mandate_label($value),
         'percent' => $value === null ? '' : (string)$value,

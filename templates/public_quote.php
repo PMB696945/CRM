@@ -41,14 +41,14 @@
       <tbody>
       <?php foreach ($lines as $l): ?>
         <tr><td class="text-gray-800 dark:text-white/90"><?= h($l['description']) ?><div class="muted text-theme-xs"><?= h(SERVICE_TYPES[$l['service_type']] ?? '') ?></div></td>
-          <td class="num"><?= (int)$l['quantity'] ?></td><td class="num"><?= h(money($l['monthly_price'])) ?></td><td class="num"><?= h(money($l['setup_fee'])) ?></td><td class="num"><?= (int)$l['term_months'] ?> months</td></tr>
+          <td class="num"><?= (int)$l['quantity'] ?></td><td class="num"><?= h(money($l['monthly_price'])) ?></td><td class="num"><?= h(money($l['setup_fee'])) ?></td><td class="num"><?= h(term_label($l['term_months'])) ?></td></tr>
       <?php endforeach; ?>
       </tbody>
     </table></div>
     <div class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
       <div><div class="kpi-label">Monthly total</div><div class="text-xl font-bold text-gray-800 dark:text-white/90"><?= h(money($totals['monthly'])) ?></div><div class="kpi-sub">+ VAT</div></div>
       <div><div class="kpi-label">One-off total</div><div class="text-xl font-bold text-gray-800 dark:text-white/90"><?= h(money($totals['setup'])) ?></div><div class="kpi-sub">+ VAT</div></div>
-      <div><div class="kpi-label">Minimum term</div><div class="text-xl font-bold text-gray-800 dark:text-white/90"><?= (int)$totals['term'] ?> months</div></div>
+      <div><div class="kpi-label">Minimum term</div><div class="text-xl font-bold text-gray-800 dark:text-white/90"><?= h(term_label($totals['term'])) ?></div></div>
     </div>
     <?php if ($terms = setting('quote_terms')): ?><p class="help mt-5"><?= nl2br(h($terms)) ?></p><?php endif; ?>
   </section>

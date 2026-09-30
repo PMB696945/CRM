@@ -326,23 +326,25 @@ function xero_sync(): array
         $now = date('Y-m-d H:i:s');
 
         db()->beginTransaction();
-        $upsert = db()->prepare('INSERT INTO xero_contacts (contact_id, name, account_number, email, status, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+        $upsert = db()->prepare('INSERT INTO xero_contacts (contact_id, name, account_number, email, status, is_supplier, is_customer, details, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), account_number = VALUES(account_number),
-                email = VALUES(email), status = VALUES(status), synced_at = VALUES(synced_at)');
+                email = VALUES(email), status = VALUES(status), is_supplier = VALUES(is_supplier), is_customer = VALUES(is_customer),
+                details = COALESCE(VALUES(details), details), synced_at = VALUES(synced_at)');
         $seen = [];
         foreach ($contacts as $c) {
             if (empty($c['ContactID'])) {
                 continue;
             }
             $upsert->execute([$c['ContactID'], mb_substr($c['Name'] ?? '(no name)', 0, 255), $c['AccountNumber'] ?? null,
-                $c['EmailAddress'] ?? null, $c['ContactStatus'] ?? null, $now]);
+                $c['EmailAddress'] ?? null, $c['ContactStatus'] ?? null, !empty($c['IsSupplier']) ? 1 : 0, !empty($c['IsCustomer']) ? 1 : 0,
+                xero_contact_details($c), $now]);
             $seen[$c['ContactID']] = true;
         }
         // Contacts with balances that weren't in the list (e.g. archived) still need a row.
         foreach ($balances as $id => $b) {
             if (!isset($seen[$id])) {
-                $upsert->execute([$id, mb_substr($b['name'] ?? '(unknown contact)', 0, 255), null, null, null, $now]);
+                $upsert->execute([$id, mb_substr($b['name'] ?? '(unknown contact)', 0, 255), null, null, null, 0, 1, null, $now]);
             }
         }
         db_exec('UPDATE xero_contacts SET outstanding = 0, overdue = 0, open_invoices = 0, oldest_due_date = NULL');
@@ -352,11 +354,13 @@ function xero_sync(): array
         }
         $linked = xero_auto_link();
         db()->commit();
+        $suppliers = setting('xero_import_suppliers') === '1' ? xero_import_suppliers() : null;
 
         $summary = [
             'contacts'  => count($contacts),
             'invoices'  => count($invoices),
             'linked'    => $linked,
+            'suppliers' => $suppliers ? $suppliers['created'] + $suppliers['linked'] : null,
             'seconds'   => round(microtime(true) - $started, 1),
         ];
         set_setting('xero_last_sync_at', $now);
@@ -372,6 +376,106 @@ function xero_sync(): array
     } finally {
         db_value("SELECT RELEASE_LOCK('telecomcrm_xero_sync')");
     }
+}
+
+/** The parts of a Xero contact a supplier record can use (phones, address, website, person), as JSON. */
+function xero_contact_details(array $c): ?string
+{
+    $phone = null;
+    $mobile = null;
+    foreach ($c['Phones'] ?? [] as $p) {
+        $number = trim(implode(' ', array_filter([trim((string)($p['PhoneAreaCode'] ?? '')), trim((string)($p['PhoneNumber'] ?? ''))])));
+        if ($number === '') {
+            continue;
+        }
+        if (($p['PhoneType'] ?? '') === 'MOBILE') {
+            $mobile ??= $number;
+        } elseif (in_array($p['PhoneType'] ?? '', ['DEFAULT', 'DDI'], true)) {
+            $phone ??= $number;
+        }
+    }
+    $address = null;
+    // Prefer the street address, else the postal one.
+    foreach (['STREET', 'POBOX'] as $type) {
+        foreach ($c['Addresses'] ?? [] as $a) {
+            if (($a['AddressType'] ?? '') === $type && trim(($a['AddressLine1'] ?? '') . ($a['PostalCode'] ?? '')) !== '') {
+                $address = [
+                    'address' => trim((string)($a['AddressLine1'] ?? '')), 'address2' => trim(implode(', ', array_filter([$a['AddressLine2'] ?? '', $a['AddressLine3'] ?? '']))),
+                    'city' => trim((string)($a['City'] ?? '')), 'county' => trim((string)($a['Region'] ?? '')), 'postcode' => strtoupper(trim((string)($a['PostalCode'] ?? ''))),
+                ];
+                break 2;
+            }
+        }
+    }
+    $terms = $c['PaymentTerms']['Bills'] ?? null;
+    $details = array_filter([
+        'contact_name' => trim(($c['FirstName'] ?? '') . ' ' . ($c['LastName'] ?? '')),
+        'phone' => $phone ?? $mobile,
+        'website' => trim((string)($c['Website'] ?? '')),
+        'payment_terms' => $terms && isset($terms['Day']) ? xero_payment_terms_label((int)$terms['Day'], (string)($terms['Type'] ?? '')) : '',
+        'address' => $address,
+    ]);
+    return $details ? json_encode($details) : null;
+}
+
+function xero_payment_terms_label(int $day, string $type): string
+{
+    return match ($type) {
+        'DAYSAFTERBILLDATE'    => "$day days after the bill date",
+        'DAYSAFTERBILLMONTH'   => "$day days after the end of the bill month",
+        'OFCURRENTMONTH'       => "Day $day of the bill month",
+        'OFFOLLOWINGMONTH'     => "Day $day of the following month",
+        default                => '',
+    };
+}
+
+/**
+ * Bring Xero contacts marked as suppliers into the CRM's suppliers: link ones
+ * with the same name, create the rest. Blank details are filled from Xero;
+ * anything already typed in the CRM is kept. Returns ['created' => n, 'linked' => n, 'updated' => n].
+ */
+function xero_import_suppliers(): array
+{
+    $out = ['created' => 0, 'linked' => 0, 'updated' => 0];
+    $bySupplierName = [];
+    foreach (db_all('SELECT id, name FROM suppliers WHERE xero_contact_id IS NULL') as $s) {
+        $bySupplierName[company_match_key($s['name'])][] = (int)$s['id'];
+    }
+    $contacts = db_all("SELECT * FROM xero_contacts WHERE is_supplier = 1 AND (status IS NULL OR status <> 'ARCHIVED')");
+    foreach ($contacts as $c) {
+        $d = json_decode((string)$c['details'], true) ?: [];
+        $fields = array_filter([
+            'email' => $c['email'] ? strtolower((string)$c['email']) : null,
+            'accounts_email' => $c['email'] ? strtolower((string)$c['email']) : null,
+            'contact_name' => $d['contact_name'] ?? null, 'phone' => $d['phone'] ?? null, 'website' => $d['website'] ?? null,
+            'payment_terms' => $d['payment_terms'] ?? null,
+        ] + array_map(fn($v) => $v ?: null, $d['address'] ?? []), fn($v) => $v !== null && $v !== '');
+        $supplier = db_one('SELECT * FROM suppliers WHERE xero_contact_id = ?', [$c['id']]);
+        if (!$supplier) {
+            $match = $bySupplierName[company_match_key($c['name'])] ?? [];
+            if (count($match) === 1 && !db_value("SELECT 1 FROM suppliers WHERE id = ? AND xero_contact_id IS NOT NULL", [$match[0]])) {
+                db_exec('UPDATE suppliers SET xero_contact_id = ? WHERE id = ?', [$c['id'], $match[0]]);
+                $supplier = db_one('SELECT * FROM suppliers WHERE id = ?', [$match[0]]);
+                unset($bySupplierName[company_match_key($c['name'])]);
+                audit('xero_link', "Supplier {$supplier['name']} linked to Xero contact {$c['name']}", 'suppliers', (int)$supplier['id']);
+                $out['linked']++;
+            } else {
+                $cols = ['name' => mb_substr($c['name'], 0, 150), 'xero_contact_id' => (int)$c['id']] + $fields;
+                db_exec('INSERT INTO suppliers (' . implode(', ', array_keys($cols)) . ') VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')', array_values($cols));
+                $id = (int)db()->lastInsertId();
+                audit('create', "Supplier {$c['name']} added from Xero", 'suppliers', $id);
+                $out['created']++;
+                continue;
+            }
+        }
+        // Fill in blanks from Xero.
+        $blank = array_filter($fields, fn($v, $k) => array_key_exists($k, $supplier) && ($supplier[$k] === null || $supplier[$k] === ''), ARRAY_FILTER_USE_BOTH);
+        if ($blank) {
+            db_exec('UPDATE suppliers SET ' . implode(', ', array_map(fn($k) => "$k = ?", array_keys($blank))) . ' WHERE id = ?', [...array_values($blank), $supplier['id']]);
+            $out['updated']++;
+        }
+    }
+    return $out;
 }
 
 /** Link to the contact in Xero's web app. */

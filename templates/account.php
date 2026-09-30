@@ -292,6 +292,8 @@ $canEdit = can('customers.edit');
       </ul>
     </section>
 
+    <?php render('_files', ['docs' => $files, 'where' => ['account_id' => $id]]); ?>
+
     <section class="card">
       <div class="card-head"><h2>Marketing &amp; alerts</h2></div>
       <?php if ($contacts): ?>

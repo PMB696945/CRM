@@ -127,7 +127,7 @@ function search_controller(): void
     $q = query('q');
     $results = [];
     if ($q !== '') {
-        foreach (['accounts', 'contacts', 'sites', 'services', 'tickets', 'opportunities'] as $name) {
+        foreach (array_merge(['accounts', 'contacts', 'sites', 'services', 'tickets', 'opportunities'], can('suppliers.view') ? ['suppliers', 'purchase_orders'] : []) as $name) {
             $found = list_rows($name, ['q' => $q, 'per_page' => 10]);
             if ($found['total'] > 0) {
                 $results[$name] = $found;
@@ -372,6 +372,9 @@ function entity_controller(string $name): void
     $action = query('action', 'list');
     $id = query_int('id');
     $canWrite = empty($entity['perm']) || (bool)array_filter((array)$entity['perm'], 'can');
+    if (!empty($entity['view_perm']) && !can($entity['view_perm']) && !$canWrite) {
+        forbidden();
+    }
 
     switch ($action) {
         case 'list':
@@ -408,6 +411,8 @@ function entity_controller(string $name): void
                 account_view($entity, $row);
             } elseif ($name === 'tickets') {
                 ticket_view($entity, $row);
+            } elseif ($name === 'suppliers') {
+                supplier_view($entity, $row);
             } else {
                 page('view', compact('name', 'entity', 'row', 'canWrite'), $entity['label']);
             }
@@ -510,7 +515,16 @@ function entity_controller(string $name): void
             if ($id && ($row = find($name, $id))) {
                 $snapshot = record_snapshot($name, $entity, $id);
                 $accountId = isset($row['account_id']) ? (int)$row['account_id'] : null;
-                delete_row($name, $id);
+                try {
+                    delete_row($name, $id);
+                } catch (PDOException $e) {
+                    if ((int)($e->errorInfo[1] ?? 0) !== 1451) {
+                        throw $e;
+                    }
+                    flash('This ' . strtolower($entity['label']) . ' is still in use (for example on purchase orders), so it can\'t be deleted.'
+                        . (isset($entity['fields']['active']) ? ' Untick "' . $entity['fields']['active']['label'] . '" instead.' : ''), 'error');
+                    redirect(url($name, ['action' => 'view', 'id' => $id]));
+                }
                 audit('delete', $entity['label'] . ' ' . record_label($entity, $row) . ' deleted', $name, $id, null,
                     array_map(fn($v) => ['from' => $v, 'to' => ''], array_filter($snapshot, fn($v) => $v !== '')), $accountId);
             }
@@ -535,6 +549,29 @@ function entity_controller(string $name): void
                 flash($e->getMessage(), 'error');
             }
             redirect(safe_return($_POST['_return'] ?? null, $id ? url('products', ['action' => 'view', 'id' => $id]) : url('products')));
+
+        case 'xero_import':
+            // Bring in (and link) suppliers from Xero contacts marked as suppliers.
+            if ($name !== 'suppliers' || !is_post()) {
+                not_found();
+            }
+            verify_csrf();
+            require_permission('suppliers.edit');
+            if (!xero_connected()) {
+                flash('Connect Xero first (Admin → Xero).', 'error');
+            } else {
+                try {
+                    xero_sync();
+                    $r = xero_import_suppliers();
+                    audit('xero_suppliers', "Suppliers brought in from Xero: {$r['created']} added, {$r['linked']} linked, {$r['updated']} updated");
+                    flash($r['created'] || $r['linked'] || $r['updated']
+                        ? "From Xero: {$r['created']} supplier(s) added, {$r['linked']} linked to existing suppliers, {$r['updated']} with details filled in."
+                        : 'No new suppliers in Xero. (Xero marks a contact as a supplier once you enter a bill for them.)');
+                } catch (IntegrationException $e) {
+                    flash('Xero: ' . $e->getMessage(), 'error');
+                }
+            }
+            redirect(safe_return($_POST['_return'] ?? null, url('suppliers')));
 
         case 'comment':
             if ($name !== 'tickets' || !is_post() || !$id) {
@@ -609,7 +646,8 @@ function account_view(array $entity, array $account): void
         ];
     }
 
-    page('account', compact('entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
+    $files = account_documents($id);
+    page('account', compact('files', 'entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
         'sites', 'mainContact', 'billingContact', 'pendingRequest', 'history', 'giacomOrders', 'giacomChecks'), $account['name']);
 }
 
@@ -740,6 +778,12 @@ function xero_controller(): void
                 flash($on && $newScopes !== $scopes
                     ? 'Saved. Press Reconnect so Xero can grant the CRM permission to create items.'
                     : 'Saved.');
+                break;
+
+            case 'suppliers_setting':
+                set_setting('xero_import_suppliers', !empty($_POST['import_suppliers']) ? '1' : null);
+                audit('settings', 'Xero: bring in suppliers on each sync ' . (setting('xero_import_suppliers') ? 'on' : 'off'));
+                flash('Saved.');
                 break;
 
             case 'push_setting':

@@ -23,3 +23,29 @@
     <?php endforeach; ?>
   </dl>
 </div>
+<?php if ($name === 'products' && can('suppliers.view')): $prices = product_supplier_prices((int)$row['id']); ?>
+<section class="card">
+  <div class="card-head"><h2>Suppliers</h2>
+    <?php if (can('suppliers.edit')): ?><a class="btn btn-sm" href="<?= h(url('supplier_products', ['action' => 'new', 'product_id' => $row['id'], 'description' => $row['name'], 'billing_frequency' => $row['billing_frequency'], 'return' => $_SERVER['REQUEST_URI'] ?? ''])) ?>">+ Add supplier price</a><?php endif; ?></div>
+  <?php if ($prices): ?>
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th>Supplier</th><th>Their code</th><th class="num">Cost</th><th class="num">Setup</th><th>Lead time</th><th>Price changed</th></tr></thead>
+      <tbody>
+      <?php foreach ($prices as $p): ?>
+        <tr class="<?= $p['active'] ? '' : 'muted' ?>">
+          <td><a class="row-link" href="<?= h(url('supplier_products', ['action' => 'view', 'id' => $p['id']])) ?>"><?= h($p['supplier_name']) ?></a><?= $p['preferred'] ? ' <span class="badge badge-active">Preferred</span>' : '' ?><?= $p['active'] ? '' : ' <span class="badge">Unavailable</span>' ?></td>
+          <td class="small"><?= h((string)$p['supplier_sku']) ?></td>
+          <td class="num"><?= h(money($p['cost_price'])) ?> <span class="muted small"><?= h(strtolower(BILLING_FREQUENCIES[$p['billing_frequency']] ?? '')) ?></span></td>
+          <td class="num"><?= $p['setup_cost'] !== null ? h(money($p['setup_cost'])) : '<span class="muted">—</span>' ?></td>
+          <td class="small"><?= $p['lead_time_days'] !== null ? (int)$p['lead_time_days'] . ' days' : '<span class="muted">—</span>' ?></td>
+          <td class="small"><?= h(fmt_date($p['price_updated_at'])) ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table></div>
+    <p class="help">The preferred supplier's price sets this product's cost price, and keeps it up to date when their prices change.</p>
+  <?php else: ?>
+    <p class="muted">No supplier prices yet. Link a supplier's product to this one to track what it costs you.</p>
+  <?php endif; ?>
+</section>
+<?php endif; ?>

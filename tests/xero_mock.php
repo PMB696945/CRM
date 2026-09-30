@@ -160,6 +160,14 @@ if ($path === '/api.xro/2.0/Contacts') {
     for ($i = 1; $i <= 145; $i++) {
         $contacts[] = ['ContactID' => sprintf('d0000000-0000-0000-0000-%012d', $i), 'Name' => "Supplier $i", 'ContactStatus' => 'ACTIVE'];
     }
+    // Suppliers (Xero sets IsSupplier once a bill has been entered).
+    $contacts[5] += ['IsSupplier' => true, 'EmailAddress' => 'Accounts@Supplier1.example', 'FirstName' => 'Sam', 'LastName' => 'Vendor', 'Website' => 'www.supplier1.example',
+        'Phones' => [['PhoneType' => 'DEFAULT', 'PhoneAreaCode' => '0161', 'PhoneNumber' => '496 0000'], ['PhoneType' => 'MOBILE', 'PhoneNumber' => '07700 900000']],
+        'Addresses' => [['AddressType' => 'POBOX', 'AddressLine1' => 'PO Box 1', 'City' => 'Leeds', 'PostalCode' => 'ls1 1aa'],
+                        ['AddressType' => 'STREET', 'AddressLine1' => '1 Mill Lane', 'AddressLine2' => 'Unit 4', 'City' => 'Bolton', 'Region' => 'Lancs', 'PostalCode' => 'bl1 1aa']],
+        'PaymentTerms' => ['Bills' => ['Day' => 30, 'Type' => 'DAYSAFTERBILLDATE']]];
+    $contacts[6] = ['ContactID' => $contacts[6]['ContactID'], 'Name' => 'Giacom Limited', 'ContactStatus' => 'ACTIVE', 'IsSupplier' => true, 'EmailAddress' => 'billing@giacom.example'];
+    $contacts[7] = ['IsSupplier' => true, 'ContactStatus' => 'ARCHIVED'] + $contacts[7];
     json_out(200, ['Contacts' => array_slice($contacts, ($page - 1) * 100, 100)]);
 }
 

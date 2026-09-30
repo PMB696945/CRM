@@ -111,7 +111,7 @@ function log_activity(int $accountId, string $type, string $subject, ?string $bo
 }
 
 /** Email the quote to the customer with a link to accept or decline. */
-function quote_send(array $quote, string $email, string $name): void
+function quote_send(array $quote, string $email, string $name, array $documents = []): void
 {
     $lines = quote_lines((int)$quote['id']);
     if (!$lines) {
@@ -130,13 +130,16 @@ function quote_send(array $quote, string $email, string $name): void
         . '<tr><td style="padding:6px 0;color:#667085">One-off charges</td><td style="padding:6px 0;text-align:right;font-weight:bold">' . h(money($totals['setup'])) . ' + VAT</td></tr>'
         . '<tr><td style="padding:6px 0;color:#667085">Valid until</td><td style="padding:6px 0;text-align:right">' . h(fmt_date($validUntil)) . '</td></tr></table>'
         . email_button(quote_public_url($quote), 'View quote and respond')
+        . ($documents ? '<p>We\'ve also attached:</p><ul>' . implode('', array_map(fn($d) => '<li>' . h($d['title']) . '</li>', $documents)) . '</ul>' : '')
         . '<p style="color:#667085;font-size:13px">You can accept or decline the quote on that page. If you have any questions, just reply to this email.</p>';
 
-    send_mail($email, $name, 'Your quote ' . $quote['reference'] . ' from ' . company('name', config('app_name')), email_layout('Your quote is ready', $body));
+    send_mail($email, $name, 'Your quote ' . $quote['reference'] . ' from ' . company('name', config('app_name')), email_layout('Your quote is ready', $body), null, [],
+        document_attachments($documents));
 
     db_exec("UPDATE quotes SET status = 'sent', token_hash = ?, valid_until = ?, recipient_name = ?, recipient_email = ?, sent_at = NOW() WHERE id = ?",
         [$token, $validUntil, $name, $email, $quote['id']]);
-    log_activity((int)$quote['account_id'], 'email', "Quote {$quote['reference']} emailed to $name <$email>");
+    log_activity((int)$quote['account_id'], 'email', "Quote {$quote['reference']} emailed to $name <$email>",
+        $documents ? 'Attached: ' . implode(', ', array_column($documents, 'title')) : null);
 }
 
 /**

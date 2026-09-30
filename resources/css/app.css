@@ -311,11 +311,11 @@
 
   /* ---- Badges ---- */
   .badge { @apply inline-flex items-center justify-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-theme-xs font-medium whitespace-nowrap text-gray-700 dark:bg-white/5 dark:text-white/80; }
-  .badge-active, .badge-won, .badge-resolved, .badge-customer, .badge-signed, .badge-accepted, .badge-approved { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
+  .badge-active, .badge-won, .badge-resolved, .badge-customer, .badge-signed, .badge-accepted, .badge-approved, .badge-received { @apply bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500; }
   .badge-prospect, .badge-lead, .badge-pending, .badge-open, .badge-new_business, .badge-sent, .badge-sending, .badge-marketing { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400; }
   .badge-qualified, .badge-proposal, .badge-in_progress, .badge-upsell, .badge-billing, .badge-business { @apply bg-blue-light-50 text-blue-light-500 dark:bg-blue-light-500/15 dark:text-blue-light-500; }
   .badge-negotiation, .badge-awaiting_customer, .badge-awaiting_carrier, .badge-suspended, .badge-p2, .badge-renewal, .badge-task, .badge-sandbox, .badge-expired, .badge-service_alert { @apply bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400; }
-  .badge-churned, .badge-lost, .badge-ceased, .badge-p1, .badge-disabled, .badge-declined, .badge-rejected, .badge-failed { @apply bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500; }
+  .badge-churned, .badge-lost, .badge-ceased, .badge-p1, .badge-disabled, .badge-declined, .badge-rejected, .badge-failed, .badge-cancelled { @apply bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500; }
   .badge-dealer, .badge-msa { @apply bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400; }
   .dealer-line { @apply mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400; }
   .badge-admin, .badge-super_admin, .badge-internal { @apply bg-theme-purple-500/10 text-theme-purple-500 dark:bg-theme-purple-500/15; }
@@ -482,6 +482,18 @@
   .details dd.details-section { @apply hidden; }
   .key-contact { @apply mb-4 text-theme-sm last:mb-0; }
   .address { @apply mb-3 text-theme-sm text-gray-800 dark:text-white/90; }
+  .folder-list { @apply m-0 flex list-none flex-col gap-0.5 p-0; }
+  .folder-list a { @apply flex items-center gap-2 rounded-lg px-3 py-2 text-theme-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5; }
+  .folder-list a.active { @apply bg-brand-50 text-brand-500 dark:bg-brand-500/[0.12] dark:text-brand-400; }
+  .folder-list .count { @apply ml-auto text-theme-xs text-gray-400; }
+  .file-list { @apply m-0 flex list-none flex-col divide-y divide-gray-100 p-0 dark:divide-gray-800; }
+  .file-list li { @apply flex items-center gap-3 py-2.5 text-theme-sm; }
+  .file-list .file-main { @apply min-w-0 flex-1; }
+  .file-list .file-main a { @apply font-medium break-words; }
+  .attach-list { @apply flex max-h-72 flex-col gap-1 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-gray-800; }
+  .attach-list .attach-folder { @apply mt-1 text-theme-xs font-semibold tracking-wide text-gray-400 uppercase; }
+  .attach-list label { @apply flex items-start gap-2 text-theme-sm font-normal; }
+  .attach-list input { @apply mt-0.5 w-auto; }
   .dropdown { @apply relative; }
   .dropdown > summary { @apply list-none cursor-pointer; }
   .dropdown > summary::-webkit-details-marker { display: none; }
@@ -511,4 +523,11 @@
   .address-list input, .choice-cards input { @apply mt-0.5 shrink-0; }
   .appointment-grid { @apply grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3; }
   .appointment-grid label { @apply flex! flex-row! items-center gap-3 rounded-lg border border-gray-200 px-3 py-2 font-normal has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:border-gray-800 dark:has-[:checked]:bg-brand-500/10; }
+}
+
+@media print {
+  .sidebar, .topbar, .page-head .actions, .no-print, .flash { display: none !important; }
+  .main { margin: 0 !important; padding: 0 !important; }
+  .grid-side { display: block !important; }
+  .card { box-shadow: none !important; break-inside: avoid; }
 }

@@ -31,7 +31,7 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
 <div class="kpis kpis-sm">
   <div class="kpi"><span class="kpi-label">Monthly</span><span class="kpi-value"><?= h(money($totals['monthly'])) ?></span><span class="kpi-sub">excl. VAT</span></div>
   <div class="kpi"><span class="kpi-label">One-off</span><span class="kpi-value"><?= h(money($totals['setup'])) ?></span><span class="kpi-sub">excl. VAT</span></div>
-  <div class="kpi"><span class="kpi-label">Contract value</span><span class="kpi-value"><?= h(money($totals['tcv'])) ?></span><span class="kpi-sub">over <?= (int)$totals['term'] ?> months</span></div>
+  <div class="kpi"><span class="kpi-label">Contract value</span><span class="kpi-value"><?= h(money($totals['tcv'])) ?></span><span class="kpi-sub">over <?= h(term_label($totals['term'])) ?></span></div>
 </div>
 
 <div class="grid-side">
@@ -45,11 +45,22 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
         <?php foreach ($lines as $l): ?>
           <tr><td class="text-gray-800 dark:text-white/90"><?= h($l['description']) ?></td><td><?= h(SERVICE_TYPES[$l['service_type']] ?? $l['service_type']) ?></td>
             <td class="num"><?= (int)$l['quantity'] ?></td><td class="num"><?= h(money($l['monthly_price'])) ?></td><td class="num"><?= h(money($l['setup_fee'])) ?></td>
-            <td class="num"><?= (int)$l['term_months'] ?>m</td><td class="num"><?= h(money($l['quantity'] * $l['monthly_price'])) ?></td></tr>
+            <td class="num"><?= h(term_label($l['term_months'])) ?></td><td class="num"><?= h(money($l['quantity'] * $l['monthly_price'])) ?></td></tr>
         <?php endforeach; ?>
         </tbody>
       </table></div>
     </section>
+
+    <?php if ($picked && $status !== 'draft'): ?>
+    <section class="card">
+      <div class="card-head"><h2>Documents sent with the quote</h2></div>
+      <ul class="file-list">
+        <?php foreach (array_merge(...array_values($library), ...[$customerFiles]) as $d): if (!in_array((int)$d['id'], $picked, true)) continue; ?>
+          <li><?= icon('paperclip', 'size-4 shrink-0 text-gray-400') ?><div class="file-main"><a href="<?= h(url('documents', ['action' => 'open', 'id' => $d['id']])) ?>" target="_blank" rel="noopener"><?= h($d['title']) ?></a></div><span class="muted small"><?= h(file_size_label($d['size'])) ?></span></li>
+        <?php endforeach; ?>
+      </ul>
+    </section>
+    <?php endif; ?>
 
     <?php if ($contracts): ?>
     <section class="card">
@@ -75,6 +86,21 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
         <?php endif; ?>
         <label>Name<input name="recipient_name" value="<?= h($quote['recipient_name'] ?? ($recipients[0]['name'] ?? '')) ?>" required></label>
         <label>Email<input type="email" name="recipient_email" value="<?= h($quote['recipient_email'] ?? ($recipients[0]['email'] ?? '')) ?>" required></label>
+        <?php if ($library || $customerFiles): ?>
+          <fieldset><legend class="small font-medium">Attach documents (optional)</legend>
+            <div class="attach-list">
+              <?php foreach ($library as $folderName => $docs): ?>
+                <div class="attach-folder"><?= h($folderName) ?></div>
+                <?php foreach ($docs as $d): ?><label><input type="checkbox" name="documents[]" value="<?= (int)$d['id'] ?>" <?= in_array((int)$d['id'], $picked, true) ? 'checked' : '' ?>><span><?= h($d['title']) ?> <span class="muted small"><?= h(file_size_label($d['size'])) ?></span></span></label><?php endforeach; ?>
+              <?php endforeach; ?>
+              <?php if ($customerFiles): ?>
+                <div class="attach-folder">This customer's files</div>
+                <?php foreach ($customerFiles as $d): ?><label><input type="checkbox" name="documents[]" value="<?= (int)$d['id'] ?>" <?= in_array((int)$d['id'], $picked, true) ? 'checked' : '' ?>><span><?= h($d['title']) ?> <span class="muted small"><?= h(file_size_label($d['size'])) ?></span></span></label><?php endforeach; ?>
+              <?php endif; ?>
+            </div>
+            <p class="help">Sent as attachments with the quote email, up to <?= h(file_size_label(QUOTE_ATTACH_MAX_BYTES)) ?> in total.</p>
+          </fieldset>
+        <?php endif; ?>
         <button class="btn btn-primary">✉ Email quote</button>
         <?php if (!mail_configured()): ?><p class="help text-warning">Email isn't set up yet. <?= is_admin() ? '<a href="' . h(url('settings')) . '">Set it up in Settings</a>.' : 'Ask an admin to set it up.' ?></p><?php endif; ?>
       </form>

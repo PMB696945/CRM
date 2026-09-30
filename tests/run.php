@@ -376,6 +376,21 @@ test('syncs balances, paging, 429 retry and auto-links customers', function () {
     eq(null, setting('xero_last_sync_error'));
 });
 
+test('suppliers are brought in from Xero: same name linked, others added with details, archived skipped', function () {
+    eq(1, (int)db_value("SELECT COUNT(*) FROM suppliers WHERE name = 'Giacom'"), 'Giacom is the first supplier');
+    eq(['created' => 1, 'linked' => 1, 'updated' => 1], xero_import_suppliers());
+    $giacom = db_one("SELECT s.*, x.name AS xname FROM suppliers s JOIN xero_contacts x ON x.id = s.xero_contact_id WHERE s.name = 'Giacom'");
+    eq(['Giacom Limited', 'billing@giacom.example'], [$giacom['xname'], $giacom['email']], 'linked by name, blank email filled');
+    $s1 = db_one("SELECT * FROM suppliers WHERE name = 'Supplier 1'");
+    eq(['accounts@supplier1.example', 'Sam Vendor', '0161 496 0000', '1 Mill Lane', 'Unit 4', 'Bolton', 'Lancs', 'BL1 1AA', '30 days after the bill date', 'www.supplier1.example'],
+        [$s1['accounts_email'], $s1['contact_name'], $s1['phone'], $s1['address'], $s1['address2'], $s1['city'], $s1['county'], $s1['postcode'], $s1['payment_terms'], $s1['website']]);
+    ok(!db_value("SELECT 1 FROM suppliers WHERE name = 'Supplier 3'"), 'archived supplier skipped');
+    ok(!db_value("SELECT 1 FROM suppliers WHERE name = 'Supplier 4'"), 'contacts not marked as suppliers skipped');
+    db_exec("UPDATE suppliers SET phone = '0800 000' WHERE id = ?", [$s1['id']]);
+    eq(['created' => 0, 'linked' => 0, 'updated' => 0], xero_import_suppliers(), 'safe to re-run; details typed in the CRM are kept');
+    eq('0800 000', db_value('SELECT phone FROM suppliers WHERE id = ?', [$s1['id']]));
+});
+
 test('balances appear in customer lists and presets', function () {
     ok(isset(entities()['accounts']['computed']['_balance']), 'balance column added once connected');
     $arrears = list_rows('accounts', ['preset' => 'arrears']);
@@ -889,7 +904,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
     eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));
@@ -1424,12 +1439,6 @@ test('tickets waiting too long alert admins once; per-group limits', function ()
     ok(db_value('SELECT pickup_alerted_at FROM tickets WHERE id = ?', [$bill]) !== null);
 });
 
-proc_terminate($sinkProc);
-proc_terminate($sgProc);
-@unlink($sgState);
-array_map('unlink', glob("$smtpDir/*") ?: []);
-exec('rm -rf ' . escapeshellarg($cfg['storage_path']));
-@rmdir($smtpDir);
 
 echo "Security\n";
 test('secrets are encrypted at rest and decrypted transparently', function () {
@@ -1505,6 +1514,220 @@ test('password rules', function () {
     ok(password_problem('jsmith-rocks-99', 'jsmith@example.com') !== null, 'contains email name');
     eq(null, password_problem('orange-kettle-river'));
 });
+
+echo "Terms, documents and suppliers\n";
+test('terms are set values: 30 days, 12, 24, 36, 60 months', function () {
+    eq(['30 days', '36 months', 'No minimum term', '18 months'], [term_label(1), term_label(36), term_label(0), term_label(18)]);
+    eq([1, 12, 24, 36, 60], array_keys(TERM_OPTIONS));
+    ok(isset(term_options(18)[18]) && !isset(term_options(36)[18]), 'an older value is kept as a choice');
+    eq('term', entity('products')['fields']['term_months']['type']);
+    [$data, $errors] = validate(entity('opportunities'), ['account_id' => '', 'title' => 'x', 'opp_type' => 'upsell', 'stage' => 'lead', 'term_months' => '1']);
+    eq(1, $data['term_months']);
+    [, $errors] = validate(entity('opportunities'), ['term_months' => 'twelve']);
+    ok(isset($errors['term_months']));
+    eq(['30 days', ''], [export_value(entity('products'), 'term_months', ['term_months' => 1]), export_value(entity('products'), 'term_months', ['term_months' => null])]);
+});
+
+function temp_upload(string $name, string $content): array
+{
+    $tmp = tempnam(sys_get_temp_dir(), 'up');
+    file_put_contents($tmp, $content);
+    return ['name' => $name, 'tmp_name' => $tmp, 'error' => UPLOAD_ERR_OK, 'size' => strlen($content)];
+}
+
+$docIds = [];
+test('documents: library folders, customer files, checks on type and who can add or remove them', function () use (&$docIds) {
+    as_role('super_admin');
+    $folders = array_column(doc_folders(), 'id', 'name');
+    ok(isset($folders['Sales & Marketing'], $folders['Spec sheets']), 'starter folders');
+    $spec = document_store(temp_upload('FTTP spec.pdf', '%PDF-1.4 spec sheet'), ['folder_id' => $folders['Spec sheets']], '', 'Full fibre', false);
+    $brochure = document_store(temp_upload('brochure.docx', 'PK brochure'), ['folder_id' => $folders['Sales & Marketing']], 'Company brochure', '', false);
+    $acct = create('accounts', ['name' => 'Files & Co Ltd', 'type' => 'business', 'status' => 'active', 'email' => 'boss@files.example']);
+    $own = document_store(temp_upload('signed order.pdf', '%PDF order'), ['account_id' => $acct], '', 'Signed order form', false);
+    $d = db_one('SELECT * FROM documents WHERE id = ?', [$spec]);
+    eq(['FTTP spec', 'application/pdf', 'Full fibre'], [$d['title'], $d['mime'], $d['description']]);
+    eq('%PDF-1.4 spec sheet', file_get_contents(document_path($d)), 'stored privately');
+    ok(str_starts_with(document_path($d), storage_path('documents')));
+    eq(['Company brochure'], array_column(library_documents()['Sales & Marketing'], 'title'));
+    eq(['signed order'], array_column(account_documents($acct), 'title'));
+    try { document_store(temp_upload('virus.exe', 'MZ'), ['folder_id' => $folders['Spec sheets']], '', '', false); throw new Exception('expected refusal'); } catch (IntegrationException) {}
+    try { document_store(['name' => 'big.pdf', 'tmp_name' => '/dev/null', 'error' => UPLOAD_ERR_OK, 'size' => DOC_MAX_BYTES + 1], ['folder_id' => $folders['Spec sheets']], '', '', false); throw new Exception('expected refusal'); } catch (IntegrationException) {}
+    as_role('staff');
+    ok(document_can('view', $d) && !document_can('add', $d) && !document_can('delete', $d), 'staff can use the library but not change it');
+    $ownDoc = db_one('SELECT * FROM documents WHERE id = ?', [$own]);
+    ok(document_can('add', ['account_id' => $acct]) && document_can('delete', $ownDoc), 'staff can add customer files and remove their own');
+    db_exec('UPDATE documents SET uploaded_by = NULL WHERE id = ?', [$own]);
+    ok(!document_can('delete', db_one('SELECT * FROM documents WHERE id = ?', [$own])), "but not someone else's without delete permission");
+    as_role('manager');
+    ok(document_can('add', $d) && document_can('delete', $d), 'managers manage the library');
+    as_role('super_admin');
+    $docIds = compact('spec', 'brochure', 'own', 'acct');
+});
+
+test('quotes can be emailed with library documents and customer files attached', function () use (&$docIds) {
+    extract($docIds);
+    db_exec('INSERT INTO quotes (account_id, title, created_by) VALUES (?, ?, 1)', [$acct, 'Fibre for Files & Co']);
+    $qid = (int)db()->lastInsertId();
+    db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
+    quote_save_lines($qid, [['product_id' => null, 'service_type' => 'broadband', 'description' => 'FTTP 500', 'quantity' => 1, 'monthly_price' => 45, 'setup_fee' => 0, 'term_months' => 36]]);
+    $quote = db_one('SELECT * FROM quotes WHERE id = ?', [$qid]);
+    $other = create('accounts', ['name' => 'Someone Else Ltd', 'type' => 'business', 'status' => 'active']);
+    $theirs = document_store(temp_upload('private.pdf', '%PDF private'), ['account_id' => $other], '', '', false);
+    $docs = quote_set_documents($quote, [$spec, $brochure, $own, $theirs, 999999]);
+    eq(['Company brochure', 'FTTP spec', 'signed order'], array_column(quote_documents($qid), 'title'), "another customer's files can't be attached");
+    $before = count(sent_mails());
+    quote_send($quote, 'boss@files.example', 'Bea Boss', $docs);
+    usleep(300000);
+    $mails = sent_mails();
+    eq($before + 1, count($mails));
+    $raw = end($mails);
+    ok(str_contains($raw, 'multipart/mixed'), 'sent as multipart/mixed');
+    ok(str_contains($raw, 'filename="FTTP spec.pdf"') && str_contains($raw, 'filename="brochure.docx"') && str_contains($raw, 'filename="signed order.pdf"'), 'all three attached');
+    ok(str_contains($raw, base64_encode('%PDF-1.4 spec sheet')), 'file content attached');
+    ok(str_contains(mail_body($raw), 'Company brochure'), 'email lists the attachments');
+    ok(str_contains((string)db_value("SELECT body FROM activities WHERE account_id = ? AND type = 'email' ORDER BY id DESC LIMIT 1", [$acct]), 'FTTP spec'));
+    db_exec('UPDATE documents SET size = ? WHERE id = ?', [QUOTE_ATTACH_MAX_BYTES, $brochure]);
+    try { quote_set_documents($quote, [$spec, $brochure]); throw new Exception('expected refusal'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'too big')); }
+    eq(3, count(quote_documents($qid)), 'selection unchanged after a refusal');
+    // Deleting a document removes the file and takes it off quotes.
+    document_delete(db_one('SELECT * FROM documents WHERE id = ?', [$spec]));
+    eq(2, count(quote_documents($qid)));
+    ok(!is_file(storage_path('documents') . '/' . basename((string)db_value('SELECT stored_name FROM documents WHERE id = ?', [$spec]))));
+    // Mail without attachments stays multipart/alternative.
+    [$headers] = mail_build('a@example.com', 'A', 'Hi', '<p>Hi</p>');
+    ok((bool)preg_grep('#multipart/alternative#', $headers));
+});
+
+test('supplier prices: the preferred supplier sets the product cost, per the product billing cycle', function () {
+    as_role('super_admin');
+    $supplier = create('suppliers', ['name' => 'Kit Distribution Ltd', 'category' => 'hardware', 'active' => '1', 'email' => 'orders@kit.example']);
+    $product = create('products', ['sku' => 'T-RENTAL', 'name' => 'Router rental', 'category' => 'hardware', 'billing_frequency' => 'monthly', 'monthly_price' => '10', 'term_months' => '12', 'active' => '1']);
+    $sp = create('supplier_products', ['supplier_id' => $supplier, 'supplier_sku' => 'RT-100', 'description' => 'Router', 'product_id' => $product,
+        'cost_price' => '12.00', 'billing_frequency' => 'quarterly', 'preferred' => '1', 'active' => '1']);
+    eq(4.0, (float)db_value('SELECT cost_price FROM products WHERE id = ?', [$product]), '£12 a quarter = £4 a month');
+    ok(db_value('SELECT price_updated_at FROM supplier_products WHERE id = ?', [$sp]) !== null);
+    $other = create('suppliers', ['name' => 'Cheaper Kit', 'active' => '1']);
+    $sp2 = create('supplier_products', ['supplier_id' => $other, 'description' => 'Router', 'product_id' => $product, 'cost_price' => '3.50', 'billing_frequency' => 'monthly', 'preferred' => '1', 'active' => '1']);
+    eq([0, 1], [(int)db_value('SELECT preferred FROM supplier_products WHERE id = ?', [$sp]), (int)db_value('SELECT preferred FROM supplier_products WHERE id = ?', [$sp2])], 'one preferred supplier per product');
+    eq(3.5, (float)db_value('SELECT cost_price FROM products WHERE id = ?', [$product]));
+    eq(['Cheaper Kit', 'Kit Distribution Ltd'], array_column(product_supplier_prices($product), 'supplier_name'), 'preferred first');
+    ok(str_contains((string)db_value("SELECT summary FROM audit_log WHERE entity = 'products' AND entity_id = ? ORDER BY id DESC LIMIT 1", [$product]), 'Cheaper Kit'));
+    as_role('sales');
+    ok(!can('suppliers.view') && !can('suppliers.edit'), 'sales can\'t see suppliers by default');
+    as_role('finance');
+    ok(can('suppliers.view') && can('suppliers.edit') && can('purchasing.edit'));
+    as_role('staff');
+    ok(can('suppliers.view') && !can('suppliers.edit') && !can('purchasing.edit'));
+    as_role('super_admin');
+});
+
+function make_xlsx(string $path, array $rows): void
+{
+    $zip = new ZipArchive();
+    $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+    $strings = [];
+    $sheet = '';
+    foreach ($rows as $r => $row) {
+        $sheet .= '<row r="' . ($r + 1) . '">';
+        foreach ($row as $c => $v) {
+            $ref = chr(65 + $c) . ($r + 1);
+            if (is_string($v)) {
+                $strings[] = $v;
+                $sheet .= '<c r="' . $ref . '" t="s"><v>' . (count($strings) - 1) . '</v></c>';
+            } else {
+                $sheet .= '<c r="' . $ref . '"><v>' . $v . '</v></c>';
+            }
+        }
+        $sheet .= '</row>';
+    }
+    $zip->addFromString('xl/workbook.xml', '<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Prices" sheetId="1" r:id="rId1"/></sheets></workbook>');
+    $zip->addFromString('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>');
+    $zip->addFromString('xl/sharedStrings.xml', '<sst>' . implode('', array_map(fn($s) => '<si><t>' . htmlspecialchars($s) . '</t></si>', $strings)) . '</sst>');
+    $zip->addFromString('xl/worksheets/sheet1.xml', '<worksheet><sheetData>' . $sheet . '</sheetData></worksheet>');
+    $zip->close();
+}
+
+test('price files (CSV or Excel) update supplier prices after a preview', function () {
+    $supplier = (int)db_value("SELECT id FROM suppliers WHERE name = 'Kit Distribution Ltd'");
+    $product = (int)db_value("SELECT id FROM products WHERE sku = 'T-RENTAL'");
+    db_exec('UPDATE supplier_products SET preferred = 0 WHERE product_id = ?', [$product]);
+    db_exec("UPDATE supplier_products SET preferred = 1 WHERE supplier_sku = 'RT-100'");
+    create('supplier_products', ['supplier_id' => $supplier, 'supplier_sku' => 'OLD-1', 'description' => 'Discontinued', 'cost_price' => '1', 'billing_frequency' => 'monthly', 'active' => '1']);
+    create('supplier_products', ['supplier_id' => $supplier, 'supplier_sku' => 'SW-8', 'description' => 'Switch', 'cost_price' => '20', 'billing_frequency' => 'monthly', 'active' => '1']);
+    $csv = sys_get_temp_dir() . '/prices_' . getmypid() . '.csv';
+    file_put_contents($csv, "\xEF\xBB\xBFKit Distribution price list,,,\nProduct Code;Description;Trade Price;Setup Charge\nRT-100;Router 100;£15.00;£25\nSW-8;Switch;20.00;\nAP-2;Access point;\"1,234.50\";0\n;Section heading;;\nBAD-1;No price;call;\nRT-100;Duplicate;9;\n");
+    $rows = price_file_rows($csv, 'prices.csv');
+    ok(str_starts_with($rows[0][0], 'Kit Distribution') && count($rows[1]) === 4, 'semicolon-separated file read (a title line is kept for the controller to skip)');
+    $rows = array_slice($rows, 1);
+    $map = price_file_guess($rows[0]);
+    eq(['setup_cost' => 3, 'supplier_sku' => 0, 'cost_price' => 2, 'description' => 1], $map, 'columns guessed from the headers');
+    $plan = price_import_plan($supplier, $rows, $map, ['add_new' => true]);
+    eq([1, 1, 1], [count($plan['changed']), count($plan['new']), $plan['same']], 'RT-100 changed, AP-2 new, SW-8 unchanged');
+    eq([12.0, 15.0, 25.0], [$plan['changed'][0]['old_cost'], $plan['changed'][0]['cost_price'], $plan['changed'][0]['setup_cost']]);
+    eq(1234.5, $plan['new'][0]['cost_price']);
+    eq(2, count($plan['errors']), 'bad price and duplicate reported');
+    eq(['OLD-1'], array_column($plan['missing'], 'supplier_sku'));
+    $summary = price_import_apply($supplier, $plan, ['frequency' => 'monthly', 'retire_missing' => true]);
+    eq([1, 1, 1], [$summary['updated'], $summary['added'], $summary['retired']]);
+    eq(15.0, (float)db_value("SELECT cost_price FROM supplier_products WHERE supplier_sku = 'RT-100'"));
+    eq(0, (int)db_value("SELECT active FROM supplier_products WHERE supplier_sku = 'OLD-1'"));
+    eq(5.0, (float)db_value('SELECT cost_price FROM products WHERE id = ?', [$product]), 'preferred supplier price change updates the product cost (15 a quarter)');
+    eq(['Router rental'], array_column($summary['products'], 0));
+    ok(str_contains((string)db_value("SELECT changes FROM audit_log WHERE action = 'price_import' ORDER BY id DESC LIMIT 1"), 'RT-100'));
+    // Without adding new products, unknown codes are ignored.
+    eq(0, count(price_import_plan($supplier, [['Code', 'Price'], ['NEW-9', '5']], ['supplier_sku' => 0, 'cost_price' => 1])['new']));
+    try { price_import_plan($supplier, $rows, ['supplier_sku' => 0]); throw new Exception('expected'); } catch (IntegrationException) {}
+    // Excel.
+    $xlsx = sys_get_temp_dir() . '/prices_' . getmypid() . '.xlsx';
+    make_xlsx($xlsx, [['SKU', 'Name', 'Monthly cost'], ['SW-8', 'Switch 8 port', 18.25], ['RT-100', 'Router', 15]]);
+    $rows = price_file_rows($xlsx, 'prices.xlsx');
+    eq([['SKU', 'Name', 'Monthly cost'], ['SW-8', 'Switch 8 port', '18.25'], ['RT-100', 'Router', '15']], $rows);
+    $plan = price_import_plan($supplier, $rows, price_file_guess($rows[0]));
+    eq(['SW-8'], array_column($plan['changed'], 'sku'));
+    price_import_apply($supplier, $plan, ['update_descriptions' => true]);
+    eq(['18.25', 'Switch 8 port'], array_values(db_one("SELECT cost_price, description FROM supplier_products WHERE supplier_sku = 'SW-8'")));
+    try { price_file_rows($csv, 'prices.pdf'); throw new Exception('expected'); } catch (IntegrationException) {}
+});
+
+test('purchase orders: lines, totals, emailing the supplier and receiving', function () {
+    $supplier = db_one("SELECT * FROM suppliers WHERE name = 'Kit Distribution Ltd'");
+    $sw = (int)db_value("SELECT id FROM supplier_products WHERE supplier_sku = 'SW-8'");
+    [$lines, $errors] = po_parse_lines(['line_supplier_product_id' => [(string)$sw, '', ''], 'line_sku' => ['SW-8', '', ''], 'line_description' => ['Switch', 'Cable', ''],
+        'line_quantity' => ['2', '10', ''], 'line_unit_cost' => ['18.25', '£1.50', '']], (int)$supplier['id']);
+    eq([], $errors);
+    eq([$sw, null], array_column($lines, 'supplier_product_id'));
+    eq(51.5, po_total($lines));
+    [, $errors] = po_parse_lines(['line_supplier_product_id' => [''], 'line_description' => ['X'], 'line_quantity' => ['0'], 'line_unit_cost' => ['1']], (int)$supplier['id']);
+    ok((bool)$errors, 'quantity checked');
+    [$l2] = po_parse_lines(['line_supplier_product_id' => [(string)$sw], 'line_description' => ['X'], 'line_quantity' => ['1'], 'line_unit_cost' => ['1']], (int)db_value("SELECT id FROM suppliers WHERE name = 'Cheaper Kit'"));
+    eq(null, $l2[0]['supplier_product_id'], "another supplier's product isn't linked");
+    db_exec('INSERT INTO purchase_orders (supplier_id, deliver_to, created_by) VALUES (?, ?, 1)', [$supplier['id'], "Unit 1\nLeeds"]);
+    $id = (int)db()->lastInsertId();
+    db_exec('UPDATE purchase_orders SET reference = ? WHERE id = ?', [sprintf('PO-%06d', $id), $id]);
+    po_save_lines($id, $lines);
+    eq(51.5, (float)db_value('SELECT total FROM purchase_orders WHERE id = ?', [$id]));
+    $po = db_one('SELECT * FROM purchase_orders WHERE id = ?', [$id]);
+    po_send($po, 'orders@kit.example', 'Olly Orders');
+    usleep(300000);
+    $mails = sent_mails();
+    $raw = end($mails);
+    ok(str_contains($raw, 'X-Rcpt: orders@kit.example'));
+    $body = mail_body($raw);
+    ok(str_contains($body, $po['reference']) && str_contains($body, 'Switch') && str_contains($body, '£51.50') && str_contains($body, 'Leeds'));
+    $po = db_one('SELECT * FROM purchase_orders WHERE id = ?', [$id]);
+    eq('sent', $po['status']);
+    ok($po['sent_at'] !== null && $po['order_date'] === date('Y-m-d'));
+    eq(company('name'), explode("\n", po_default_delivery(null))[0], 'delivery defaults to head office');
+    ok(str_contains(po_default_delivery(db_one("SELECT * FROM accounts WHERE name = 'Files & Co Ltd'")), 'Files & Co Ltd'));
+    try { db_exec('DELETE FROM suppliers WHERE id = ?', [$supplier['id']]); throw new Exception('expected'); } catch (PDOException $e) { eq(1451, (int)$e->errorInfo[1], 'suppliers with orders are kept'); }
+});
+
+proc_terminate($sinkProc);
+proc_terminate($sgProc);
+@unlink($sgState);
+array_map('unlink', glob("$smtpDir/*") ?: []);
+exec('rm -rf ' . escapeshellarg($cfg['storage_path']));
+@rmdir($smtpDir);
 
 echo "Demo data\n";
 test('demo data loads', function () {

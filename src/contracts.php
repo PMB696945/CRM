@@ -98,6 +98,7 @@ function contract_fields(array $account, ?array $quote, array $contract, array $
         'contract_reference'  => $contract['reference'] ?? '',
         'date'                => date('j F Y'),
         'term_months'         => (string)$totals['term'],
+        'term'                => term_label($totals['term']),
         'monthly_total'       => money($totals['monthly']),
         'setup_total'         => money($totals['setup']),
         'contract_value'      => money($totals['tcv']),
@@ -113,7 +114,7 @@ function contract_table_rows(array $lines): array
     $rows = [['Service', 'Qty', 'Monthly (each)', 'One-off (each)', 'Term']];
     foreach ($lines as $l) {
         $rows[] = [$l['description'] . ' (' . (SERVICE_TYPES[$l['service_type']] ?? $l['service_type']) . ')', (string)$l['quantity'],
-            money($l['monthly_price']), money($l['setup_fee']), $l['term_months'] . ' months'];
+            money($l['monthly_price']), money($l['setup_fee']), term_label($l['term_months'])];
     }
     $t = quote_totals($lines);
     $rows[] = ['Total', '', money($t['monthly']) . '/mo', money($t['setup']), ''];

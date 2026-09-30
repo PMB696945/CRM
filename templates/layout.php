@@ -17,8 +17,16 @@ $nav = [
         'opportunities' => ['pound', 'Opportunities'],
         'activities'    => ['clipboard', 'Activities'],
         'products'      => ['cube', 'Products & tariffs'],
+        'documents'     => ['folder', 'Documents'],
     ],
 ];
+if (can('suppliers.view') || can('suppliers.edit') || can('purchasing.edit')) {
+    $nav['Purchasing'] = [
+        'suppliers'         => ['truck', 'Suppliers'],
+        'purchase_orders'   => ['cart', 'Purchase orders'],
+        'supplier_products' => ['pound', 'Supplier prices'],
+    ];
+}
 if (can('marketing.send')) {
     $nav['Marketing'] = ['campaigns' => ['megaphone', 'Alerts & marketing']];
 }

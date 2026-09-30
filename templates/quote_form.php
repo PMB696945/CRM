@@ -61,7 +61,7 @@ $cancel = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : (
             <td><input name="line_quantity[]" type="number" min="1" value="<?= (int)$l['quantity'] ?>" class="w-20" aria-label="Quantity"></td>
             <td><input name="line_monthly_price[]" type="number" step="0.01" min="0" value="<?= h($l['monthly_price']) ?>" class="w-28" aria-label="Monthly price"></td>
             <td><input name="line_setup_fee[]" type="number" step="0.01" min="0" value="<?= h($l['setup_fee']) ?>" class="w-28" aria-label="One-off price"></td>
-            <td><input name="line_term_months[]" type="number" min="0" max="120" value="<?= (int)$l['term_months'] ?>" class="w-20" aria-label="Term in months"></td>
+            <td><select name="line_term_months[]" aria-label="Term"><?php foreach (term_options($l['term_months']) as $k => $label): ?><option value="<?= $k ?>" <?= (int)$l['term_months'] === $k ? 'selected' : '' ?>><?= h($label) ?></option><?php endforeach; ?></select></td>
             <td><button type="button" class="btn btn-sm btn-ghost" data-remove-line aria-label="Remove line">✕</button></td>
           </tr>
         <?php endforeach; ?>

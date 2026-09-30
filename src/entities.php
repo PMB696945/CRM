@@ -6,7 +6,7 @@ declare(strict_types=1);
  * CSV export and persistence code in repository.php, so adding a field is
  * usually a one-line change here plus a schema column.
  *
- * Field types: text, textarea, email, tel, select, ref, money, int, date, bool.
+ * Field types: text, textarea, email, tel, select, ref, money, int, term, date, bool.
  * "ref" fields point to another entity and are rendered via a JOIN.
  */
 
@@ -20,6 +20,29 @@ const CARRIERS = [
     'EE', 'Vodafone', 'O2', 'Three', 'BT Wholesale', 'Openreach', 'TalkTalk Wholesale',
     'CityFibre', 'Virgin Media Business', 'Gamma', 'Colt', 'Giacom', 'Other',
 ];
+
+/** Contract terms offered, in months (1 = 30 days, rolling). */
+const TERM_OPTIONS = [1 => '30 days', 12 => '12 months', 24 => '24 months', 36 => '36 months', 60 => '60 months'];
+
+function term_label(mixed $months): string
+{
+    if ($months === null || $months === '') {
+        return '';
+    }
+    $m = (int)$months;
+    return TERM_OPTIONS[$m] ?? ($m === 0 ? 'No minimum term' : $m . ' month' . ($m === 1 ? '' : 's'));
+}
+
+/** Term choices for a dropdown, keeping an older value that isn't one of the set terms. */
+function term_options(mixed $current = null): array
+{
+    $opts = TERM_OPTIONS;
+    if ($current !== null && $current !== '' && !isset($opts[(int)$current])) {
+        $opts[(int)$current] = term_label($current);
+        ksort($opts);
+    }
+    return $opts;
+}
 
 const OPP_STAGES = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
 const STAGE_PROBABILITY = ['lead' => 10, 'qualified' => 25, 'proposal' => 50, 'negotiation' => 75, 'won' => 100, 'lost' => 0];
@@ -77,7 +100,14 @@ const REF_LABELS = [
     'gocardless_customers' => 'name',
     'quotes'        => 'reference',
     'opportunities' => 'title',
+    'suppliers'     => 'name',
+    'supplier_products' => 'description',
+    'purchase_orders'   => 'reference',
 ];
+
+const SUPPLIER_CATEGORIES = ['network' => 'Network / connectivity', 'hardware' => 'Hardware', 'software' => 'Software & licences',
+    'services' => 'Services', 'distributor' => 'Distributor', 'other' => 'Other'];
+const PO_STATUSES = ['draft' => 'Draft', 'sent' => 'Sent', 'received' => 'Received', 'cancelled' => 'Cancelled'];
 
 /** Refs to external systems: [table => [id column, function building a URL to it]]. */
 const EXTERNAL_REFS = [
@@ -233,7 +263,7 @@ function entities(): array
                 'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'help' => 'What it costs you per billing cycle',
                     'if' => fn() => can('costs.view'), 'readonly' => !can('costs.edit')],
                 'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money', 'help' => 'One-off'],
-                'term_months'       => ['label' => 'Term (months)', 'type' => 'int', 'required' => true, 'min' => 0],
+                'term_months'       => ['label' => 'Term', 'type' => 'term', 'required' => true, 'default' => 24],
                 'active'            => ['label' => 'Available to sell', 'type' => 'bool', 'default' => 1],
                 'description'       => ['label' => 'Description', 'type' => 'textarea'],
                 'sales_account_code'    => ['label' => 'Sales nominal code', 'type' => 'text', 'section' => 'Accounts', 'datalist' => 'sales',
@@ -266,7 +296,7 @@ function entities(): array
                 'monthly_price'     => ['label' => 'Monthly price', 'type' => 'money'],
                 'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money'],
                 'start_date'        => ['label' => 'Contract start', 'type' => 'date'],
-                'term_months'       => ['label' => 'Term (months)', 'type' => 'int', 'min' => 0],
+                'term_months'       => ['label' => 'Term', 'type' => 'term'],
                 'contract_end_date' => ['label' => 'Contract end', 'type' => 'date', 'help' => 'Calculated from start + term when left blank'],
                 'install_address'   => ['label' => 'Installation address notes', 'type' => 'text', 'help' => 'Only if the site isn\'t in the address book'],
                 'notes'             => ['label' => 'Notes', 'type' => 'textarea'],
@@ -322,7 +352,7 @@ function entities(): array
                 'stage'          => ['label' => 'Stage', 'type' => 'select', 'options' => opts(OPP_STAGES), 'required' => true],
                 'monthly_value'  => ['label' => 'Monthly value', 'type' => 'money'],
                 'one_off_value'  => ['label' => 'One-off value', 'type' => 'money'],
-                'term_months'    => ['label' => 'Term (months)', 'type' => 'int', 'default' => 24, 'min' => 0],
+                'term_months'    => ['label' => 'Term', 'type' => 'term', 'default' => 24],
                 'probability'    => ['label' => 'Probability %', 'type' => 'int', 'min' => 0, 'max' => 100, 'help' => 'Defaults from the stage when left blank'],
                 'expected_close' => ['label' => 'Expected close', 'type' => 'date'],
                 'owner_id'       => ['label' => 'Owner', 'type' => 'ref', 'ref' => 'users'],
@@ -412,6 +442,90 @@ function entities(): array
             'presets' => [
                 'tasks' => ['label' => 'Open tasks', 'sql' => "t.type = 'task' AND t.done = 0"],
             ],
+            'default_sort' => ['created_at', 'desc'],
+        ],
+    ];
+
+    $entities += [
+        'suppliers' => [
+            'label' => 'Supplier', 'plural' => 'Suppliers', 'icon' => '🚚', 'perm' => 'suppliers.edit', 'view_perm' => 'suppliers.view',
+            'fields' => [
+                'name'           => ['label' => 'Name', 'type' => 'text', 'required' => true],
+                'account_number' => ['label' => 'Our account no.', 'type' => 'text', 'help' => 'Your account number with them'],
+                'category'       => ['label' => 'Type', 'type' => 'select', 'options' => SUPPLIER_CATEGORIES],
+                'active'         => ['label' => 'Active', 'type' => 'bool', 'default' => 1],
+                'contact_name'   => ['label' => 'Account manager', 'type' => 'text', 'section' => 'Contact'],
+                'email'          => ['label' => 'Orders email', 'type' => 'email', 'help' => 'Purchase orders are emailed here'],
+                'phone'          => ['label' => 'Phone', 'type' => 'tel'],
+                'accounts_email' => ['label' => 'Accounts email', 'type' => 'email'],
+                'support_email'  => ['label' => 'Support email', 'type' => 'email'],
+                'support_phone'  => ['label' => 'Support phone', 'type' => 'tel'],
+                'website'        => ['label' => 'Website', 'type' => 'text'],
+                'portal_url'     => ['label' => 'Partner portal', 'type' => 'text', 'help' => 'Where you log in to order or raise faults'],
+                'address'        => ['label' => 'Address line 1', 'type' => 'text', 'section' => 'Address'],
+                'address2'       => ['label' => 'Address line 2', 'type' => 'text'],
+                'city'           => ['label' => 'Town / city', 'type' => 'text'],
+                'county'         => ['label' => 'County', 'type' => 'text'],
+                'postcode'       => ['label' => 'Postcode', 'type' => 'text'],
+                'payment_terms'  => ['label' => 'Payment terms', 'type' => 'text', 'section' => 'Terms & notes', 'help' => 'e.g. 30 days from invoice, Direct Debit'],
+                'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
+                'xero_contact_id' => ['label' => 'Xero contact', 'type' => 'ref', 'ref' => 'xero_contacts', 'if' => 'xero_connected',
+                    'ref_where' => 'is_supplier = 1', 'help' => 'Linked automatically when brought in from Xero'],
+            ],
+            'list'    => ['name', 'category', 'account_number', 'contact_name', 'email', 'phone', '_products', 'active'],
+            'search'  => ['name', 'account_number', 'contact_name', 'email'],
+            'filters' => ['category', 'active'],
+            'default_sort' => ['name', 'asc'],
+            'computed' => [
+                '_products' => ['label' => 'Products', 'type' => 'int', 'sql' => '(SELECT COUNT(*) FROM supplier_products sp WHERE sp.supplier_id = t.id AND sp.active = 1)'],
+            ],
+        ],
+
+        'supplier_products' => [
+            'label' => 'Supplier product', 'plural' => 'Supplier prices', 'icon' => '🏷️', 'perm' => 'suppliers.edit', 'view_perm' => 'suppliers.view',
+            'fields' => [
+                'supplier_id'       => ['label' => 'Supplier', 'type' => 'ref', 'ref' => 'suppliers', 'required' => true],
+                'supplier_sku'      => ['label' => 'Supplier code', 'type' => 'text', 'help' => 'Their product code or SKU; price files are matched on this'],
+                'description'       => ['label' => 'Description', 'type' => 'text', 'required' => true],
+                'product_id'        => ['label' => 'Our product', 'type' => 'ref', 'ref' => 'products', 'help' => 'The product or tariff this is the cost of'],
+                'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'required' => true, 'help' => 'Per billing cycle, excluding VAT'],
+                'billing_frequency' => ['label' => 'Billed', 'type' => 'select', 'options' => BILLING_FREQUENCIES, 'default' => 'monthly', 'required' => true],
+                'setup_cost'        => ['label' => 'Setup / one-off cost', 'type' => 'money'],
+                'term_months'       => ['label' => 'Minimum term', 'type' => 'term'],
+                'lead_time_days'    => ['label' => 'Lead time (days)', 'type' => 'int', 'min' => 0, 'max' => 365],
+                'preferred'         => ['label' => 'Preferred supplier for our product', 'type' => 'bool',
+                    'help' => 'Its cost becomes the product\'s cost price, and keeps it up to date when prices change'],
+                'active'            => ['label' => 'Available', 'type' => 'bool', 'default' => 1],
+                'notes'             => ['label' => 'Notes', 'type' => 'textarea'],
+                'price_updated_at'  => ['label' => 'Price last changed', 'type' => 'datetime', 'readonly' => true],
+            ],
+            'list'    => ['supplier_id', 'supplier_sku', 'description', 'product_id', 'cost_price', 'billing_frequency', 'setup_cost', 'preferred', 'price_updated_at'],
+            'search'  => ['supplier_sku', 'description'],
+            'filters' => ['supplier_id', 'product_id', 'preferred', 'active'],
+            'default_sort' => ['description', 'asc'],
+        ],
+
+        'purchase_orders' => [
+            'label' => 'Purchase order', 'plural' => 'Purchase orders', 'icon' => '🛒', 'perm' => 'purchasing.edit', 'view_perm' => 'suppliers.view',
+            'fields' => [
+                'reference'     => ['label' => 'PO number', 'type' => 'text', 'readonly' => true],
+                'supplier_id'   => ['label' => 'Supplier', 'type' => 'ref', 'ref' => 'suppliers', 'required' => true],
+                'account_id'    => ['label' => 'For customer', 'type' => 'ref', 'ref' => 'accounts', 'help' => 'If you are ordering for a particular customer'],
+                'status'        => ['label' => 'Status', 'type' => 'select', 'options' => PO_STATUSES, 'readonly' => true],
+                'order_date'    => ['label' => 'Order date', 'type' => 'date'],
+                'expected_date' => ['label' => 'Expected delivery', 'type' => 'date'],
+                'supplier_ref'  => ['label' => 'Supplier\'s order no.', 'type' => 'text'],
+                'total'         => ['label' => 'Total (ex VAT)', 'type' => 'money', 'readonly' => true],
+                'deliver_to'    => ['label' => 'Deliver to', 'type' => 'textarea'],
+                'notes'         => ['label' => 'Notes for the supplier', 'type' => 'textarea'],
+                'created_by'    => ['label' => 'Raised by', 'type' => 'ref', 'ref' => 'users', 'readonly' => true],
+                'sent_at'       => ['label' => 'Sent', 'type' => 'datetime', 'readonly' => true],
+                'received_at'   => ['label' => 'Received', 'type' => 'datetime', 'readonly' => true],
+                'created_at'    => ['label' => 'Created', 'type' => 'datetime', 'readonly' => true],
+            ],
+            'list'    => ['reference', 'supplier_id', 'account_id', 'status', 'order_date', 'expected_date', 'total', 'created_by'],
+            'search'  => ['reference', 'supplier_ref', 'notes'],
+            'filters' => ['status', 'supplier_id', 'account_id'],
             'default_sort' => ['created_at', 'desc'],
         ],
     ];
@@ -622,6 +736,19 @@ function before_save(string $name, array $data, ?array $existing): array
             }
             break;
 
+        case 'supplier_products':
+            if ($existing === null || (array_key_exists('cost_price', $data) && (float)$data['cost_price'] !== (float)$existing['cost_price'])
+                || (array_key_exists('setup_cost', $data) && (string)$data['setup_cost'] !== (string)($existing['setup_cost'] ?? ''))) {
+                $data['price_updated_at'] = $now;
+            }
+            if (array_key_exists('supplier_sku', $data) && $data['supplier_sku'] === '') {
+                $data['supplier_sku'] = null;
+            }
+            if (array_key_exists('product_id', $data) && empty($data['product_id'])) {
+                $data['preferred'] = 0;
+            }
+            break;
+
         case 'products':
             if ($existing === null || array_key_exists('setup_fee', $data)) {
                 $data['setup_fee'] ??= 0;
@@ -647,6 +774,9 @@ function after_insert(string $name, int $id, array $data): void
 /** Runs after a row is inserted or updated. $data includes virtual (form-only) fields. */
 function after_save(string $name, int $id, array $data, ?array $existing): void
 {
+    if ($name === 'supplier_products') {
+        supplier_product_saved($id);
+    }
     if ($name === 'accounts' && array_key_exists('main_name', $data)) {
         save_account_contacts($id, $data);
     }

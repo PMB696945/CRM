@@ -28,8 +28,11 @@ function mail_address(string $email, string $name = ''): string
     return $name === '' ? "<$email>" : mail_encode_header($name) . " <$email>";
 }
 
-/** Build the full MIME message (headers + body) as used by both transports. */
-function mail_build(string $to, string $toName, string $subject, string $html, ?string $text = null, array $extraHeaders = []): array
+/**
+ * Build the full MIME message (headers + body) as used by both transports.
+ * $attachments: [['name' => file name, 'path' => file on disk, 'mime' => type], ...]
+ */
+function mail_build(string $to, string $toName, string $subject, string $html, ?string $text = null, array $extraHeaders = [], array $attachments = []): array
 {
     $from = (string)setting('mail_from_email');
     $fromName = (string)(setting('mail_from_name') ?: company('name', config('app_name')));
@@ -46,6 +49,10 @@ function mail_build(string $to, string $toName, string $subject, string $html, ?
         'MIME-Version: 1.0',
         'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
     ];
+    $mixed = $attachments ? 'm' . bin2hex(random_bytes(12)) : null;
+    if ($mixed) {
+        $headers[6] = 'Content-Type: multipart/mixed; boundary="' . $mixed . '"';
+    }
     if ($replyTo = setting('mail_reply_to')) {
         $headers[] = 'Reply-To: ' . $replyTo;
     }
@@ -57,11 +64,21 @@ function mail_build(string $to, string $toName, string $subject, string $html, ?
         . "--$boundary\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
         . chunk_split(base64_encode($html))
         . "--$boundary--\r\n";
+    if ($mixed) {
+        $parts = "--$mixed\r\nContent-Type: multipart/alternative; boundary=\"$boundary\"\r\n\r\n" . $body;
+        foreach ($attachments as $a) {
+            $name = str_replace(['"', "\r", "\n"], '', (string)$a['name']);
+            $encoded = preg_match('/[^\x20-\x7e]/', $name) ? "filename*=UTF-8''" . rawurlencode($name) : 'filename="' . $name . '"';
+            $parts .= "--$mixed\r\nContent-Type: " . (($a['mime'] ?? '') ?: 'application/octet-stream') . "\r\nContent-Transfer-Encoding: base64\r\n"
+                . "Content-Disposition: attachment; $encoded\r\n\r\n" . chunk_split(base64_encode((string)file_get_contents($a['path'])));
+        }
+        $body = $parts . "--$mixed--\r\n";
+    }
     return [$headers, $body];
 }
 
 /** Send an email. Throws IntegrationException with a readable reason on failure. */
-function send_mail(string $to, string $toName, string $subject, string $html, ?string $text = null, array $headers = []): void
+function send_mail(string $to, string $toName, string $subject, string $html, ?string $text = null, array $headers = [], array $attachments = []): void
 {
     if (!mail_configured()) {
         throw new IntegrationException('Email isn\'t set up yet. An admin can add it under Settings → Email.');
@@ -70,10 +87,10 @@ function send_mail(string $to, string $toName, string $subject, string $html, ?s
         throw new IntegrationException("\"$to\" isn't a valid email address.");
     }
     if (setting('mail_transport') === 'mandrill') {
-        mandrill_send($to, $toName, $subject, $html, $text, $headers);
+        mandrill_send($to, $toName, $subject, $html, $text, $headers, $attachments);
         return;
     }
-    [$headers, $body] = mail_build($to, $toName, $subject, $html, $text, $headers);
+    [$headers, $body] = mail_build($to, $toName, $subject, $html, $text, $headers, $attachments);
 
     if (setting('mail_transport') === 'smtp') {
         smtp_send((string)setting('mail_from_email'), $to, implode("\r\n", $headers) . "\r\n\r\n" . $body);
@@ -88,7 +105,7 @@ function send_mail(string $to, string $toName, string $subject, string $html, ?s
 }
 
 /** Send through Mailchimp Transactional (formerly Mandrill). */
-function mandrill_send(string $to, string $toName, string $subject, string $html, ?string $text, array $headers): void
+function mandrill_send(string $to, string $toName, string $subject, string $html, ?string $text, array $headers, array $attachments = []): void
 {
     $key = (string)setting('mandrill_api_key');
     if ($key === '') {
@@ -105,6 +122,8 @@ function mandrill_send(string $to, string $toName, string $subject, string $html
         'from_name'  => (string)(setting('mail_from_name') ?: company('name', config('app_name'))),
         'to'         => [['email' => $to, 'name' => $toName, 'type' => 'to']],
         'headers'    => $headers ?: null,
+        'attachments' => $attachments ? array_map(fn($a) => ['type' => ($a['mime'] ?? '') ?: 'application/octet-stream', 'name' => (string)$a['name'],
+            'content' => base64_encode((string)file_get_contents($a['path']))], $attachments) : null,
         'track_opens' => true,
         'track_clicks' => false,
     ], fn($v) => $v !== null)];

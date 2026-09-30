@@ -69,7 +69,10 @@ function quotes_controller(): void
             $lines = quote_lines((int)$quote['id']);
             $contracts = db_all('SELECT * FROM contracts WHERE quote_id = ? ORDER BY id DESC', [$quote['id']]);
             $recipients = quote_recipients($account);
-            page('quote', compact('quote', 'account', 'lines', 'contracts', 'recipients'), $quote['reference'] . ' ' . $quote['title']);
+            $library = library_documents();
+            $customerFiles = account_documents((int)$account['id']);
+            $picked = array_map('intval', array_column(quote_documents((int)$quote['id']), 'id'));
+            page('quote', compact('quote', 'account', 'lines', 'contracts', 'recipients', 'library', 'customerFiles', 'picked'), $quote['reference'] . ' ' . $quote['title']);
             return;
     }
 
@@ -93,8 +96,9 @@ function quotes_controller(): void
                 if ($quote['status'] === 'expired') {
                     $quote['valid_until'] = null; // fresh validity period
                 }
-                quote_send($quote, $email, $name);
-                flash("Quote emailed to $name. You'll get an email when they respond.");
+                $docs = quote_set_documents($quote, is_array($_POST['documents'] ?? null) ? $_POST['documents'] : []);
+                quote_send($quote, $email, $name, $docs);
+                flash("Quote emailed to $name" . ($docs ? ' with ' . count($docs) . ' document' . (count($docs) === 1 ? '' : 's') . ' attached' : '') . ". You'll get an email when they respond.");
                 break;
             case 'revise':
                 db_exec("UPDATE quotes SET status = 'draft', token_hash = NULL WHERE id = ? AND status IN ('sent','expired','declined')", [$quote['id']]);
@@ -127,6 +131,7 @@ function quotes_controller(): void
                 $qid = (int)db()->lastInsertId();
                 db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
                 quote_save_lines($qid, quote_lines((int)$quote['id']));
+                db_exec('INSERT INTO quote_documents (quote_id, document_id) SELECT ?, document_id FROM quote_documents WHERE quote_id = ?', [$qid, $quote['id']]);
                 flash('Copy created.');
                 redirect(url('quotes', ['action' => 'view', 'id' => $qid]));
             case 'delete':
@@ -379,7 +384,7 @@ function contract_merge_field_help(): array
         'dealer_name' => 'Their dealer (if any)', 'msa_reference' => 'Dealer\'s signed MSA reference', 'msa_date' => 'Date the MSA was signed',
         'quote_reference' => 'Quote reference', 'quote_title' => 'Quote title', 'contract_reference' => 'Contract reference', 'date' => 'Today\'s date',
         'services_table' => 'Table of services (put on its own line)', 'monthly_total' => 'Total monthly charges', 'setup_total' => 'Total one-off charges',
-        'contract_value' => 'Total contract value', 'term_months' => 'Longest term in months',
+        'contract_value' => 'Total contract value', 'term_months' => 'Longest term in months', 'term' => 'Longest term in words, e.g. 36 months or 30 days',
         'our_company_name' => 'Your company name', 'our_company_address' => 'Your address', 'our_company_number' => 'Your company number',
     ];
 }

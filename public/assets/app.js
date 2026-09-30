@@ -83,14 +83,17 @@ document.querySelectorAll('.quote-form').forEach((form) => {
       tr.querySelector('[name="line_description[]"]').value = o.dataset.name;
       tr.querySelector('[name="line_monthly_price[]"]').value = o.dataset.monthly;
       tr.querySelector('[name="line_setup_fee[]"]').value = o.dataset.setup;
-      tr.querySelector('[name="line_term_months[]"]').value = o.dataset.term;
+      const term = tr.querySelector('[name="line_term_months[]"]');
+      if (![...term.options].some((x) => x.value === o.dataset.term)) term.add(new Option(`${o.dataset.term} months`, o.dataset.term));
+      term.value = o.dataset.term;
     }
     totals();
   });
   form.addEventListener('click', (e) => {
     if (e.target.closest('[data-add-line]')) {
       const row = body.querySelector('tr').cloneNode(true);
-      row.querySelectorAll('input').forEach((i) => { i.value = i.name.startsWith('line_quantity') ? 1 : (i.name.startsWith('line_term') ? 24 : ''); });
+      row.querySelectorAll('input').forEach((i) => { i.value = i.name.startsWith('line_quantity') ? 1 : ''; });
+      row.querySelector('[name="line_term_months[]"]').value = '24';
       row.querySelector('[data-product]').value = '';
       body.appendChild(row);
       row.querySelector('[data-product]').focus();
@@ -214,4 +217,44 @@ document.querySelectorAll('[data-filter-for]').forEach((bar) => {
   };
   bar.addEventListener('change', apply);
   apply();
+});
+
+// Print buttons.
+document.querySelectorAll('[data-print]').forEach((b) => b.addEventListener('click', () => window.print()));
+
+// Purchase order line editor: fill from the supplier's products, add/remove rows, live total.
+document.querySelectorAll('.po-form').forEach((form) => {
+  const body = form.querySelector('[data-lines]');
+  const money = (n) => '£' + n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const total = () => {
+    let t = 0;
+    body.querySelectorAll('tr').forEach((tr) => {
+      const v = (n) => parseFloat(tr.querySelector(`[name="${n}[]"]`).value) || 0;
+      t += v('line_quantity') * v('line_unit_cost');
+    });
+    form.querySelector('[data-po-total]').textContent = money(t);
+  };
+  form.addEventListener('input', total);
+  form.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-po-product]');
+    if (sel && sel.value) {
+      const o = sel.selectedOptions[0], tr = sel.closest('tr');
+      tr.querySelector('[name="line_sku[]"]').value = o.dataset.sku;
+      tr.querySelector('[name="line_description[]"]').value = o.dataset.name;
+      tr.querySelector('[name="line_unit_cost[]"]').value = o.dataset.cost;
+    }
+    total();
+  });
+  form.addEventListener('click', (e) => {
+    if (e.target.closest('[data-add-line]')) {
+      const row = body.querySelector('tr').cloneNode(true);
+      row.querySelectorAll('input').forEach((i) => { i.value = i.name.startsWith('line_quantity') ? 1 : ''; });
+      row.querySelector('[data-po-product]').value = '';
+      body.appendChild(row);
+      row.querySelector('[data-po-product]').focus();
+    }
+    const rm = e.target.closest('[data-remove-line]');
+    if (rm && body.querySelectorAll('tr').length > 1) { rm.closest('tr').remove(); total(); }
+  });
+  total();
 });

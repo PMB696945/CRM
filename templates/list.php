@@ -10,6 +10,7 @@ $bulk = $name === 'products' && xero_connected() && can('products.edit');
   <h1><?= h($entity['plural']) ?> <small class="count"><?= (int)$result['total'] ?></small></h1>
   <div class="actions">
     <?php if (can('export')): ?><a class="btn" href="<?= h(url($name, $exportParams)) ?>">Export CSV</a><?php endif; ?>
+    <?php if ($name === 'suppliers' && xero_connected() && can('suppliers.edit')): ?><form method="post" action="<?= h(url('suppliers', ['action' => 'xero_import'])) ?>" class="inline"><?= csrf_field() ?><button class="btn">Bring in from Xero</button></form><?php endif; ?>
     <?php if ($canWrite && ($name !== 'products' || can('products.edit'))): ?><a class="btn btn-primary" href="<?= h(url($name, ['action' => 'new'])) ?>">+ New <?= h(strtolower($entity['label'])) ?></a><?php endif; ?>
   </div>
 </div>

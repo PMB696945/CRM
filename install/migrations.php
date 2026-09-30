@@ -515,4 +515,144 @@ return [
             db()->exec('ALTER TABLE tickets ADD COLUMN pickup_alerted_at DATETIME NULL AFTER group_id');
         }
     },
+    13 => function (): void {
+        // Document library (folders), files on customers and suppliers, and documents sent with quotes.
+        db()->exec("CREATE TABLE IF NOT EXISTS doc_folders (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name        VARCHAR(80) NOT NULL UNIQUE,
+            description VARCHAR(255) NULL,
+            sort        INT NOT NULL DEFAULT 0,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        // Suppliers, what they sell us and at what cost, and purchase orders.
+        db()->exec("CREATE TABLE IF NOT EXISTS suppliers (
+            id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name           VARCHAR(150) NOT NULL,
+            account_number VARCHAR(60) NULL COMMENT 'Our account number with them',
+            category       VARCHAR(40) NULL,
+            active         TINYINT(1) NOT NULL DEFAULT 1,
+            contact_name   VARCHAR(120) NULL,
+            email          VARCHAR(190) NULL COMMENT 'Where purchase orders go',
+            accounts_email VARCHAR(190) NULL,
+            support_email  VARCHAR(190) NULL,
+            phone          VARCHAR(40) NULL,
+            support_phone  VARCHAR(40) NULL,
+            website        VARCHAR(255) NULL,
+            portal_url     VARCHAR(255) NULL,
+            address        VARCHAR(150) NULL,
+            address2       VARCHAR(150) NULL,
+            city           VARCHAR(80) NULL,
+            county         VARCHAR(80) NULL,
+            postcode       VARCHAR(12) NULL,
+            payment_terms  VARCHAR(80) NULL,
+            notes          TEXT NULL,
+            price_file_mapping TEXT NULL,
+            created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_suppliers_name (name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS documents (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            folder_id   INT UNSIGNED NULL,
+            account_id  INT UNSIGNED NULL,
+            supplier_id INT UNSIGNED NULL,
+            title       VARCHAR(190) NOT NULL,
+            description VARCHAR(500) NULL,
+            file_name   VARCHAR(255) NOT NULL,
+            stored_name VARCHAR(64) NOT NULL,
+            mime        VARCHAR(100) NULL,
+            size        INT UNSIGNED NOT NULL DEFAULT 0,
+            uploaded_by INT UNSIGNED NULL,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_documents_folder (folder_id, title),
+            CONSTRAINT fk_doc_folder FOREIGN KEY (folder_id) REFERENCES doc_folders(id),
+            CONSTRAINT fk_doc_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            CONSTRAINT fk_doc_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+            CONSTRAINT fk_doc_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS quote_documents (
+            quote_id    INT UNSIGNED NOT NULL,
+            document_id INT UNSIGNED NOT NULL,
+            PRIMARY KEY (quote_id, document_id),
+            CONSTRAINT fk_qd_quote FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE,
+            CONSTRAINT fk_qd_doc FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS supplier_products (
+            id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            supplier_id       INT UNSIGNED NOT NULL,
+            product_id        INT UNSIGNED NULL,
+            supplier_sku      VARCHAR(80) NULL,
+            description       VARCHAR(255) NOT NULL,
+            cost_price        DECIMAL(10,2) NOT NULL DEFAULT 0,
+            billing_frequency VARCHAR(20) NOT NULL DEFAULT 'monthly',
+            setup_cost        DECIMAL(10,2) NULL,
+            term_months       SMALLINT UNSIGNED NULL,
+            lead_time_days    SMALLINT UNSIGNED NULL,
+            preferred         TINYINT(1) NOT NULL DEFAULT 0,
+            active            TINYINT(1) NOT NULL DEFAULT 1,
+            notes             TEXT NULL,
+            price_updated_at  DATETIME NULL,
+            created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_supplier_sku (supplier_id, supplier_sku),
+            KEY idx_sp_product (product_id),
+            CONSTRAINT fk_sp_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+            CONSTRAINT fk_sp_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS purchase_orders (
+            id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            reference     VARCHAR(20) NULL UNIQUE,
+            supplier_id   INT UNSIGNED NOT NULL,
+            account_id    INT UNSIGNED NULL COMMENT 'Customer it is for, if any',
+            status        VARCHAR(20) NOT NULL DEFAULT 'draft',
+            order_date    DATE NULL,
+            expected_date DATE NULL,
+            supplier_ref  VARCHAR(80) NULL COMMENT 'Their order number',
+            deliver_to    TEXT NULL,
+            notes         TEXT NULL,
+            total         DECIMAL(12,2) NOT NULL DEFAULT 0,
+            created_by    INT UNSIGNED NULL,
+            sent_at       DATETIME NULL,
+            received_at   DATETIME NULL,
+            created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_po_supplier (supplier_id, created_at),
+            CONSTRAINT fk_po_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+            CONSTRAINT fk_po_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL,
+            CONSTRAINT fk_po_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS purchase_order_lines (
+            id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            po_id               INT UNSIGNED NOT NULL,
+            supplier_product_id INT UNSIGNED NULL,
+            sku                 VARCHAR(80) NULL,
+            description         VARCHAR(255) NOT NULL,
+            quantity            INT UNSIGNED NOT NULL DEFAULT 1,
+            unit_cost           DECIMAL(10,2) NOT NULL DEFAULT 0,
+            sort                INT NOT NULL DEFAULT 0,
+            CONSTRAINT fk_pol_po FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+            CONSTRAINT fk_pol_sp FOREIGN KEY (supplier_product_id) REFERENCES supplier_products(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        // Suppliers can come from (and link to) Xero contacts marked as suppliers.
+        if (!column_exists('xero_contacts', 'is_supplier')) {
+            db()->exec('ALTER TABLE xero_contacts ADD COLUMN is_supplier TINYINT(1) NOT NULL DEFAULT 0 AFTER status, ADD COLUMN is_customer TINYINT(1) NOT NULL DEFAULT 0 AFTER is_supplier, ADD COLUMN details TEXT NULL AFTER is_customer');
+        }
+        if (!column_exists('suppliers', 'xero_contact_id')) {
+            db()->exec('ALTER TABLE suppliers ADD COLUMN xero_contact_id INT UNSIGNED NULL AFTER notes');
+        }
+        if (!constraint_exists('suppliers', 'fk_suppliers_xero')) {
+            db()->exec('ALTER TABLE suppliers ADD CONSTRAINT fk_suppliers_xero FOREIGN KEY (xero_contact_id) REFERENCES xero_contacts(id) ON DELETE SET NULL');
+        }
+        if (!db_value('SELECT COUNT(*) FROM doc_folders')) {
+            foreach ([['Sales & Marketing', 'Brochures, flyers and presentations'], ['Spec sheets', 'Product and service specifications'],
+                      ['Terms & policies', 'Terms and conditions, SLAs and policies'], ['Price lists', 'Tariffs and price guides']] as $i => [$name, $desc]) {
+                db_exec('INSERT INTO doc_folders (name, description, sort) VALUES (?, ?, ?)', [$name, $desc, $i]);
+            }
+        }
+        // Giacom becomes the first supplier.
+        if (!db_value('SELECT COUNT(*) FROM suppliers')) {
+            db_exec("INSERT INTO suppliers (name, category, website, portal_url, notes) VALUES ('Giacom', 'Network', 'https://www.giacom.com', 'https://cloud.market',
+                'Broadband and connectivity. Availability checks and orders are under Broadband orders.')");
+        }
+    },
 ];

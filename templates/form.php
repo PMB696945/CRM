@@ -44,6 +44,14 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
               <?php endforeach; ?>
             </select>
           <?php break;
+          case 'term': ?>
+            <select id="<?= h($id) ?>" name="<?= h($field) ?>" <?= !empty($def['required']) ? 'required' : '' ?>>
+              <?php if (empty($def['required'])): ?><option value="">—</option><?php endif; ?>
+              <?php foreach (term_options($value) as $k => $label): ?>
+                <option value="<?= $k ?>" <?= (string)$value === (string)$k ? 'selected' : '' ?>><?= h($label) ?></option>
+              <?php endforeach; ?>
+            </select>
+          <?php break;
           case 'ref':
             $scoped = !empty($def['scoped']);
             $choices = $scoped ? ($accountId ? ref_options($def['ref'], $accountId) : []) : ref_options($def['ref'], null, $def['ref_where'] ?? null);

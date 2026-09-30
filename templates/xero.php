@@ -72,7 +72,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
       <div class="card-head"><h2><span class="step <?= $lastSync ? 'step-done' : '' ?>">3</span> Sync</h2></div>
       <dl class="details">
         <dt>Last sync</dt><dd><?= $lastSync ? h(fmt_datetime($lastSync)) : '<span class="muted">Never</span>' ?>
-          <?php if ($summary): ?><div class="muted"><?= (int)$summary['contacts'] ?> contacts, <?= (int)$summary['invoices'] ?> unpaid invoices, <?= h($summary['seconds']) ?>s</div><?php endif; ?></dd>
+          <?php if ($summary): ?><div class="muted"><?= (int)$summary['contacts'] ?> contacts, <?= (int)$summary['invoices'] ?> unpaid invoices<?= !empty($summary['suppliers']) ? ', ' . (int)$summary['suppliers'] . ' suppliers brought in' : '' ?>, <?= h($summary['seconds']) ?>s</div><?php endif; ?></dd>
         <?php if ($lastError): ?><dt>Last error</dt><dd class="text-danger"><?= h($lastError) ?></dd><?php endif; ?>
         <dt>Xero contacts</dt><dd><?= number_format($stats['contacts']) ?></dd>
         <dt>Linked customers</dt><dd><?= number_format($stats['linked']) ?></dd>
@@ -109,6 +109,18 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
       <span class="help"><?= ($n = count(nominal_codes())) ? "$n codes loaded. Product forms offer them and check codes against them." : 'Loads your chart of accounts so product forms can offer and check the codes.' ?></span>
     </form>
   <?php endif; ?>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Suppliers</h2>
+    <form method="post" action="<?= h(url('suppliers', ['action' => 'xero_import'])) ?>" class="inline"><?= csrf_field() ?><input type="hidden" name="_return" value="<?= h(url('xero')) ?>"><button class="btn btn-sm">Bring in suppliers now</button></form></div>
+  <p>Contacts Xero marks as <b>suppliers</b> (anyone you've entered a bill for) can be brought into the CRM's Suppliers. A supplier with the same name is linked rather than duplicated, and blank details (email, phone, address, website, payment terms) are filled in from Xero. Anything already typed in the CRM is kept.
+    <?= ($n = (int)db_value('SELECT COUNT(*) FROM xero_contacts WHERE is_supplier = 1')) ? "Xero has $n supplier" . ($n === 1 ? '' : 's') . ' at the last sync.' : '' ?></p>
+  <form method="post" action="<?= h(url('xero', ['action' => 'suppliers_setting'])) ?>" class="stack">
+    <?= csrf_field() ?>
+    <label class="check"><input type="checkbox" name="import_suppliers" value="1" <?= setting('xero_import_suppliers') === '1' ? 'checked' : '' ?>> Bring in new suppliers from Xero on every sync</label>
+    <button class="btn">Save</button>
+  </form>
 </section>
 
 <section class="card">
