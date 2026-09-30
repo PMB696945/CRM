@@ -261,13 +261,17 @@ function giacom_summarise_availability(array $r): array
         $products[] = [
             'product_id' => (string)$p['product-id'],
             'name' => (string)($p['product-name'] ?? $p['product-id']),
-            'technology' => strtolower((string)($p['technology-type'] ?? '')),
+            // Giacom leaves technology-type empty on some products (FTTP); fall back to the reference.
+            'technology' => strtolower((string)(($p['technology-type'] ?? '') ?: giacom_tech_label('', (string)($p['supplier-product-reference'] ?? ''), (string)($p['product-name'] ?? '')))),
             'supplier_ref' => trim(($p['supplier-product-reference'] ?? '') . ' ' . ($p['supplier-product-subtype'] ?? '')),
             'supplier' => giacom_supplier_name((string)($p['supplier'] ?? ($p['network'] ?? '')), (string)($p['supplier-product-reference'] ?? ''), (string)($p['product-name'] ?? '')),
             'supplier_code' => $p['supplier'] ?? null,
             'tech_label' => giacom_tech_label((string)($p['technology-type'] ?? ''), (string)($p['supplier-product-reference'] ?? ''), (string)($p['product-name'] ?? '')),
             'install_type' => $p['expected-install-type'] ?? null,
-            'speed' => isset($p['service-speed']) ? (float)$p['service-speed'] : null,
+            'speed' => ($speed = giacom_product_speed($p, $estimates[$key] ?? null))['down'] !== null ? $speed['down'] * 1000000 : null,
+            'down_mbps' => $speed['down'],
+            'up_mbps' => $speed['up'],
+            'contract_months' => giacom_contract_months((string)($p['product-name'] ?? '')),
             'likely_range' => isset($p['likely-min-range'], $p['likely-max-range']) ? [(float)$p['likely-min-range'], (float)$p['likely-max-range']] : null,
             'estimate' => $estimates[$key] ?? null,
             'care_levels' => array_values(array_filter(array_map('trim', explode(',', (string)($p['care-level-options'] ?? ''))))),
@@ -284,10 +288,106 @@ function giacom_summarise_availability(array $r): array
             'name' => $a['exchange']['name'] ?? null, 'code' => $a['exchange']['code'] ?? null,
             'state' => GIACOM_EXCHANGE_STATES[$a['exchange']['state'] ?? ''] ?? ($a['exchange']['state'] ?? null),
         ] : null,
+        'min_visit' => ['new_line' => giacom_visit_code($a['minimum-svr-new-line'] ?? null), 'existing_line' => giacom_visit_code($a['minimum-svr-existing-line'] ?? null)],
+        'site_classification' => ($a['site-classification'] ?? '') ?: null,
+        'ont' => giacom_ont_details($r['ont-details'] ?? ($a['ont-details'] ?? null)),
         'fttc' => isset($a['fttc-qualification']['likely-max-speed-down']) ? [(float)$a['fttc-qualification']['likely-max-speed-down'], (float)($a['fttc-qualification']['likely-max-speed-up'] ?? 0)] : null,
         'products' => $products,
         'raw' => $r,
     ];
+}
+
+/**
+ * A product's headline speed in Mbps: ['down' => float|null, 'up' => float|null].
+ * Giacom is inconsistent: the product subtype or name usually carries the package
+ * speed ("80/20", "1000/115"); likely-max-range is bits/s; service-speed is a
+ * kbit/s range ("40000.00 - 72000.00"), a plain bits/s figure or empty.
+ */
+function giacom_product_speed(array $p, ?array $estimate = null): array
+{
+    foreach ([(string)($p['supplier-product-subtype'] ?? ''), (string)($p['product-name'] ?? '')] as $text) {
+        if (preg_match('~(?<![\d.])(\d{1,4}(?:\.\d+)?)\s*/\s*(\d{1,4}(?:\.\d+)?)(?![\d.])~', $text, $m)) {
+            return ['down' => (float)$m[1], 'up' => (float)$m[2]];
+        }
+    }
+    $down = null;
+    if (is_numeric($p['likely-max-range'] ?? null) && (float)$p['likely-max-range'] > 0) {
+        $down = (float)$p['likely-max-range'] / 1000000;
+    } elseif (($s = trim((string)($p['service-speed'] ?? ''))) !== '') {
+        $nums = array_map('floatval', preg_split('/\s*-\s*/', $s));
+        $max = max($nums);
+        // A range, or a figure small enough to be kbit/s; otherwise bits/s.
+        $down = count($nums) > 1 || $max < 1000000 ? $max / 1000 : $max / 1000000;
+    } elseif ($estimate && ($e = giacom_range_max($estimate['down'] ?? null)) !== null) {
+        $down = $e / 1000;
+    }
+    $up = $estimate ? giacom_range_max($estimate['up'] ?? null) : null;
+    return ['down' => $down !== null && $down > 0 ? round($down, 1) : null, 'up' => $up ? round($up / 1000, 1) : null];
+}
+
+/**
+ * FTTP ONT details at the address: ['type', 'new_ont', 'existing_ont', 'onts' => [[reference, serial, max_speed, ports => [[number, type, status]]]]].
+ * Giacom sends one ONT (or port) as an object and several as a list.
+ */
+function giacom_ont_details(mixed $d): ?array
+{
+    if (!is_array($d) || !$d) {
+        return null;
+    }
+    $list = fn($v) => is_array($v) ? (array_is_list($v) ? $v : [$v]) : [];
+    $onts = [];
+    foreach ($list($d['ont-list']['ont'] ?? ($d['ont-list'] ?? [])) as $o) {
+        if (!is_array($o) || empty($o['reference'])) {
+            continue;
+        }
+        $onts[] = [
+            'reference' => (string)$o['reference'],
+            'serial' => $o['serial_number'] ?? ($o['serial-number'] ?? null),
+            'max_speed' => $o['max_speed'] ?? ($o['max-speed'] ?? null),
+            'ports' => array_map(fn($p) => ['number' => $p['number'] ?? null, 'type' => $p['type'] ?? null, 'status' => $p['status'] ?? null],
+                array_filter($list($o['port'] ?? ($o['ports']['port'] ?? [])), 'is_array')),
+        ];
+    }
+    return [
+        'type' => ($d['ont-type'] ?? '') ?: null,
+        'new_ont' => ($d['new-ont'] ?? '') === 'Y',
+        'existing_ont' => ($d['existing-ont'] ?? '') === 'Y',
+        'onts' => $onts,
+    ];
+}
+
+/** The top of a range like "40000 - 72000" (or a plain number). */
+function giacom_range_max(mixed $v): ?float
+{
+    if ($v === null || $v === '' || is_array($v)) {
+        return null;
+    }
+    $nums = array_filter(array_map('trim', preg_split('/\s*-\s*/', (string)$v)), 'is_numeric');
+    return $nums ? max(array_map('floatval', $nums)) : null;
+}
+
+/** Contract length from a product name such as "SKY SOGEA 80/20 (36 Months)". */
+function giacom_contract_months(string $name): ?int
+{
+    return preg_match('/(\d{1,2})\s*months?/i', $name, $m) ? (int)$m[1] : null;
+}
+
+/** Giacom's minimum site visit ("Standard", "Premium", "None") → the order code. */
+function giacom_visit_code(mixed $v): ?string
+{
+    return match (strtolower(trim((string)$v))) {
+        'premium', 'premium_install' => 'PREMIUM',
+        'standard', 'standard_install' => 'STANDARD',
+        'none', 'no_site_visit', 'no site visit' => 'NO_SITE_VISIT',
+        default => null,
+    };
+}
+
+/** A saved check's result, re-read from Giacom's raw response so parsing fixes apply to old checks. */
+function giacom_check_result(array $check): array
+{
+    $result = json_decode((string)$check['result'], true) ?: ['products' => []];
+    return !empty($result['raw']) && is_array($result['raw']) ? giacom_summarise_availability($result['raw']) : $result;
 }
 
 /** Which network a product is on, from Giacom's supplier field or its product reference. */
@@ -296,8 +396,8 @@ function giacom_supplier_name(string $supplier, string $ref, string $name = ''):
     $hay = strtolower($supplier . ' ' . $ref . ' ' . $name);
     return match (true) {
         str_contains($hay, 'cityfibre') || str_contains($hay, 'city fibre') || preg_match('/(^|[\s_])cf[_\s]/', $hay) === 1 => 'CityFibre',
-        str_contains($hay, 'sky') => 'Sky',
-        str_contains($hay, 'vodafone') => 'Vodafone',
+        preg_match('/(^|[\s_])sky([_\s]|$)/', $hay) === 1 => 'Sky',
+        str_contains($hay, 'vodafone') || preg_match('/(^|[\s_])(vf|voda)([_\s]|$)/', $hay) === 1 => 'Vodafone',
         str_contains($hay, 'ttb') || str_contains($hay, 'talktalk') => 'TalkTalk',
         str_contains($hay, 'bt_') || str_contains($hay, 'bt ') || str_contains($hay, 'openreach') || str_contains($hay, 'btw') => 'BT Wholesale',
         $supplier !== '' => ucfirst($supplier),
@@ -777,7 +877,7 @@ function giacom_controller(): void
             $check = db_one('SELECT c.*, a.name AS account_name, s.name AS site_name, u.name AS user_name FROM giacom_checks c
                 LEFT JOIN accounts a ON a.id = c.account_id LEFT JOIN sites s ON s.id = c.site_id LEFT JOIN users u ON u.id = c.created_by WHERE c.id = ?',
                 [query_int('id') ?? 0]) ?? not_found('Check not found.');
-            page('giacom_result', ['check' => $check, 'result' => json_decode((string)$check['result'], true) ?: ['products' => []]], 'Availability');
+            page('giacom_result', ['check' => $check, 'result' => giacom_check_result($check)], 'Availability');
             return;
 
         case 'order':
@@ -787,7 +887,7 @@ function giacom_controller(): void
                 flash('Run the check from a customer\'s page to order for them.', 'error');
                 redirect(url('giacom', ['action' => 'result', 'id' => $check['id']]));
             }
-            $result = json_decode((string)$check['result'], true) ?: [];
+            $result = giacom_check_result($check);
             $product = null;
             foreach ($result['products'] ?? [] as $i => $p) {
                 if ((string)$i === query('product')) {
@@ -802,7 +902,10 @@ function giacom_controller(): void
             $contact = db_one('SELECT * FROM contacts WHERE id = ?', [($site['contact_id'] ?? null) ?: ($account['main_contact_id'] ?: 0)]);
             [$title, $forename, $surname] = giacom_split_name((string)($contact['name'] ?? ''));
             // Ask Giacom for the actual install dates for this product and address.
-            $visit = in_array($_POST['site_visit_reason'] ?? '', ['NO_SITE_VISIT', 'STANDARD_INSTALL', 'PREMIUM_INSTALL'], true) ? $_POST['site_visit_reason'] : 'NO_SITE_VISIT';
+            // Giacom says the least site visit the address needs (new line vs existing line).
+            $orderType = in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide';
+            $minVisit = $result['min_visit'][$orderType === 'migrate' ? 'existing_line' : 'new_line'] ?? null;
+            $visit = giacom_visit_code($_POST['site_visit_reason'] ?? null) ?? $minVisit ?? 'NO_SITE_VISIT';
             $slots = giacom_appointments($check, $product, $visit);
             $appointments = $slots['appointments'];
             $appointmentsError = $slots['error'];
@@ -810,7 +913,7 @@ function giacom_controller(): void
             $leadSource = $appointments ? 'appointment' : (($product['leadtime']['first_date'] ?? null) ? 'lead time' : null);
             $lead ??= date('Y-m-d', strtotime('+10 weekdays'));
             $values = [
-                'order_type' => in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide',
+                'order_type' => $orderType,
                 'cli' => (string)$check['cli'], 'crd' => max($lead, date('Y-m-d', strtotime('+1 weekday'))),
                 'bb_username' => giacom_suggest_username($account), 'bb_password' => substr(strtr(base64_encode(random_bytes(9)), '+/', 'Kq'), 0, 12),
                 'bb_suffix' => (string)setting('giacom_username_suffix'), 'realm' => (string)setting('giacom_realm'),
@@ -931,7 +1034,7 @@ function giacom_controller(): void
                         $product = ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null];
                         $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
                         $key = (string)($_POST['appointment'] ?? '');
-                        $offered = $check ? giacom_appointments($check, $product, (string)($_POST['visit'] ?? 'NO_SITE_VISIT'))['appointments'] : [];
+                        $offered = $check ? giacom_appointments($check, $product, giacom_visit_code($_POST['visit'] ?? null) ?? 'NO_SITE_VISIT')['appointments'] : [];
                         $chosen = array_values(array_filter($offered, fn($a) => giacom_appointment_key($a) === $key))[0] ?? null;
                         if (!$chosen) {
                             throw new GiacomException('That appointment is no longer available. Show the dates again and choose another.');
@@ -959,7 +1062,7 @@ function giacom_controller(): void
             $slots = null;
             if (query('appointments') === '1' && can('orders.place')) {
                 $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
-                $slots = $check ? giacom_appointments($check, ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null], query('visit', 'NO_SITE_VISIT'))
+                $slots = $check ? giacom_appointments($check, ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null], giacom_visit_code(query('visit')) ?? 'NO_SITE_VISIT')
                     : ['appointments' => [], 'error' => 'The availability check for this order is no longer available.'];
             }
             page('giacom_view', compact('order', 'events', 'slots'), 'Giacom order ' . $order['giacom_order_id']);

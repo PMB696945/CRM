@@ -1246,9 +1246,9 @@ test('Giacom: address search and availability check are saved and summarised', f
     $r = json_decode($c['result'], true);
     eq(5, $r['quick_result']); ok(str_contains($r['quick_text'], 'new provide'));
     eq('MANCHESTER CENTRAL', $r['exchange']['name']); eq('Enabled', $r['exchange']['state']);
-    eq(4, count($r['products']));
-    eq(['BT Wholesale', 'CityFibre', 'BT Wholesale', 'BT Wholesale'], array_column($r['products'], 'supplier'));
-    eq(['FTTC', 'FTTP', 'SOGEA', 'FTTP'], array_column($r['products'], 'tech_label'));
+    eq(8, count($r['products']));
+    eq(['BT Wholesale', 'CityFibre', 'BT Wholesale', 'BT Wholesale', 'BT Wholesale', 'Vodafone', 'Sky', 'TalkTalk'], array_column($r['products'], 'supplier'));
+    eq(['FTTC', 'FTTP', 'SOGEA', 'FTTP', 'FTTP', 'FTTP', 'SOGEA', 'MPF'], array_column($r['products'], 'tech_label'));
     eq('Standard', $r['products'][1]['install_type']);
     eq('CITYFIBRE', $r['products'][1]['supplier_code']);
     eq('77001234', g_state()['last']['availability']['uprn'], 'UPRN looked up so CityFibre can be offered');
@@ -1264,6 +1264,18 @@ test('Giacom: address search and availability check are saved and summarised', f
     eq('M1 3HE', g_state()['last']['availability']['postcode'], 'postcode sent with a space');
     eq('M1 3HE', giacom_postcode('m13he')); eq('SW1A 1AA', giacom_postcode('sw1a1aa'));
     eq('80 Mbps', giacom_mbps($r['products'][0]['speed']));
+    // Real-response shapes: package speed from the subtype, kbit/s ranges, bits/s figures, suppliers.
+    $by = array_column($r['products'], null, 'product_id');
+    eq([80.0, 20.0, 'BT Wholesale', 'FTTP', 'fttp'], [$by['59310']['down_mbps'], $by['59310']['up_mbps'], $by['59310']['supplier'], $by['59310']['tech_label'], $by['59310']['technology']]);
+    eq([40.0, 'Vodafone', 'FTTP'], [$by['53733']['down_mbps'], $by['53733']['supplier'], $by['53733']['tech_label']]);
+    eq([80.0, 'Sky', 'SOGEA', 36], [$by['72299']['down_mbps'], $by['72299']['supplier'], $by['72299']['tech_label'], $by['72299']['contract_months']]);
+    eq([9.2, 'TalkTalk', 'MPF'], [$by['55453']['down_mbps'], $by['55453']['supplier'], $by['55453']['tech_label']]);
+    eq(500.0, $by['34370']['down_mbps'], 'plain bits/s service speed');
+    eq(72.0, giacom_product_speed(['likely-max-range' => '72000000'])['down']);
+    eq(36.0, giacom_product_speed(['service-speed' => '20000.00 - 36000.00'])['down']);
+    eq(['new_line' => 'PREMIUM', 'existing_line' => 'STANDARD'], $r['min_visit']);
+    eq(['ONT0064647241', 'Working', true], [$r['ont']['onts'][0]['reference'], $r['ont']['onts'][0]['ports'][0]['status'], $r['ont']['new_ont']]);
+    eq('Vodafone', giacom_supplier_name('', 'VF_FTTP')); eq('Other', giacom_supplier_name('', 'SKYLARK_X'));
     eq('68 Mbps', giacom_mbps($r['products'][0]['estimate']['down'], 'kbps'));
     eq('A00012345679', g_state()['last']['availability']['address-reference']);
     eq('Y', g_state()['last']['availability']['detailed']);
@@ -1335,7 +1347,7 @@ test('Giacom: status updates are picked up; completion makes the service live', 
     eq([date('Y-m-d', strtotime('+8 days')), 'AM', 'APT8'], array_values($slots['appointments'][0]), 'earliest appointment first');
     $sent = g_state()['last']['available_appointments'];
     eq(['FTTP', 'CITYFIBRE', 'NO_SITE_VISIT', '77001234'], [$sent['technology-type'], $sent['supplier'], $sent['site-visit-reason'], $sent['uprn']]);
-    eq(date('Y-m-d', strtotime('+13 days')), giacom_appointments($check, $product, 'STANDARD_INSTALL')['appointments'][0]['date'], 'dates depend on the visit type');
+    eq(date('Y-m-d', strtotime('+13 days')), giacom_appointments($check, $product, 'STANDARD')['appointments'][0]['date'], 'dates depend on the visit type');
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
     giacom_book_appointment($order, $slots['appointments'][1]);
     eq(['700100', date('Y-m-d', strtotime('+9 days')), 'PM', 'APT9'], [g_state()['last']['amend_order']['order-id'], g_state()['last']['amend_order']['appointment-date'], g_state()['last']['amend_order']['appointment-slot'], g_state()['last']['amend_order']['appointment-ref']]);

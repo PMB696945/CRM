@@ -105,8 +105,11 @@ switch ($call) {
                 'exchange' => ['code' => 'LVMAN', 'name' => 'MANCHESTER CENTRAL', 'state' => 'E'],
                 'fttc-qualification' => ['likely-max-speed-down' => '63100000', 'likely-max-speed-up' => '19000000'],
                 'quick-result' => empty($req['cli']) ? '5' : '4',
+                'minimum-svr-new-line' => 'Premium', 'minimum-svr-existing-line' => 'Standard', 'site-classification' => 'Property Shell',
                 'fttp' => ['leadtimes' => [['product-id' => '34360', 'first-date-int' => (string)strtotime('+30 days 00:00 UTC'), 'leadtime' => '20']]],
             ],
+            'ont-details' => ['mdu-build-complete' => 'N', 'ont-type' => 'EXISTING', 'existing-ont' => 'N', 'new-ont' => 'Y',
+                'ont-list' => ['ont' => ['reference' => 'ONT0064647241', 'serial_number' => 'ADTN224818B9', 'max_speed' => 'Up to 1000', 'port' => ['type' => 'Data', 'status' => 'Working', 'number' => '1']]]],
             'leadtimes' => [['product-id' => '34350', 'leadtime' => '10', 'first-date-text' => date('Y-m-d', strtotime('+14 days'))]],
             'products' => [
                 ['product-id' => '34350', 'product-name' => 'Business FTTC 80/20', 'technology-type' => 'fttc', 'supplier-product-reference' => 'BT_21CN_FTTC', 'supplier-product-subtype' => 'plus',
@@ -114,6 +117,12 @@ switch ($call) {
                 ['product-id' => '34370', 'product-name' => 'CityFibre FTTP 500', 'technology-type' => 'fttp', 'supplier' => 'CITYFIBRE', 'supplier-product-reference' => 'CF_FTTP', 'service-speed' => '500000000', 'expected-install-type' => 'Standard'],
                 ['product-id' => '34380', 'product-name' => 'SOGEA 80/20', 'technology-type' => 'sogea', 'supplier-product-reference' => 'BT_21CN_SOGEA', 'service-speed' => '80000000'],
                 ['product-id' => '34360', 'product-name' => 'Business FTTP 900', 'technology-type' => 'fttp', 'supplier-product-reference' => 'BT_FTTP', 'service-speed' => '900000000', 'realms' => [['realm' => 'isp.example'], ['realm' => '-public@GreatDSL']]],
+                // Shapes as seen in a real response (GL53 0ED).
+                ['product-id' => '59310', 'product-name' => 'BTW FTTP 80/20 ELEVATED', 'likely-max-range' => '72000000', 'likely-min-range' => '40000000', 'service-speed' => '40000.00 - 72000.00',
+                    'technology-type' => '', 'supplier-product-reference' => 'BT_21CN_FTTP', 'supplier-product-subtype' => '80/20', 'care-level-options' => 'standard,enhanced,premium'],
+                ['product-id' => '53733', 'product-name' => 'VODA FTTP 40/10', 'technology-type' => '', 'supplier-product-reference' => 'VF_FTTP', 'supplier-product-subtype' => '40/10', 'service-speed' => '20000.00 - 36000.00'],
+                ['product-id' => '72299', 'product-name' => 'SKY SOGEA 80/20 (36 Months)', 'service-speed' => '', 'technology-type' => 'sogea', 'supplier-product-reference' => 'SKY_SOGEA', 'supplier-product-subtype' => '80/20'],
+                ['product-id' => '55453', 'product-name' => 'TTB MPF ADSL2+', 'service-speed' => '9185000', 'technology-type' => 'mpf', 'supplier-product-reference' => 'TTB_MPF', 'supplier-product-subtype' => ''],
             ],
         ]);
     case 'provide':
@@ -141,7 +150,7 @@ switch ($call) {
         $save();
         reply(['order-id' => $id, 'service-id' => '9' . $id]);
     case 'available_appointments':
-        $extra = ($req['site-visit-reason'] ?? '') === 'STANDARD_INSTALL' ? 5 : 0;
+        $extra = ($req['site-visit-reason'] ?? '') === 'STANDARD' ? 5 : 0;
         reply(['appointments' => [
             ['date' => date('Y-m-d', strtotime('+' . (9 + $extra) . ' days')), 'timeslot' => 'PM', 'appointment-ref' => 'APT9'],
             ['date' => date('Y-m-d', strtotime('+' . (8 + $extra) . ' days')), 'timeslot' => 'AM', 'appointment-ref' => 'APT8'],
