@@ -176,7 +176,7 @@ function users_controller(): void
             $values = [
                 'name'   => trim((string)($_POST['name'] ?? '')),
                 'email'  => strtolower(trim((string)($_POST['email'] ?? ''))),
-                'role'   => isset(ROLES[$_POST['role'] ?? '']) ? $_POST['role'] : 'staff',
+                'role'   => isset(roles()[$_POST['role'] ?? '']) ? $_POST['role'] : 'staff',
                 'active' => empty($_POST['active']) ? 0 : 1,
             ];
             $password = (string)($_POST['password'] ?? '');

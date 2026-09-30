@@ -11,8 +11,8 @@
   <div class="field <?= isset($errors['role']) ? 'has-error' : '' ?>">
     <label for="u_role">Role</label>
     <select id="u_role" name="role">
-      <?php foreach (ROLES as $role => $label): if ($role === 'super_admin' && !is_super_admin() && $values['role'] !== 'super_admin') continue; ?>
-        <option value="<?= h($role) ?>" <?= $values['role'] === $role ? 'selected' : '' ?>><?= h($label) ?> – <?= h(ROLE_DESCRIPTIONS[$role]) ?></option>
+      <?php foreach (roles() as $role => $label): if ($role === 'super_admin' && !is_super_admin() && $values['role'] !== 'super_admin') continue; ?>
+        <option value="<?= h($role) ?>" <?= $values['role'] === $role ? 'selected' : '' ?>><?= h($label) ?> – <?= h(role_description($role)) ?></option>
       <?php endforeach; ?>
     </select>
     <?php if (isset($errors['role'])): ?><div class="error"><?= h($errors['role']) ?></div><?php else: ?><div class="help">What each role can do is set on <?= is_super_admin() ? '<a href="' . h(url('roles')) . '">Roles &amp; permissions</a>' : 'the Roles &amp; permissions page (super admins only)' ?>.</div><?php endif; ?>

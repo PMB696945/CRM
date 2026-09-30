@@ -865,6 +865,22 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(in_array('test@example.com', array_column(users_with_permission('approvals.decide'), 'email'), true));
 });
 
+test('custom roles get their own permissions and survive a reset of the built-in roles', function () {
+    set_setting('custom_roles', json_encode(['c_provisioning' => ['label' => 'Provisioning', 'description' => 'Orders and installs']]));
+    set_setting('role_permissions', json_encode(['c_provisioning' => ['services.edit', 'tickets.edit'], '_known' => all_permissions()]));
+    eq('Provisioning', roles()['c_provisioning']);
+    eq('Provisioning', role_label('c_provisioning'));
+    eq('Orders and installs', role_description('c_provisioning'));
+    eq(['services.edit', 'tickets.edit'], role_permissions()['c_provisioning']);
+    eq(DEFAULT_ROLE_PERMISSIONS['staff'], role_permissions()['staff'], 'built-in roles not in the saved grid keep defaults');
+    as_role('c_provisioning');
+    ok(can('services.edit') && !can('customers.edit') && !can('audit.view'));
+    as_role('super_admin');
+    set_setting('custom_roles', null);
+    set_setting('role_permissions', null);
+    eq([], role_permissions()['c_provisioning'] ?? [], 'deleted role has no permissions');
+});
+
 $acct = [];
 test('customer form creates main and accounts contacts', function () use (&$acct) {
     $acct['a'] = create('accounts', ['name' => 'Bramble Dental', 'type' => 'business', 'status' => 'active', 'address' => '1 High St', 'postcode' => 'm1 2ab',

@@ -75,6 +75,28 @@ const DEFAULT_ROLE_PERMISSIONS = [
 /** Permissions added after the Roles page existed: roles saved before then get the defaults for these. */
 const PERMISSIONS_ADDED_LATER = ['costs.view', 'costs.edit'];
 
+/** Built-in roles plus any custom roles created on the Roles page: [key => label]. */
+function roles(): array
+{
+    $out = ROLES;
+    foreach (custom_roles() as $key => $r) {
+        $out[$key] = $r['label'];
+    }
+    return $out;
+}
+
+/** Custom roles: [key => ['label' => ..., 'description' => ...]]. */
+function custom_roles(): array
+{
+    $saved = json_decode((string)setting('custom_roles', ''), true);
+    return is_array($saved) ? $saved : [];
+}
+
+function role_description(string $role): string
+{
+    return ROLE_DESCRIPTIONS[$role] ?? (custom_roles()[$role]['description'] ?? '') ?: 'Custom role.';
+}
+
 function all_permissions(): array
 {
     return array_merge(...array_values(array_map('array_keys', PERMISSIONS)));
@@ -85,7 +107,7 @@ function role_permissions(): array
 {
     $saved = json_decode((string)setting('role_permissions', ''), true);
     $out = [];
-    foreach (ROLES as $role => $label) {
+    foreach (roles() as $role => $label) {
         if ($role === 'super_admin') {
             $out[$role] = all_permissions();
             continue;
@@ -124,7 +146,7 @@ function is_super_admin(): bool
 
 function role_label(?string $role): string
 {
-    return ROLES[$role] ?? humanize($role);
+    return roles()[$role] ?? humanize($role);
 }
 
 /** Users with a permission (e.g. who to tell about a new approval request). */
@@ -145,8 +167,76 @@ function roles_controller(): void
     }
     if (is_post()) {
         verify_csrf();
+        $saved = json_decode((string)setting('role_permissions', ''), true) ?: [];
+        $action = query('action');
+
+        if ($action === 'add_role') {
+            $label = trim(preg_replace('/\s+/', ' ', (string)($_POST['label'] ?? '')));
+            $description = mb_substr(trim((string)($_POST['description'] ?? '')), 0, 200);
+            $copy = (string)($_POST['copy_from'] ?? '');
+            if ($label === '' || mb_strlen($label) > 40) {
+                flash('Give the role a name (up to 40 characters).', 'error');
+                redirect(url('roles'));
+            }
+            if (in_array(mb_strtolower($label), array_map('mb_strtolower', roles()), true)) {
+                flash('There is already a role called "' . $label . '".', 'error');
+                redirect(url('roles'));
+            }
+            $base = 'c_' . substr(trim(preg_replace('/[^a-z0-9]+/', '_', strtolower($label)), '_') ?: 'role', 0, 14);
+            $key = $base;
+            for ($i = 2; isset(roles()[$key]); $i++) {
+                $key = substr($base, 0, 17) . $i;
+            }
+            $custom = custom_roles();
+            $custom[$key] = ['label' => $label, 'description' => $description];
+            set_setting('custom_roles', json_encode($custom));
+            $perms = $copy !== '' && $copy !== 'super_admin' && isset(roles()[$copy]) ? role_permissions()[$copy] : [];
+            set_setting('role_permissions', json_encode([$key => $perms] + $saved + ['_known' => $saved['_known'] ?? array_values(array_diff(all_permissions(), PERMISSIONS_ADDED_LATER))]));
+            audit('roles', "Custom role \"$label\" created" . ($perms ? ' with the permissions of ' . role_label($copy) : ''), null, null, null,
+                ['Permissions' => ['from' => '', 'to' => implode(', ', $perms)]]);
+            flash("Role \"$label\" created. Tick what it can do below, then give it to people on the Users page.");
+            redirect(url('roles') . '#role-' . $key);
+        }
+
+        if ($action === 'edit_role' || $action === 'delete_role') {
+            $key = (string)($_POST['role'] ?? '');
+            $custom = custom_roles();
+            if (!isset($custom[$key])) {
+                flash('Only custom roles can be renamed or deleted.', 'error');
+                redirect(url('roles'));
+            }
+            if ($action === 'delete_role') {
+                $users = (int)db_value('SELECT COUNT(*) FROM users WHERE role = ?', [$key]);
+                if ($users) {
+                    flash("Move the $users user" . ($users === 1 ? '' : 's') . " with this role to another role first.", 'error');
+                    redirect(url('roles'));
+                }
+                $deleted = $custom[$key]['label'];
+                unset($custom[$key], $saved[$key]);
+                set_setting('custom_roles', json_encode($custom));
+                set_setting('role_permissions', json_encode($saved));
+                audit('roles', "Custom role \"$deleted\" deleted");
+                flash('Role deleted.');
+                redirect(url('roles'));
+            }
+            $label = trim(preg_replace('/\s+/', ' ', (string)($_POST['label'] ?? '')));
+            if ($label === '' || mb_strlen($label) > 40) {
+                flash('Give the role a name (up to 40 characters).', 'error');
+                redirect(url('roles'));
+            }
+            $old = $custom[$key];
+            $custom[$key] = ['label' => $label, 'description' => mb_substr(trim((string)($_POST['description'] ?? '')), 0, 200)];
+            set_setting('custom_roles', json_encode($custom));
+            audit('roles', "Custom role \"{$old['label']}\" updated", null, null, null,
+                ['Name' => ['from' => $old['label'], 'to' => $label], 'Description' => ['from' => $old['description'], 'to' => $custom[$key]['description']]]);
+            flash('Role updated.');
+            redirect(url('roles'));
+        }
+
         if (($_POST['reset'] ?? '') === '1') {
-            set_setting('role_permissions', null);
+            // Built-in roles go back to their defaults; custom roles keep their ticks.
+            $keep = array_intersect_key($saved, custom_roles());
+            set_setting('role_permissions', $keep ? json_encode($keep + ['_known' => all_permissions()]) : null);
             audit('roles', 'Role permissions reset to the defaults');
             flash('Role permissions reset to the defaults.');
             redirect(url('roles'));
@@ -155,7 +245,7 @@ function roles_controller(): void
         $posted = is_array($_POST['perm'] ?? null) ? $_POST['perm'] : [];
         $save = [];
         $changes = [];
-        foreach (ROLES as $role => $label) {
+        foreach (roles() as $role => $label) {
             if ($role === 'super_admin') {
                 continue;
             }
