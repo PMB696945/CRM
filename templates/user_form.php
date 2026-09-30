@@ -22,6 +22,14 @@
     <input id="u_password" type="password" name="password" autocomplete="new-password" <?= $id ? '' : 'required' ?>>
     <?php if (isset($errors['password'])): ?><div class="error"><?= h($errors['password']) ?></div><?php elseif ($id): ?><div class="help">Leave blank to keep the current password.</div><?php endif; ?>
   </div>
+  <?php if ($groups): ?>
+  <div class="field wide">
+    <fieldset class="checkbox-group"><legend>Ticket groups</legend>
+      <?php foreach ($groups as $g): ?><label class="check"><input type="checkbox" name="groups[]" value="<?= (int)$g['id'] ?>" <?= in_array((int)$g['id'], $groupIds, true) ? 'checked' : '' ?>> <?= h($g['name']) ?></label><?php endforeach; ?>
+    </fieldset>
+    <div class="help">They'll see these groups' tickets and can pick them up from the Ticket queue.</div>
+  </div>
+  <?php endif; ?>
   <div class="field field-check"><label><input type="checkbox" name="active" value="1" <?= $values['active'] ? 'checked' : '' ?>> Active (can sign in)</label></div>
   <div class="form-actions wide"><button class="btn btn-primary">Save</button><a class="btn btn-ghost" href="<?= h(url('users')) ?>">Cancel</a></div>
 </form>

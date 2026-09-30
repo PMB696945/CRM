@@ -15,6 +15,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Services & lines** | Mobile SIMs (MSISDN), broadband (FTTP/SOGEA), VoIP seats, SIP trunks, hosted PBX, leased lines, Ethernet and hardware. Each one records its carrier (EE, Vodafone, O2, Openreach, CityFibre, BT Wholesale, Gamma, Colt…), price, contract start, term and end date |
 | **Contract renewals** | The contract end date is calculated from start date + term. Contracts ending within 90 days (configurable) or already out of contract are flagged, and "Start renewal" creates a renewal opportunity in one click |
 | **Support tickets** | Tickets get references (`TCK-000001`) and a category (fault / billing / order / porting / cancellation). Priorities P1–P4 have SLA timers, and you can record the carrier fault reference. The update thread supports internal and customer-facing notes and logs status changes |
+| **Ticket groups & queue** | Groups such as Sales, Faults and Billing, with staff in as many as needed. New tickets go to a group (by category, or chosen) and wait in its queue, oldest first, until someone in the group picks one up or presses **Take next ticket**. Staff see their groups' tickets; managers and admins see all |
 | **Sales pipeline** | Kanban board plus list view. Each deal has monthly and one-off value, term, total contract value and a probability that follows the stage. Deals are typed as new business, upsell or renewal |
 | **Products & tariffs** | A catalogue of products with a sale price, cost price (and margin), sales and purchases nominal codes, setup fee, term and billing cycle (weekly, monthly, quarterly, bi-annually or yearly). Picking a product on a service or quote fills in the details, converting the price to a monthly amount for MRR. Products can be sent to Xero as items: one at a time, several ticked at once, or automatically when saved |
 | **Activities** | Calls, emails, meetings, notes and tasks with due dates |
@@ -253,6 +254,13 @@ The SKU becomes the Xero item code (Xero allows up to 30 characters), the name i
 
 **Tracking:** the hourly cron job (`cron/sync.php`) and **Check for updates** on the Broadband orders page fetch status changes from Giacom. Each order's page shows its history and has **Refresh from Giacom**. When Giacom completes an order its service becomes **active**; a cancelled order's pending service is marked ceased. People who can place orders can also ask Giacom to cancel one in progress (Giacom confirms whether it could).
 
+## Ticket groups and the queue
+
+- **Groups** (Admin → Ticket groups): Sales, Faults, Billing and General are created for you. For each group choose which ticket categories go to it (e.g. Fault and Porting → Faults), its members, and optionally a shared email address for new-ticket alerts (otherwise each member is emailed, when email is set up). Staff can be in several groups; you can also tick groups on each user's page.
+- **New tickets** go to the group chosen on the ticket, or the group for its category, and wait **unassigned** in that group's queue. A ticket that has no group goes to the person who logged it, as before.
+- **Ticket queue** (in the menu, with a count): everything waiting in your groups, oldest first, with how long each has waited and its SLA. **Take next ticket** gives you the one waiting longest; **Pick up** takes a particular one. Once someone has it, it leaves everyone else's queue; two people can't take the same ticket.
+- **Who sees what:** staff see tickets in their own groups, tickets assigned to them and ungrouped tickets. Roles with "See tickets in every group" (admin and manager by default) see all.
+
 ## Customers: head office, sites and contacts
 
 - **Head office:** address, main phone and company email are on the customer form.
@@ -298,6 +306,7 @@ src/
   auth.php         sessions, login
   permissions.php  roles, permissions and the Roles page
   approvals.php    close/delete requests and approvals
+  ticket_groups.php ticket groups, queue and pick-up
   campaigns.php    service alerts and marketing: audiences, sending, unsubscribes
   mailchimp.php    Mailchimp Marketing API
   giacom.php       Giacom comms API: availability checks, orders and tracking

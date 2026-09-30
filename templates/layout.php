@@ -9,7 +9,7 @@ $nav = [
         'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
         'tickets'       => ['ticket', 'Support tickets'],
-    ] + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
+    ] + (can('tickets.edit') && user_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []) + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'contracts'     => ['signature', 'Contracts'],
@@ -27,6 +27,7 @@ $admin = array_filter([
     'approvals'  => can('approvals.decide') ? ['check', 'Approvals'] : null,
     'settings'   => can('settings.manage') ? ['cog', 'Settings'] : null,
     'users'      => can('users.manage') ? ['key', 'Users'] : null,
+    'ticket_groups' => can('users.manage') ? ['inbox', 'Ticket groups'] : null,
     'roles'      => is_super_admin() ? ['shield', 'Roles & permissions'] : null,
     'audit'      => can('audit.view') ? ['clipboard', 'Audit trail'] : null,
     'contract_templates' => can('settings.manage') ? ['template', 'Contract templates'] : null,
@@ -59,7 +60,7 @@ $flash = flash();
         <h3 class="menu-group-title"><?= h($group) ?></h3>
         <div class="menu">
           <?php foreach ($items as $key => [$ico, $label]): ?>
-            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?></a>
+            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?></a>
           <?php endforeach; ?>
         </div>
       <?php endforeach; ?>

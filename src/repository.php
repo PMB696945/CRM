@@ -186,6 +186,12 @@ function list_rows(string $name, array $opts = []): array
         $params["f_$field"] = $value;
     }
 
+    // Records the signed-in user may see (e.g. tickets in their groups).
+    if (!empty($entity['scope']) && ($scope = ($entity['scope'])())) {
+        $where[] = $scope[0];
+        $params += $scope[1];
+    }
+
     $preset = $entity['presets'][$opts['preset'] ?? ''] ?? null;
     if ($preset) {
         $where[] = '(' . $preset['sql'] . ')';
@@ -269,7 +275,7 @@ function ref_options(string $ref, ?int $accountId = null, ?string $extraWhere = 
     if ($ref === 'users') {
         $where[] = 'active = 1';
     }
-    if ($ref === 'products') {
+    if ($ref === 'products' || $ref === 'ticket_groups') {
         $where[] = 'active = 1';
     }
     if ($extraWhere !== null) {

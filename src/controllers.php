@@ -208,6 +208,15 @@ function users_controller(): void
                 } else {
                     db_exec('INSERT INTO users (name, email, role, active, password_hash) VALUES (?, ?, ?, ?, ?)',
                         [$values['name'], $values['email'], $values['role'], $values['active'], password_hash($password, PASSWORD_DEFAULT)]);
+                    $id = null;
+                }
+                $savedUserId = $id ?: (int)db()->lastInsertId();
+                // Ticket groups this person works in.
+                $beforeGroups = user_group_ids($savedUserId, true);
+                $newGroups = array_values(array_intersect(array_map('intval', array_column(ticket_groups(), 'id')), array_map('intval', is_array($_POST['groups'] ?? null) ? $_POST['groups'] : [])));
+                db_exec('DELETE FROM ticket_group_members WHERE user_id = ?', [$savedUserId]);
+                foreach ($newGroups as $gid) {
+                    db_exec('INSERT INTO ticket_group_members (group_id, user_id) VALUES (?, ?)', [$gid, $savedUserId]);
                 }
                 $userChanges = [];
                 foreach (['name', 'email', 'role', 'active'] as $f) {
@@ -218,13 +227,20 @@ function users_controller(): void
                 if ($password !== '') {
                     $userChanges['password'] = ['from' => '', 'to' => '(set)'];
                 }
+                sort($beforeGroups);
+                sort($newGroups);
+                if ($beforeGroups !== $newGroups) {
+                    $gn = array_column(ticket_groups(), 'name', 'id');
+                    $userChanges['ticket groups'] = ['from' => implode(', ', array_map(fn($g) => $gn[$g] ?? $g, $beforeGroups)), 'to' => implode(', ', array_map(fn($g) => $gn[$g] ?? $g, $newGroups))];
+                }
                 audit($id ? 'user_update' : 'user_create', 'User ' . $values['email'] . ($id ? ' updated' : ' created') . ' (' . role_label($values['role']) . ', ' . ($values['active'] ? 'active' : 'disabled') . ')' . ($password !== '' ? ', password set' : ''),
-                    'users', $id ?: (int)db()->lastInsertId(), null, $userChanges ?: null);
+                    'users', $savedUserId, null, $userChanges ?: null);
                 flash('User saved.');
                 redirect(url('users'));
             }
         }
-        page('user_form', ['values' => $values, 'errors' => $errors, 'id' => $id], $id ? 'Edit user' : 'New user');
+        $groupIds = is_post() ? array_map('intval', is_array($_POST['groups'] ?? null) ? $_POST['groups'] : []) : ($id ? user_group_ids($id, true) : []);
+        page('user_form', ['values' => $values, 'errors' => $errors, 'id' => $id, 'groups' => ticket_groups(), 'groupIds' => $groupIds], $id ? 'Edit user' : 'New user');
         return;
     }
 
@@ -385,6 +401,9 @@ function entity_controller(string $name): void
             if (!$row) {
                 not_found($entity['label'] . ' not found.');
             }
+            if ($name === 'tickets' && !can_see_ticket($row)) {
+                forbidden();
+            }
             if ($name === 'accounts') {
                 account_view($entity, $row);
             } elseif ($name === 'tickets') {
@@ -404,6 +423,9 @@ function entity_controller(string $name): void
                 $existing = $id ? find($name, $id) : null;
                 if (!$existing) {
                     not_found();
+                }
+                if ($name === 'tickets' && !can_see_ticket($existing)) {
+                    forbidden();
                 }
             }
             $values = $existing ?? defaults_for($entity);
@@ -425,6 +447,9 @@ function entity_controller(string $name): void
                             $savedId = $id;
                         } else {
                             $savedId = insert_row($name, $data);
+                            if ($name === 'tickets') {
+                                ticket_notify_group($savedId);
+                            }
                         }
                         $after = record_snapshot($name, $entity, $savedId);
                         $changes = [];
@@ -517,6 +542,9 @@ function entity_controller(string $name): void
             }
             verify_csrf();
             require_permission('tickets.edit');
+            if (!can_see_ticket(db_one('SELECT * FROM tickets WHERE id = ?', [$id]) ?? not_found())) {
+                forbidden();
+            }
             ticket_comment($id);
             return;
 

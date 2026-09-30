@@ -470,4 +470,36 @@ return [
             CONSTRAINT fk_goe_order FOREIGN KEY (order_id) REFERENCES giacom_orders(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+
+    11 => function (): void {
+        // Ticket groups (queues): staff can be in several; tickets route to a group by category.
+        db()->exec("CREATE TABLE IF NOT EXISTS ticket_groups (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name        VARCHAR(80) NOT NULL UNIQUE,
+            description VARCHAR(255) NULL,
+            categories  VARCHAR(255) NULL,
+            email       VARCHAR(190) NULL,
+            active      TINYINT(1) NOT NULL DEFAULT 1,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS ticket_group_members (
+            group_id INT UNSIGNED NOT NULL,
+            user_id  INT UNSIGNED NOT NULL,
+            PRIMARY KEY (group_id, user_id),
+            CONSTRAINT fk_tgm_group FOREIGN KEY (group_id) REFERENCES ticket_groups(id) ON DELETE CASCADE,
+            CONSTRAINT fk_tgm_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        if (!column_exists('tickets', 'group_id')) {
+            db()->exec('ALTER TABLE tickets ADD COLUMN group_id INT UNSIGNED NULL AFTER assigned_to, ADD KEY idx_tickets_queue (group_id, assigned_to, created_at)');
+        }
+        if (!constraint_exists('tickets', 'fk_tickets_group')) {
+            db()->exec('ALTER TABLE tickets ADD CONSTRAINT fk_tickets_group FOREIGN KEY (group_id) REFERENCES ticket_groups(id) ON DELETE SET NULL');
+        }
+        if (!db_value('SELECT COUNT(*) FROM ticket_groups')) {
+            foreach ([['Sales', 'New orders and upgrades', 'order'], ['Faults', 'Service faults and porting', 'fault,porting'],
+                      ['Billing', 'Invoices, payments and cancellations', 'billing,cancellation'], ['General', 'Everything else', 'general']] as [$name, $desc, $cats]) {
+                db_exec('INSERT INTO ticket_groups (name, description, categories) VALUES (?, ?, ?)', [$name, $desc, $cats]);
+            }
+        }
+    },
 ];

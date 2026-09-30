@@ -178,13 +178,55 @@ test('search matches identifiers and escapes LIKE wildcards', function () {
 
 echo "Tickets\n";
 $ticket = 0;
-test('ticket gets reference, SLA from priority and assignee', function () use (&$acc, &$svc, &$ticket) {
+test('ticket gets reference, SLA from priority, and a group from its category', function () use (&$acc, &$svc, &$ticket) {
     $ticket = create('tickets', ['account_id' => $acc, 'service_id' => $svc, 'subject' => 'No sync', 'category' => 'fault', 'priority' => 'P1', 'status' => 'open']);
     $row = find('tickets', $ticket);
     eq(sprintf('TCK-%06d', $ticket), $row['reference']);
     $hours = (strtotime($row['sla_due_at']) - strtotime($row['created_at'])) / 3600;
     ok(abs($hours - 4) < 0.02, "P1 SLA should be 4h, got $hours");
-    eq(1, $row['assigned_to']);
+    eq('Faults', $row['group_id__label'], 'fault tickets go to the Faults group');
+    eq(null, $row['assigned_to'], 'grouped tickets wait in the queue');
+    db_exec("UPDATE ticket_groups SET categories = NULL WHERE name = 'General'");
+    $own = create('tickets', ['account_id' => $acc, 'subject' => 'Ungrouped', 'category' => 'general', 'priority' => 'P3', 'status' => 'open']);
+    eq(1, find('tickets', $own)['assigned_to'], 'without a group, the person who logs it gets it');
+    eq(null, find('tickets', $own)['group_id']);
+    db_exec("UPDATE ticket_groups SET categories = 'general' WHERE name = 'General'");
+});
+test('ticket groups: queue in arrival order, pick up once, only see your groups', function () use (&$acc) {
+    $faults = (int)db_value("SELECT id FROM ticket_groups WHERE name = 'Faults'");
+    $billing = (int)db_value("SELECT id FROM ticket_groups WHERE name = 'Billing'");
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Queue Quinn', 'quinn@example.com', 'x', 'support')");
+    $quinn = (int)db()->lastInsertId();
+    db_exec('INSERT INTO ticket_group_members (group_id, user_id) VALUES (?, ?)', [$faults, $quinn]);
+    $old = create('tickets', ['account_id' => $acc, 'subject' => 'Older fault', 'category' => 'fault', 'priority' => 'P3', 'status' => 'open']);
+    db_exec('UPDATE tickets SET created_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = ?', [$old]);
+    $new = create('tickets', ['account_id' => $acc, 'subject' => 'Newer fault', 'category' => 'fault', 'priority' => 'P1', 'status' => 'open']);
+    $bill = create('tickets', ['account_id' => $acc, 'subject' => 'Invoice query', 'category' => 'billing', 'priority' => 'P3', 'status' => 'open']);
+    eq($billing, (int)find('tickets', $bill)['group_id']);
+
+    $_SESSION['user_id'] = $quinn;
+    current_user(true);
+    user_group_ids(null, true);
+    ok(!can('tickets.all'));
+    $queue = array_map('intval', array_column(ticket_queue(), 'id'));
+    eq($old, $queue[0], 'oldest first');
+    ok(in_array($new, $queue, true) && !in_array($bill, $queue, true), 'only my groups');
+    $visible = array_map('intval', array_column(list_rows('tickets', ['per_page' => 0])['rows'], 'id'));
+    ok(in_array($old, $visible, true) && !in_array($bill, $visible, true), 'ticket lists are limited to my groups');
+    ok(!can_see_ticket(find('tickets', $bill)) && can_see_ticket(find('tickets', $old)));
+    ok(ticket_queue_count() >= 2);
+    ok(ticket_pick_up($old));
+    $t = find('tickets', $old);
+    eq($quinn, (int)$t['assigned_to']); eq('in_progress', $t['status']);
+    ok(!ticket_pick_up($old), 'cannot be picked up twice');
+    ok(!ticket_pick_up($bill), 'cannot pick up another group\'s ticket');
+    ok(str_contains((string)db_value('SELECT body FROM ticket_comments WHERE ticket_id = ? ORDER BY id DESC LIMIT 1', [$old]), 'picked up'));
+
+    $_SESSION['user_id'] = 1;
+    current_user(true);
+    user_group_ids(null, true);
+    ok(can('tickets.all'));
+    ok(in_array($bill, array_map('intval', array_column(list_rows('tickets', ['per_page' => 0])['rows'], 'id')), true), 'admins see every group');
 });
 test('service must belong to the ticket customer', function () use (&$svc) {
     $other = create('accounts', ['name' => 'Other Co', 'type' => 'business', 'status' => 'active']);
@@ -847,7 +889,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'orders.check', 'orders.place', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
     eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));

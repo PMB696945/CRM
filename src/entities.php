@@ -71,6 +71,7 @@ const REF_LABELS = [
     'services' => 'identifier',
     'contacts' => 'name',
     'sites'    => 'name',
+    'ticket_groups' => 'name',
     'users'    => 'name',
     'xero_contacts' => 'name',
     'gocardless_customers' => 'name',
@@ -291,16 +292,20 @@ function entities(): array
                 'category'    => ['label' => 'Category', 'type' => 'select', 'options' => opts(['fault', 'billing', 'order', 'porting', 'cancellation', 'general']), 'required' => true],
                 'priority'    => ['label' => 'Priority', 'type' => 'select', 'options' => ['P1' => 'P1 – Critical', 'P2' => 'P2 – High', 'P3' => 'P3 – Normal', 'P4' => 'P4 – Low'], 'required' => true, 'default' => 'P3'],
                 'status'      => ['label' => 'Status', 'type' => 'select', 'options' => opts(['open', 'in_progress', 'awaiting_customer', 'awaiting_carrier', 'resolved', 'closed']), 'required' => true],
-                'assigned_to' => ['label' => 'Assigned to', 'type' => 'ref', 'ref' => 'users'],
+                'group_id'    => ['label' => 'Group', 'type' => 'ref', 'ref' => 'ticket_groups', 'help' => 'Leave blank to route by category'],
+                'assigned_to' => ['label' => 'Assigned to', 'type' => 'ref', 'ref' => 'users', 'help' => 'Leave blank to put it in the group\'s queue'],
                 'carrier_ref' => ['label' => 'Carrier fault ref', 'type' => 'text'],
                 'description' => ['label' => 'Description', 'type' => 'textarea'],
                 'sla_due_at'  => ['label' => 'SLA due', 'type' => 'datetime', 'readonly' => true],
                 'created_at'  => ['label' => 'Opened', 'type' => 'datetime', 'readonly' => true],
             ],
-            'list'    => ['reference', 'subject', 'account_id', 'category', 'priority', 'status', 'assigned_to', 'sla_due_at'],
+            'list'    => ['reference', 'subject', 'account_id', 'category', 'priority', 'status', 'group_id', 'assigned_to', 'sla_due_at'],
             'search'  => ['reference', 'subject', 'description', 'carrier_ref'],
-            'filters' => ['status', 'priority', 'category', 'assigned_to', 'account_id'],
+            'filters' => ['status', 'priority', 'category', 'group_id', 'assigned_to', 'account_id'],
+            'scope'   => 'ticket_scope',
             'presets' => [
+                'queue'    => ['label' => 'Waiting in my groups', 'sql' => "t.status NOT IN ('resolved','closed') AND t.assigned_to IS NULL AND t.group_id IN (SELECT m.group_id FROM ticket_group_members m WHERE m.user_id = :qme)",
+                    'params' => fn() => ['qme' => current_user()['id'] ?? 0]],
                 'open'     => ['label' => 'Open', 'sql' => "t.status NOT IN ('resolved','closed')"],
                 'breached' => ['label' => 'SLA breached', 'sql' => "t.status NOT IN ('resolved','closed') AND t.sla_due_at < NOW()"],
                 'mine'     => ['label' => 'Assigned to me', 'sql' => "t.status NOT IN ('resolved','closed') AND t.assigned_to = :me", 'params' => fn() => ['me' => current_user()['id'] ?? 0]],
@@ -582,7 +587,11 @@ function before_save(string $name, array $data, ?array $existing): array
             } elseif (!$closed) {
                 $data['resolved_at'] = null;
             }
-            if ($existing === null && empty($data['assigned_to']) && $user) {
+            // Route to a group by category; grouped tickets wait in the queue for someone to pick up.
+            if (array_key_exists('group_id', $data) && empty($data['group_id']) && ($existing === null || $existing['category'] !== $data['category'] || empty($existing['group_id']))) {
+                $data['group_id'] = ticket_group_for_category($data['category'] ?? null);
+            }
+            if ($existing === null && empty($data['assigned_to']) && empty($data['group_id']) && $user) {
                 $data['assigned_to'] = $user['id'];
             }
             break;
