@@ -111,7 +111,7 @@ switch ($call) {
             'products' => [
                 ['product-id' => '34350', 'product-name' => 'Business FTTC 80/20', 'technology-type' => 'fttc', 'supplier-product-reference' => 'BT_21CN_FTTC', 'supplier-product-subtype' => 'plus',
                     'service-speed' => '80000000', 'care-level' => 'standard', 'care-level-options' => 'standard,enhanced'],
-                ['product-id' => '34360', 'product-name' => 'Business FTTP 900', 'technology-type' => 'fttp', 'supplier-product-reference' => 'BT_FTTP', 'service-speed' => '900000000'],
+                ['product-id' => '34360', 'product-name' => 'Business FTTP 900', 'technology-type' => 'fttp', 'supplier-product-reference' => 'BT_FTTP', 'service-speed' => '900000000', 'realms' => [['realm' => 'isp.example'], ['realm' => '-public@GreatDSL']]],
             ],
         ]);
     case 'provide':
@@ -124,6 +124,9 @@ switch ($call) {
         }
         if ($call === 'migrate' && empty($o['cli']) && empty($o['access-line-id'])) {
             reply([], 21, 'A CLI or access line ID is required for a migrate');
+        }
+        if (!str_contains($o['username'], '@')) {
+            reply([], 24, 'Broadband realm for ' . $o['username'] . ' not found');
         }
         if (!preg_match('/^[A-Z0-9]{2,4} [0-9][A-Z]{2}$/', $req['customer']['postcode'] ?? '')) {
             reply([], 23, 'Failed validation: Post code must contain a space.');

@@ -12,7 +12,7 @@
       <label>API username<input name="username" value="<?= h(setting('giacom_username')) ?>" autocomplete="off" spellcheck="false"></label>
       <label>API password<input type="password" name="password" autocomplete="new-password" <?= setting('giacom_password') ? 'placeholder="•••••••• saved (leave blank to keep)"' : '' ?>></label>
       <label>Client ID<input name="client_id" value="<?= h(setting('giacom_client_id')) ?>" autocomplete="off"><span class="help">If Giacom gave you one.</span></label>
-      <label>Broadband realm<input name="realm" value="<?= h(setting('giacom_realm')) ?>" placeholder="e.g. yourisp.net"><span class="help">Used for new broadband usernames (user@realm).</span></label>
+      <label>Broadband realm<input name="realm" value="<?= h(setting('giacom_realm')) ?>" placeholder="e.g. yourisp.net"><span class="help">The default realm for new broadband logins, exactly as it's set up on your Giacom account (e.g. yourisp.net). Usernames are sent as user@realm.</span></label>
       <label>Default care level<select name="care_level"><option value="">Giacom's default</option>
         <?php foreach (GIACOM_CARE_LEVELS as $k => $l): ?><option value="<?= $k ?>" <?= setting('giacom_care_level') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
       <details <?= setting('giacom_url') ? 'open' : '' ?>><summary>Advanced</summary>

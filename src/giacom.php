@@ -254,6 +254,7 @@ function giacom_summarise_availability(array $r): array
             'likely_range' => isset($p['likely-min-range'], $p['likely-max-range']) ? [(float)$p['likely-min-range'], (float)$p['likely-max-range']] : null,
             'estimate' => $estimates[$key] ?? null,
             'care_levels' => array_values(array_filter(array_map('trim', explode(',', (string)($p['care-level-options'] ?? ''))))),
+            'realms' => array_values(array_unique(array_filter(array_map(fn($r) => trim((string)($r['realm'] ?? '')), is_array($p['realms'] ?? null) ? $p['realms'] : [])))),
             'care_default' => $p['care-level'] ?? null,
             'leadtime' => $leadtimes[(string)$p['product-id']] ?? null,
         ];
@@ -304,9 +305,14 @@ function giacom_place_order(array $check, array $product, array $o): int
     $type = $o['order_type'] === 'migrate' ? 'migrate' : 'provide';
     $clientRef = mb_substr($account['account_number'] . ($o['client_ref'] !== '' ? ' ' . $o['client_ref'] : ''), 0, 60);
 
+    $fullUsername = giacom_full_username($o['bb_username'], $o['realm']);
+    if (!str_contains($fullUsername, '@')) {
+        throw new GiacomException('Enter the broadband realm: Giacom needs the username as user@realm.');
+    }
+    $realmAttr = str_contains($o['realm'], '@') ? substr($o['realm'], strrpos($o['realm'], '@') + 1) : $o['realm'];
     $attributes = array_filter([
         'password' => $o['bb_password'],
-        'realm' => $o['realm'],
+        'realm' => $realmAttr,
         'care-level' => $o['care_level'] ?: null,
         'site-visit-reason' => $o['site_visit_reason'] ?: null,
         'force-new-ont' => $o['force_new_ont'] ?? null,
@@ -316,7 +322,7 @@ function giacom_place_order(array $check, array $product, array $o): int
         'cli' => $o['cli'] ?: null,
         'prod-id' => $product['product_id'],
         'crd' => $o['crd'],
-        'username' => $o['bb_username'],
+        'username' => $fullUsername,
         'address-reference' => $address['address-reference'] ?? null,
         'access-line-id' => $type === 'migrate' ? ($o['access_line_id'] ?: null) : null,
     ], fn($v) => $v !== null && $v !== '') + ['attributes' => $attributes];
@@ -346,17 +352,17 @@ function giacom_place_order(array $check, array $product, array $o): int
         // A pending service on the customer, made live when Giacom completes the order.
         $serviceId = insert_row('services', [
             'account_id' => $account['id'], 'site_id' => $check['site_id'] ?: null, 'product_id' => $o['crm_product_id'] ?: null,
-            'service_type' => giacom_service_type($product['technology']), 'identifier' => $o['cli'] ?: $o['bb_username'],
+            'service_type' => giacom_service_type($product['technology']), 'identifier' => $o['cli'] ?: $fullUsername,
             'carrier' => 'Giacom', 'status' => 'pending', 'monthly_price' => null, 'setup_fee' => null,
             'start_date' => null, 'term_months' => null, 'contract_end_date' => null,
             'install_address' => $check['site_id'] ? null : mb_substr((string)$check['address_label'], 0, 255),
-            'notes' => "Giacom $type order $orderId: {$product['name']}" . ($o['bb_username'] ? "\nBroadband username: {$o['bb_username']}" : ''),
+            'notes' => "Giacom $type order $orderId: {$product['name']}" . ($fullUsername ? "\nBroadband username: $fullUsername" : ''),
         ]);
         db_exec('INSERT INTO giacom_orders (account_id, site_id, service_id, check_id, order_type, giacom_order_id, giacom_service_id, cli, product_id, product_name,
                 technology_type, broadband_username, address_label, crd, client_ref, status, status_updated_at, details, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)', [
             $account['id'], $check['site_id'] ?: null, $serviceId, $check['id'], $type, $orderId, $r['service-id'] ?? null, $o['cli'] ?: null,
-            $product['product_id'], mb_substr($product['name'], 0, 190), $product['technology'], $o['bb_username'] ?: null,
+            $product['product_id'], mb_substr($product['name'], 0, 190), $product['technology'], $fullUsername ?: null,
             $check['address_label'], $o['crd'], $clientRef, 'Placed',
             json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email']]),
             current_user()['id'] ?? null,
@@ -499,6 +505,21 @@ function giacom_split_name(string $name): array
     }
     $surname = count($parts) > 1 ? array_pop($parts) : '';
     return [$title, implode(' ', $parts), $surname];
+}
+
+/**
+ * The full broadband username Giacom expects: user@realm (Giacom finds the
+ * realm from it). Realms given as a suffix such as "-public@GreatDSL" are
+ * appended as they are.
+ */
+function giacom_full_username(string $user, string $realm): string
+{
+    $user = trim($user);
+    $realm = trim($realm);
+    if ($realm === '' || str_contains($user, '@')) {
+        return $user;
+    }
+    return str_contains($realm, '@') ? $user . $realm : $user . '@' . $realm;
 }
 
 /** A broadband username suggestion for a new order, e.g. acc10001-2 (the realm is sent separately). */
@@ -678,7 +699,7 @@ function giacom_controller(): void
                 'order_type' => in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide',
                 'cli' => (string)$check['cli'], 'crd' => max($lead, date('Y-m-d', strtotime('+1 weekday'))),
                 'bb_username' => giacom_suggest_username($account), 'bb_password' => substr(strtr(base64_encode(random_bytes(9)), '+/', 'Kq'), 0, 12),
-                'realm' => (string)setting('giacom_realm'),
+                'realm' => (string)(in_array((string)setting('giacom_realm'), $product['realms'] ?? [], true) || empty($product['realms']) ? setting('giacom_realm') : $product['realms'][0]),
                 'care_level' => in_array(setting('giacom_care_level'), $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS), true) ? setting('giacom_care_level') : ($product['care_default'] ?? 'standard'),
                 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => '',
                 'title' => $title, 'forename' => $forename, 'surname' => $surname,
@@ -707,9 +728,14 @@ function giacom_controller(): void
                 elseif ($leadSource && $values['crd'] < $lead) {
                     $errors['crd'] = 'Giacom\'s earliest date for this product is ' . fmt_date($lead) . '.';
                 }
-                // The realm is sent on its own, so drop it if it was typed into the username.
-                if ($values['realm'] !== '' && str_ends_with(strtolower($values['bb_username']), '@' . strtolower($values['realm']))) {
-                    $values['bb_username'] = substr($values['bb_username'], 0, -strlen('@' . $values['realm']));
+                // The realm is added on sending, so drop it if it was typed into the username too.
+                if ($values['realm'] !== '' && str_contains($values['bb_username'], '@')) {
+                    $values['bb_username'] = substr($values['bb_username'], 0, strpos($values['bb_username'], '@'));
+                }
+                if ($values['realm'] === '') {
+                    $errors['realm'] = 'Giacom needs a realm to set up the broadband login. Your realms are in the Giacom portal; set a default under Admin → Giacom.';
+                } elseif (!empty($product['realms']) && !in_array($values['realm'], $product['realms'], true)) {
+                    $errors['realm'] = 'Giacom offers these realms for this product: ' . implode(', ', $product['realms']) . '.';
                 }
                 if (!preg_match('/^[A-Za-z0-9._@+-]{3,120}$/', $values['bb_username'])) {
                     $errors['bb_username'] = 'Use letters, numbers and . _ - @ only.';

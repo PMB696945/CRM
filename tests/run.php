@@ -1231,12 +1231,12 @@ test('Giacom: placing an order sends the right details and adds a pending servic
     eq('enhanced', $sent['order']['attributes']['care-level']); eq('Pa55word!', $sent['order']['attributes']['password']);
     ok(str_starts_with($sent['order']['client-ref'], 'ACC-') && str_ends_with($sent['order']['client-ref'], ' PO 77'));
     eq('M1 3HE', $sent['customer']['postcode'], 'Giacom needs the space in the postcode');
-    eq('acc10001-1', $sent['order']['username']); eq('isp.example', $sent['order']['attributes']['realm']);
+    eq('acc10001-1@isp.example', $sent['order']['username'], 'Giacom finds the realm from the username'); eq('isp.example', $sent['order']['attributes']['realm']);
     eq('Canal Street Clinic', $sent['customer']['company']); eq('01614960000', $sent['customer']['telephone']); eq('Unit 2', $sent['customer']['sub-premise']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
     eq('700100', $order['giacom_order_id']); eq('9700100', $order['giacom_service_id']); eq('Placed', $order['status']);
     $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
-    eq('pending', $svc['status']); eq('Giacom', $svc['carrier']); eq('broadband', $svc['service_type']); eq('acc10001-1', $svc['identifier']);
+    eq('pending', $svc['status']); eq('Giacom', $svc['carrier']); eq('broadband', $svc['service_type']); eq('acc10001-1@isp.example', $svc['identifier']);
     ok(str_contains($svc['notes'], '700100'));
     ok(!str_contains((string)db_value("SELECT changes FROM audit_log WHERE action = 'giacom_order' ORDER BY id DESC LIMIT 1"), 'Pa55word'), 'password not in the audit trail');
     ok(!str_contains((string)$order['details'], 'Pa55word'), 'password not stored');
@@ -1265,6 +1265,11 @@ test('Giacom: status updates are picked up; completion makes the service live', 
     eq('Completed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$g['order']]));
     eq(3, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'giacom_status' AND account_id = ?", [$g['acc']]), 'placed → awaiting → in progress → completed');
     eq(['Dr', 'Priya', 'Shah'], giacom_split_name('Dr. Priya Shah'));
+    eq('off001-1@isp.example', giacom_full_username('off001-1', 'isp.example'));
+    eq('off001-1-public@GreatDSL', giacom_full_username('off001-1', '-public@GreatDSL'));
+    eq('off001-1@other.net', giacom_full_username('off001-1@other.net', 'isp.example'));
+    $r = json_decode(db_value('SELECT result FROM giacom_checks WHERE id = ?', [$g['check']]), true);
+    eq(['isp.example', '-public@GreatDSL'], $r['products'][1]['realms'], 'realms offered per product');
     $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$g['acc']]);
     ok(!str_contains(giacom_suggest_username($acct), '@'), 'suggested username has no realm');
     $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
@@ -1279,10 +1284,13 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
     $product = json_decode($check['result'], true)['products'][1];
     $o = ['order_type' => 'migrate', 'cli' => '01614960001', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-2', 'bb_password' => 'secret12',
-        'realm' => '', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => 'N',
+        'realm' => '-public@GreatDSL', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => 'N',
         'title' => 'Ms', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '01614960000', 'email' => '', 'crm_product_id' => ''];
     $id = giacom_place_order($check, $product, $o);
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
+    eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
+    eq('GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm']);
+    try { giacom_place_order($check, $product, ['realm' => ''] + $o); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'realm')); }
     eq('N', g_state()['last']['migrate']['order']['attributes']['force-new-ont']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
     eq('Cancelled', giacom_abort_order($order, 'Customer changed their mind'));
