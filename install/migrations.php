@@ -391,4 +391,19 @@ return [
             }
         }
     },
+
+    9 => function (): void {
+        // Nominal (account) codes per product, for sales and for purchases.
+        foreach (['sales_account_code' => 'VARCHAR(20) NULL', 'purchase_account_code' => 'VARCHAR(20) NULL'] as $column => $definition) {
+            if (!column_exists('products', $column)) {
+                db()->exec("ALTER TABLE products ADD COLUMN $column $definition AFTER description");
+            }
+        }
+        // Start from the defaults saved on the Xero page, if any.
+        foreach (['sales_account_code' => 'xero_item_sales_account', 'purchase_account_code' => 'xero_item_purchase_account'] as $column => $setting) {
+            if ($code = db_value('SELECT value FROM settings WHERE name = ?', [$setting])) {
+                db_exec("UPDATE products SET $column = ? WHERE $column IS NULL", [$code]);
+            }
+        }
+    },
 ];

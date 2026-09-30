@@ -122,6 +122,15 @@ if (preg_match('#^/api.xro/2.0/Contacts/([0-9a-f-]{36})$#', $path, $m) && $_SERV
     json_out(200, ['Contacts' => [$body['Contacts'][0] + ['ContactID' => $m[1]]]]);
 }
 
+if ($path === '/api.xro/2.0/Accounts') {
+    json_out(200, ['Accounts' => [
+        ['Code' => '200', 'Name' => 'Sales', 'Class' => 'REVENUE', 'Status' => 'ACTIVE'],
+        ['Code' => '205', 'Name' => 'Airtime sales', 'Class' => 'REVENUE', 'Status' => 'ACTIVE'],
+        ['Code' => '310', 'Name' => 'Cost of Goods Sold', 'Class' => 'EXPENSE', 'Status' => 'ACTIVE'],
+        ['Name' => 'Bank', 'Class' => 'ASSET', 'Status' => 'ACTIVE'],
+    ]]);
+}
+
 if ($path === '/api.xro/2.0/Items' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $body = json_decode(file_get_contents('php://input'), true);
     $out = [];

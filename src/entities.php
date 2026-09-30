@@ -101,7 +101,8 @@ function entities(): array
 {
     // Cached per request, keyed on the features that change the definitions.
     static $cache = [];
-    $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '') . '|' . (can('finance.view') ? 'fin' : '');
+    $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '') . '|' . (can('finance.view') ? 'fin' : '')
+        . '|' . (can('costs.view') ? 'cv' : '') . (can('costs.edit') ? 'ce' : '') . (can('products.edit') ? 'pe' : '');
     if (isset($cache[$key])) {
         return $cache[$key];
     }
@@ -220,7 +221,7 @@ function entities(): array
         ],
 
         'products' => [
-            'label' => 'Product', 'plural' => 'Products & tariffs', 'icon' => '📦', 'perm' => 'products.edit',
+            'label' => 'Product', 'plural' => 'Products & tariffs', 'icon' => '📦', 'perm' => ['products.edit', 'costs.edit'],
             'fields' => [
                 'sku'               => ['label' => 'SKU', 'type' => 'text', 'required' => true, 'help' => 'Also the item code in Xero (up to 30 characters)'],
                 'name'              => ['label' => 'Name', 'type' => 'text', 'required' => true],
@@ -228,11 +229,17 @@ function entities(): array
                 'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
                 'billing_frequency' => ['label' => 'Billing cycle', 'type' => 'select', 'options' => BILLING_FREQUENCIES, 'default' => 'monthly', 'help' => 'How often the customer is billed for it'],
                 'monthly_price'     => ['label' => 'Sale price', 'type' => 'money', 'required' => true, 'help' => 'Per billing cycle, excluding VAT'],
-                'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'help' => 'What it costs you per billing cycle. Only people who can see balances see this', 'if' => fn() => can('finance.view')],
+                'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'help' => 'What it costs you per billing cycle',
+                    'if' => fn() => can('costs.view'), 'readonly' => !can('costs.edit')],
                 'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money', 'help' => 'One-off'],
                 'term_months'       => ['label' => 'Term (months)', 'type' => 'int', 'required' => true, 'min' => 0],
                 'active'            => ['label' => 'Available to sell', 'type' => 'bool', 'default' => 1],
                 'description'       => ['label' => 'Description', 'type' => 'textarea'],
+                'sales_account_code'    => ['label' => 'Sales nominal code', 'type' => 'text', 'section' => 'Accounts', 'datalist' => 'sales',
+                    'section_help' => 'Where sales and costs of this product are posted in your accounts (and in Xero).',
+                    'default' => setting('xero_item_sales_account'), 'help' => 'e.g. 200 Sales'],
+                'purchase_account_code' => ['label' => 'Purchases nominal code', 'type' => 'text', 'datalist' => 'purchases',
+                    'default' => setting('xero_item_purchase_account'), 'help' => 'e.g. 310 Cost of goods sold'],
                 'xero_synced_at'    => ['label' => 'Sent to Xero', 'type' => 'datetime', 'readonly' => true, 'if' => 'xero_connected'],
                 'xero_sync_error'   => ['label' => 'Xero problem', 'type' => 'text', 'readonly' => true, 'if' => 'xero_connected'],
             ],
@@ -404,12 +411,21 @@ function entities(): array
         ],
     ];
 
-    // Cost prices and margins only for people allowed to see money.
-    if (can('finance.view')) {
+    // Cost prices and margins only for people allowed to see them.
+    if (can('costs.view')) {
         $entities['products']['computed']['_margin'] = ['label' => 'Margin', 'type' => 'percent',
             'sql' => '(CASE WHEN t.cost_price IS NULL OR t.monthly_price = 0 THEN NULL ELSE ROUND((t.monthly_price - t.cost_price) / t.monthly_price * 100, 1) END)'];
     } else {
         $entities['products']['list'] = array_values(array_diff($entities['products']['list'], ['cost_price', '_margin']));
+    }
+    // People who may change cost prices but not manage products can only change the cost.
+    if (!can('products.edit') && can('costs.edit')) {
+        foreach ($entities['products']['fields'] as $f => &$def) {
+            if ($f !== 'cost_price') {
+                $def['readonly'] = true;
+            }
+        }
+        unset($def);
     }
     if (xero_connected()) {
         $entities['products']['list'][] = '_xero';
@@ -598,7 +614,9 @@ function before_save(string $name, array $data, ?array $existing): array
             break;
 
         case 'products':
-            $data['setup_fee'] ??= 0;
+            if ($existing === null || array_key_exists('setup_fee', $data)) {
+                $data['setup_fee'] ??= 0;
+            }
             if (array_key_exists('billing_frequency', $data) || $existing === null) {
                 $data['billing_frequency'] = $data['billing_frequency'] ?? null ?: 'monthly';
             }
@@ -744,6 +762,13 @@ function validate_rules(string $name, array $data, ?int $id): array
             $children = (int)db_value('SELECT COUNT(*) FROM accounts WHERE parent_id = ?', [$id]);
             if ($children) {
                 $errors['is_dealer'] = "This dealer has $children customer" . ($children === 1 ? '' : 's') . ' under it. Move them first.';
+            }
+        }
+    }
+    if ($name === 'products' && ($codes = nominal_codes())) {
+        foreach (['sales_account_code', 'purchase_account_code'] as $f) {
+            if (!empty($data[$f]) && !isset($codes[$data[$f]])) {
+                $errors[$f] = 'There\'s no active account with code "' . $data[$f] . '" in your Xero chart of accounts.';
             }
         }
     }

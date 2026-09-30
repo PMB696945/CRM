@@ -47,6 +47,8 @@ const PERMISSIONS = [
     'Money' => [
         'finance.view'  => 'See balances, credit and Direct Debit status',
         'products.edit' => 'Manage products & tariffs',
+        'costs.view'    => 'See cost prices and margins',
+        'costs.edit'    => 'Change cost prices',
     ],
     'Marketing' => [
         'marketing.send' => 'Create and send service alerts and marketing emails',
@@ -60,15 +62,18 @@ const PERMISSIONS = [
 
 const DEFAULT_ROLE_PERMISSIONS = [
     'admin'     => ['customers.edit', 'customers.close', 'customers.delete', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
-                    'records.delete', 'export', 'finance.view', 'products.edit', 'marketing.send', 'settings.manage', 'users.manage'],
+                    'records.delete', 'export', 'finance.view', 'products.edit', 'costs.view', 'costs.edit', 'marketing.send', 'settings.manage', 'users.manage'],
     'manager'   => ['customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
-                    'records.delete', 'export', 'finance.view', 'marketing.send'],
-    'staff'     => ['customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'finance.view'],
-    'sales'     => ['customers.edit', 'sales.edit', 'tickets.edit'],
+                    'records.delete', 'export', 'finance.view', 'costs.view', 'costs.edit', 'marketing.send'],
+    'staff'     => ['customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'finance.view', 'costs.view'],
+    'sales'     => ['customers.edit', 'sales.edit', 'tickets.edit', 'costs.view'],
     'support'   => ['customers.edit', 'services.edit', 'tickets.edit'],
-    'finance'   => ['customers.edit', 'finance.view', 'export'],
+    'finance'   => ['customers.edit', 'finance.view', 'costs.view', 'export'],
     'read_only' => [],
 ];
+
+/** Permissions added after the Roles page existed: roles saved before then get the defaults for these. */
+const PERMISSIONS_ADDED_LATER = ['costs.view', 'costs.edit'];
 
 function all_permissions(): array
 {
@@ -85,7 +90,14 @@ function role_permissions(): array
             $out[$role] = all_permissions();
             continue;
         }
-        $list = is_array($saved[$role] ?? null) ? $saved[$role] : (DEFAULT_ROLE_PERMISSIONS[$role] ?? []);
+        $defaults = DEFAULT_ROLE_PERMISSIONS[$role] ?? [];
+        if (is_array($saved[$role] ?? null)) {
+            // Permissions that didn't exist when the grid was saved keep their defaults.
+            $known = is_array($saved['_known'] ?? null) ? $saved['_known'] : array_diff(all_permissions(), PERMISSIONS_ADDED_LATER);
+            $list = array_merge($saved[$role], array_diff(array_intersect($defaults, all_permissions()), $known));
+        } else {
+            $list = $defaults;
+        }
         $out[$role] = array_values(array_intersect(all_permissions(), $list));
     }
     return $out;
@@ -155,7 +167,7 @@ function roles_controller(): void
                 $changes[$label] = [implode(', ', $removed) ?: '', implode(', ', $added) ?: ''];
             }
         }
-        set_setting('role_permissions', json_encode($save));
+        set_setting('role_permissions', json_encode($save + ['_known' => all_permissions()]));
         audit('roles', 'Role permissions changed' . ($changes ? ': ' . implode(', ', array_keys($changes)) : ' (no changes)'), null, null, null,
             array_map(fn($c) => ['removed' => $c[0], 'added' => $c[1]], $changes));
         flash('Role permissions saved.');

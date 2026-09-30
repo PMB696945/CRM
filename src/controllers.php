@@ -355,7 +355,7 @@ function entity_controller(string $name): void
     $entity = entity($name);
     $action = query('action', 'list');
     $id = query_int('id');
-    $canWrite = empty($entity['perm']) || can($entity['perm']);
+    $canWrite = empty($entity['perm']) || (bool)array_filter((array)$entity['perm'], 'can');
 
     switch ($action) {
         case 'list':
@@ -396,7 +396,7 @@ function entity_controller(string $name): void
 
         case 'new':
         case 'edit':
-            if (!$canWrite) {
+            if (!$canWrite || ($name === 'products' && $action === 'new' && !can('products.edit'))) {
                 forbidden();
             }
             $existing = null;
@@ -479,7 +479,7 @@ function entity_controller(string $name): void
             }
             verify_csrf();
             // Customers are closed/deleted through approvals.php (with approval where needed).
-            if (!$canWrite || $name === 'accounts' || !can('records.delete')) {
+            if (!$canWrite || $name === 'accounts' || !can('records.delete') || ($name === 'products' && !can('products.edit'))) {
                 forbidden();
             }
             if ($id && ($row = find($name, $id))) {
@@ -682,6 +682,15 @@ function xero_controller(): void
     if (is_post()) {
         verify_csrf();
         switch ($action) {
+            case 'accounts':
+                try {
+                    $n = xero_fetch_accounts();
+                    flash("Loaded $n account codes from Xero. They're offered when you set a product's nominal codes.");
+                } catch (IntegrationException $e) {
+                    flash('Couldn\'t load account codes: ' . $e->getMessage(), 'error');
+                }
+                break;
+
             case 'items_setting':
                 $on = !empty($_POST['push_products']);
                 $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;

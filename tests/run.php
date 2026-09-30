@@ -412,6 +412,19 @@ test('products are sent to Xero as items: one, several, validation problems, upd
     eq(650, mock_state()['items']['T-FTTP-900']['SalesDetails']['UnitPrice']);
     eq($p['xero_item_id'], mock_state()['items']['T-FTTP-900']['ItemID'], 'same Xero item updated');
     // Xero's own validation errors are recorded against the product.
+    // Each product's own nominal codes win over the defaults.
+    db_exec("UPDATE products SET sales_account_code = '205', purchase_account_code = '310' WHERE id = ?", [$a]);
+    xero_push_products([$a]);
+    eq('205', mock_state()['items']['T-FTTP-900']['SalesDetails']['AccountCode']);
+    eq('310', mock_state()['items']['T-FTTP-900']['PurchaseDetails']['AccountCode']);
+    eq(3, xero_fetch_accounts(), 'accounts without a code skipped');
+    eq(['200' => '200 – Sales', '205' => '205 – Airtime sales'], nominal_codes('sales'));
+    eq(['310'], array_keys(nominal_codes('purchases')));
+    [$data] = validate(entity('products'), ['sales_account_code' => '999'] + find('products', $a));
+    ok(isset(validate_rules('products', $data, $a)['sales_account_code']), 'unknown code rejected once codes are loaded');
+    [$data] = validate(entity('products'), ['sales_account_code' => '205'] + find('products', $a));
+    eq([], validate_rules('products', $data, $a));
+    set_setting('xero_accounts', null);
     set_setting('xero_item_sales_account', '999');
     $r = xero_push_products([$b]);
     ok(str_contains($r['failed']['T-ROUTER'], 'not a valid code'));
@@ -798,9 +811,25 @@ test('billing cycles, cost price, margin and monthly equivalents', function () {
     $svc = create('services', ['account_id' => $acc, 'product_id' => $id, 'identifier' => 'LL-CYCLE', 'status' => 'active']);
     eq(400.0, (float)db_value('SELECT monthly_price FROM services WHERE id = ?', [$svc]), 'service gets the monthly equivalent');
     ok(str_contains(ref_options('products')[$id], 'quarterly'));
-    as_role('sales');
-    ok(!field_enabled(entity('products')['fields']['cost_price']), 'cost price hidden without finance permission');
+    as_role('support');
+    ok(!field_enabled(entity('products')['fields']['cost_price']), 'cost price hidden without permission');
     ok(!in_array('cost_price', entity('products')['list'], true) && !isset(entity('products')['computed']['_margin']));
+    as_role('sales');
+    ok(field_enabled(entity('products')['fields']['cost_price']) && !empty(entity('products')['fields']['cost_price']['readonly']), 'sales see cost but can\'t change it');
+    [$data] = validate(entity('products'), ['cost_price' => '1'] + find('products', $id));
+    ok(!array_key_exists('cost_price', $data), 'cost price not taken from the form');
+    as_role('manager');
+    ok(!can('products.edit') && can('costs.edit'));
+    $fields = entity('products')['fields'];
+    ok(empty($fields['cost_price']['readonly']) && !empty($fields['monthly_price']['readonly']) && !empty($fields['sku']['readonly']), 'managers change only the cost');
+    [$data] = validate(entity('products'), ['cost_price' => '950', 'monthly_price' => '1'] + find('products', $id));
+    eq(['cost_price'], array_keys($data));
+    update_row('products', $id, $data);
+    $p = find('products', $id);
+    db_exec('UPDATE products SET setup_fee = 99 WHERE id = ?', [$id]);
+    update_row('products', $id, $data);
+    $p = find('products', $id);
+    eq(950.0, (float)$p['cost_price']); eq(1200.0, (float)$p['monthly_price']); eq(99.0, (float)$p['setup_fee'], 'other fields untouched');
     as_role('super_admin');
 });
 
@@ -818,7 +847,9 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped');
+    eq(['customers.edit', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
+    eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));
     as_role('super_admin');
     ok(can('approvals.decide'), 'super admin cannot be restricted');

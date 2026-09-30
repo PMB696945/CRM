@@ -447,7 +447,7 @@ function xero_item_payload(array $p): array
     $cycle = strtolower(BILLING_FREQUENCIES[$p['billing_frequency'] ?? 'monthly'] ?? 'monthly');
     $description = trim((string)$p['description']) !== '' ? trim((string)$p['description']) : $p['name'];
     $sales = ['UnitPrice' => (float)$p['monthly_price']];
-    if ($a = setting('xero_item_sales_account')) {
+    if ($a = ($p['sales_account_code'] ?? null) ?: setting('xero_item_sales_account')) {
         $sales['AccountCode'] = $a;
     }
     if ($t = setting('xero_item_tax_type')) {
@@ -462,7 +462,7 @@ function xero_item_payload(array $p): array
     ];
     if ($p['cost_price'] !== null && $p['cost_price'] !== '') {
         $purchase = ['UnitPrice' => (float)$p['cost_price']];
-        if ($a = setting('xero_item_purchase_account')) {
+        if ($a = ($p['purchase_account_code'] ?? null) ?: setting('xero_item_purchase_account')) {
             $purchase['AccountCode'] = $a;
         }
         $item['IsPurchased'] = true;
@@ -538,4 +538,36 @@ function xero_push_products_message(array $r): string
         $msg .= ' …and ' . (count($r['failed']) - 5) . ' more (see the "Xero problems" tab).';
     }
     return $msg;
+}
+
+/* ------------------------------------------------------ Chart of accounts --- */
+
+/** Load the active account codes from Xero (for the nominal code lists on products). */
+function xero_fetch_accounts(): int
+{
+    $body = xero_api('GET', xero_urls()['api'] . '/Accounts', ['where' => 'Status=="ACTIVE"']);
+    $accounts = [];
+    foreach ($body['Accounts'] ?? [] as $a) {
+        if (($a['Code'] ?? '') !== '') {
+            $accounts[] = ['code' => (string)$a['Code'], 'name' => (string)($a['Name'] ?? ''), 'class' => (string)($a['Class'] ?? '')];
+        }
+    }
+    set_setting('xero_accounts', json_encode($accounts));
+    return count($accounts);
+}
+
+/** Cached Xero account codes: [code => "code – name"], optionally for sales (REVENUE) or purchases (EXPENSE). */
+function nominal_codes(?string $for = null): array
+{
+    $out = [];
+    foreach (json_decode((string)setting('xero_accounts', '[]'), true) ?: [] as $a) {
+        if ($for === 'sales' && $a['class'] !== 'REVENUE') {
+            continue;
+        }
+        if ($for === 'purchases' && $a['class'] !== 'EXPENSE') {
+            continue;
+        }
+        $out[$a['code']] = $a['code'] . ' – ' . $a['name'];
+    }
+    return $out;
 }

@@ -94,6 +94,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <label class="check"><input type="checkbox" name="push_products" value="1" <?= setting('xero_push_items') === '1' ? 'checked' : '' ?>> Send products to Xero</label>
     <label class="check"><input type="checkbox" name="push_on_save" value="1" <?= setting('xero_push_products') === '1' ? 'checked' : '' ?>> Also send a product automatically whenever it's created or saved</label>
     <?php if (setting('xero_push_items') === '1' && !xero_can_write_items()): ?><p class="text-warning">Xero hasn't been given permission to create items. Press <b>Reconnect</b> above.</p><?php endif; ?>
+    <p class="help">Each product has its own sales and purchases nominal codes (on the product form). The codes below are the defaults for new products and for any product without its own.</p>
     <div class="form-grid">
       <label>Sales account code<input name="sales_account" value="<?= h(setting('xero_item_sales_account')) ?>" placeholder="e.g. 200"></label>
       <label>Purchases account code<input name="purchase_account" value="<?= h(setting('xero_item_purchase_account')) ?>" placeholder="e.g. 310"></label>
@@ -102,6 +103,12 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <p class="help">Optional. They're used as the item's default account and VAT rate. The codes are on your Chart of accounts in Xero. This needs permission to manage items (the <code>accounting.settings</code> scope): after switching it on, press <b>Reconnect</b> and approve it.</p>
     <button class="btn">Save</button>
   </form>
+  <?php if (xero_can_write_items()): ?>
+    <form method="post" action="<?= h(url('xero', ['action' => 'accounts'])) ?>" class="inline" style="margin-top:1rem"><?= csrf_field() ?>
+      <button class="btn btn-sm">Load nominal codes from Xero</button>
+      <span class="help"><?= ($n = count(nominal_codes())) ? "$n codes loaded. Product forms offer them and check codes against them." : 'Loads your chart of accounts so product forms can offer and check the codes.' ?></span>
+    </form>
+  <?php endif; ?>
 </section>
 
 <section class="card">
