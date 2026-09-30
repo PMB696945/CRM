@@ -1209,6 +1209,10 @@ test('Giacom: address search and availability check are saved and summarised', f
     eq(['standard', 'enhanced'], $r['products'][0]['care_levels']);
     eq('68400.00', $r['products'][0]['estimate']['down']);
     eq(10, (int)$r['products'][0]['leadtime']['days']);
+    eq(date('Y-m-d', strtotime('+30 days 00:00 UTC')), $r['products'][1]['leadtime']['first_date'], 'lead time found elsewhere in the response');
+    ok(isset($r['raw']['availability']), 'full response kept for troubleshooting');
+    eq('M1 3HE', g_state()['last']['availability']['postcode'], 'postcode sent with a space');
+    eq('M1 3HE', giacom_postcode('m13he')); eq('SW1A 1AA', giacom_postcode('sw1a1aa'));
     eq('80 Mbps', giacom_mbps($r['products'][0]['speed']));
     eq('68 Mbps', giacom_mbps($r['products'][0]['estimate']['down'], 'kbps'));
     eq('A00012345679', g_state()['last']['availability']['address-reference']);
@@ -1218,7 +1222,7 @@ test('Giacom: address search and availability check are saved and summarised', f
 test('Giacom: placing an order sends the right details and adds a pending service', function () use (&$g) {
     $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
     $product = json_decode($check['result'], true)['products'][0];
-    $o = ['order_type' => 'provide', 'cli' => '', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-1@isp.example', 'bb_password' => 'Pa55word!',
+    $o = ['order_type' => 'provide', 'cli' => '', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-1', 'bb_password' => 'Pa55word!',
         'realm' => 'isp.example', 'care_level' => 'enhanced', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => 'PO 77', 'force_new_ont' => '',
         'title' => '', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '0161 496 0000', 'email' => 'rita@canal.example', 'crm_product_id' => ''];
     $g['order'] = giacom_place_order($check, $product, $o);
@@ -1226,11 +1230,13 @@ test('Giacom: placing an order sends the right details and adds a pending servic
     eq('34350', $sent['order']['prod-id']); eq('A00012345679', $sent['order']['address-reference']);
     eq('enhanced', $sent['order']['attributes']['care-level']); eq('Pa55word!', $sent['order']['attributes']['password']);
     ok(str_starts_with($sent['order']['client-ref'], 'ACC-') && str_ends_with($sent['order']['client-ref'], ' PO 77'));
+    eq('M1 3HE', $sent['customer']['postcode'], 'Giacom needs the space in the postcode');
+    eq('acc10001-1', $sent['order']['username']); eq('isp.example', $sent['order']['attributes']['realm']);
     eq('Canal Street Clinic', $sent['customer']['company']); eq('01614960000', $sent['customer']['telephone']); eq('Unit 2', $sent['customer']['sub-premise']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
     eq('700100', $order['giacom_order_id']); eq('9700100', $order['giacom_service_id']); eq('Placed', $order['status']);
     $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
-    eq('pending', $svc['status']); eq('Giacom', $svc['carrier']); eq('broadband', $svc['service_type']); eq('acc10001-1@isp.example', $svc['identifier']);
+    eq('pending', $svc['status']); eq('Giacom', $svc['carrier']); eq('broadband', $svc['service_type']); eq('acc10001-1', $svc['identifier']);
     ok(str_contains($svc['notes'], '700100'));
     ok(!str_contains((string)db_value("SELECT changes FROM audit_log WHERE action = 'giacom_order' ORDER BY id DESC LIMIT 1"), 'Pa55word'), 'password not in the audit trail');
     ok(!str_contains((string)$order['details'], 'Pa55word'), 'password not stored');
@@ -1259,6 +1265,12 @@ test('Giacom: status updates are picked up; completion makes the service live', 
     eq('Completed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$g['order']]));
     eq(3, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'giacom_status' AND account_id = ?", [$g['acc']]), 'placed → awaiting → in progress → completed');
     eq(['Dr', 'Priya', 'Shah'], giacom_split_name('Dr. Priya Shah'));
+    $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$g['acc']]);
+    ok(!str_contains(giacom_suggest_username($acct), '@'), 'suggested username has no realm');
+    $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
+    $appts = giacom_appointments($check, ['technology' => 'fttc']);
+    eq(date('Y-m-d', strtotime('+8 days')), $appts[0]['date'], 'earliest appointment first');
+    eq('FTTC', g_state()['last']['available_appointments']['technology-type']);
     eq(['', 'Mary Jane', 'Smith'], giacom_split_name('Mary Jane Smith'));
     eq(['', 'Cher', ''], giacom_split_name('Cher'));
     ok(giacom_is_complete('Completed') && !giacom_is_complete('Awaiting completion date') && giacom_is_cancelled('Order Cancelled'));

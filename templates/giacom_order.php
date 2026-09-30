@@ -23,7 +23,12 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   </div>
   <?= $f('cli', 'Phone number on the line', 'tel', 'Needed for a migrate. Leave blank for a new provide with no line.') ?>
   <div data-when="order_type=migrate"><?= $f('access_line_id', 'Access line ID (optional)', 'text', 'For SOGEA/FTTP take-overs, if you have it') ?></div>
-  <?= $f('crd', 'Required by', 'date', $product['leadtime'] ? 'Earliest: ' . fmt_date($product['leadtime']['first_date']) : '', true) ?>
+  <?= $f('crd', 'Required by', 'date', $leadSource === 'lead time'
+      ? 'Giacom\'s earliest date for this product: ' . fmt_date($lead) . ($product['leadtime']['days'] ? ' (' . (int)$product['leadtime']['days'] . ' working days)' : '')
+      : ($leadSource === 'appointment' ? 'Giacom\'s first engineer appointment: ' . fmt_date($lead) : 'Giacom didn\'t give an earliest date for this product, so this is a guess. Check the lead time with Giacom.'), true) ?>
+  <?php if ($appointments): ?>
+    <div class="field"><span class="help"><b>Engineer appointments offered:</b> <?= h(implode(', ', array_map(fn($a) => fmt_date($a['date']) . ($a['slot'] ? ' ' . $a['slot'] : ''), array_slice($appointments, 0, 8)))) ?></span></div>
+  <?php endif; ?>
   <div class="field <?= isset($errors['care_level']) ? 'has-error' : '' ?>"><label for="g_care">Care level</label>
     <select id="g_care" name="care_level"><?php foreach ($levels as $l): ?><option value="<?= h($l) ?>" <?= $values['care_level'] === $l ? 'selected' : '' ?>><?= h(GIACOM_CARE_LEVELS[$l] ?? ucfirst($l)) ?></option><?php endforeach; ?></select></div>
   <div class="field"><label for="g_visit">Engineer visit</label>
@@ -35,7 +40,7 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <?php endif; ?>
 
   <div class="form-section wide"><h2>Broadband login</h2></div>
-  <?= $f('bb_username', 'Username', 'text', '', true) ?>
+  <?= $f('bb_username', 'Username', 'text', 'Without the realm – that\'s sent separately', true) ?>
   <?= $f('bb_password', 'Password', 'text', 'Saved with Giacom only. Give it to the customer or put it on the router.', true) ?>
   <?= $f('realm', 'Realm', 'text', 'Usually the part after @ in the username') ?>
   <?= $f('client_ref', 'Your reference (optional)', 'text', 'Added after the account number, e.g. a PO or quote reference') ?>

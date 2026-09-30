@@ -223,6 +223,7 @@
   :where(select) { @apply pr-10; }
   :where(textarea) { @apply h-auto; }
   :where(input[readonly]) { @apply bg-gray-50 dark:bg-white/[0.03]; }
+  :where(input[type=radio]) { @apply text-brand-500 focus:ring-brand-500/20 size-4 shrink-0 border-gray-300 dark:border-gray-700 dark:bg-gray-900; }
   :where(input[type=checkbox]) { @apply text-brand-500 focus:ring-brand-500/20 size-4 rounded border-gray-300 dark:border-gray-700 dark:bg-gray-900; }
 
   /* ---- App shell (sidebar + header) ---- */
@@ -347,7 +348,7 @@
   .form-grid { @apply grid grid-cols-1 gap-5 md:grid-cols-2; }
   .field { @apply flex flex-col gap-1.5; }
   .field > label, .stack label, .login-card label, .dd-link label { @apply text-sm font-medium text-gray-700 dark:text-gray-400; }
-  .field input:not([type=checkbox]), .field select, .field textarea { @apply w-full; }
+  .field input:not([type=checkbox]):not([type=radio]), .field select, .field textarea { @apply w-full; }
   .field-check { @apply justify-end; }
   .field-check label { @apply flex items-center gap-2 font-normal; }
   .wide { @apply md:col-span-2; }
@@ -501,9 +502,11 @@
   .progress > span { @apply block h-full bg-brand-500; }
   .choice-cards { @apply grid grid-cols-1 gap-3 sm:grid-cols-2; }
   .choice-cards label { @apply flex! cursor-pointer flex-row! items-start gap-3 rounded-xl border border-gray-200 p-4 font-normal has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:border-gray-800 dark:has-[:checked]:bg-brand-500/10; }
-  .choice-cards label > span { @apply min-w-0 flex-1; }
+  .choice-cards label > span { @apply flex min-w-0 flex-1 flex-col gap-1; }
   .choice-cards b { @apply block text-gray-800 dark:text-white/90; }
   .bulk-bar { @apply mb-3 flex flex-wrap items-center gap-3; }
   .check-col { @apply w-10 pr-0!; }
-  .address-list { @apply flex max-h-96 flex-col gap-2 overflow-y-auto rounded-xl border border-gray-200 p-3 dark:border-gray-800; }
+  .address-list { @apply flex max-h-96 flex-col gap-1 overflow-y-auto rounded-xl border border-gray-200 p-2 dark:border-gray-800; }
+  .stack .address-list label, .address-list label { @apply flex! flex-row! items-start gap-3 rounded-lg px-2 py-2 font-normal hover:bg-gray-50 has-[:checked]:bg-brand-50 dark:hover:bg-white/5 dark:has-[:checked]:bg-brand-500/10; }
+  .address-list input, .choice-cards input { @apply mt-0.5 shrink-0; }
 }

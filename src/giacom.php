@@ -143,6 +143,13 @@ function giacom_call(string $call, array $params = [], string $version = '1.0', 
 
 /* -------------------------------------------------------- Availability --- */
 
+/** "bb52sb" → "BB5 2SB" (Giacom's order validation needs the space). */
+function giacom_postcode(?string $postcode): string
+{
+    $p = strtoupper(preg_replace('/\s+/', '', (string)$postcode));
+    return strlen($p) > 3 ? substr($p, 0, -3) . ' ' . substr($p, -3) : $p;
+}
+
 /** Addresses at a postcode (optionally narrowed by building/street), as a simple list. */
 function giacom_address_search(string $postcode, string $building = '', string $street = ''): array
 {
@@ -155,6 +162,9 @@ function giacom_address_search(string $postcode, string $building = '', string $
     foreach ($r['addresses'] ?? [] as $a) {
         if (empty($a['address-reference'])) {
             continue;
+        }
+        if (!empty($a['postcode'])) {
+            $a['postcode'] = giacom_postcode($a['postcode']);
         }
         $a['label'] = giacom_address_label($a);
         $out[] = $a;
@@ -179,7 +189,7 @@ function giacom_check(array $address, ?string $cli, ?int $accountId, ?int $siteI
     $cli = $cli ? preg_replace('/\D/', '', $cli) : null;
     $r = giacom_call('availability', array_filter([
         'cli' => $cli ?: null,
-        'postcode' => $address['postcode'] ?? null,
+        'postcode' => !empty($address['postcode']) ? giacom_postcode($address['postcode']) : null,
         'detailed' => 'Y',
         'address-reference' => $address['address-reference'] ?? null,
         'css-database-code' => $address['css-database-code'] ?? null,
@@ -202,12 +212,21 @@ function giacom_check(array $address, ?string $cli, ?int $accountId, ?int $siteI
 function giacom_summarise_availability(array $r): array
 {
     $a = $r['availability'] ?? [];
+    // Lead times: the earliest date Giacom can deliver each product. Looked for
+    // anywhere in the response, as well as on the product itself.
     $leadtimes = [];
-    foreach ($r['leadtimes'] ?? [] as $l) {
-        if (!empty($l['product-id'])) {
-            $leadtimes[$l['product-id']] = ['days' => $l['leadtime'] ?? null, 'first_date' => $l['first-date-text'] ?? null];
+    $walk = function (array $node) use (&$walk, &$leadtimes): void {
+        if (!empty($node['product-id']) && (isset($node['first-date-text']) || isset($node['first-date-int']) || isset($node['leadtime']))) {
+            $date = $node['first-date-text'] ?? (isset($node['first-date-int']) && ctype_digit((string)$node['first-date-int']) ? date('Y-m-d', (int)$node['first-date-int']) : null);
+            $leadtimes[(string)$node['product-id']] ??= ['days' => $node['leadtime'] ?? null, 'first_date' => $date ? substr((string)$date, 0, 10) : null];
         }
-    }
+        foreach ($node as $child) {
+            if (is_array($child)) {
+                $walk($child);
+            }
+        }
+    };
+    $walk($r);
     // Realistic speed estimates, by supplier product reference (+ subtype).
     $estimates = [];
     foreach (['business', 'residential', 'none'] as $segment) {
@@ -236,7 +255,7 @@ function giacom_summarise_availability(array $r): array
             'estimate' => $estimates[$key] ?? null,
             'care_levels' => array_values(array_filter(array_map('trim', explode(',', (string)($p['care-level-options'] ?? ''))))),
             'care_default' => $p['care-level'] ?? null,
-            'leadtime' => $leadtimes[$p['product-id']] ?? null,
+            'leadtime' => $leadtimes[(string)$p['product-id']] ?? null,
         ];
     }
     $quick = isset($a['quick-result']) && $a['quick-result'] !== '' ? (int)$a['quick-result'] : null;
@@ -249,6 +268,7 @@ function giacom_summarise_availability(array $r): array
         ] : null,
         'fttc' => isset($a['fttc-qualification']['likely-max-speed-down']) ? [(float)$a['fttc-qualification']['likely-max-speed-down'], (float)($a['fttc-qualification']['likely-max-speed-up'] ?? 0)] : null,
         'products' => $products,
+        'raw' => $r,
     ];
 }
 
@@ -310,7 +330,7 @@ function giacom_place_order(array $check, array $product, array $o): int
         'street' => $address['street'] ?? null,
         'city' => $address['city'] ?? null,
         'county' => $address['county'] ?? null,
-        'postcode' => $address['postcode'] ?? $check['postcode'],
+        'postcode' => giacom_postcode($address['postcode'] ?? $check['postcode']),
         'telephone' => preg_replace('/[^\d+]/', '', (string)$o['telephone']),
         'email' => $o['email'] ?: null,
     ], fn($v) => $v !== null && $v !== '');
@@ -481,12 +501,35 @@ function giacom_split_name(string $name): array
     return [$title, implode(' ', $parts), $surname];
 }
 
-/** A broadband username suggestion for a new order, e.g. acc10001-2@realm. */
+/** A broadband username suggestion for a new order, e.g. acc10001-2 (the realm is sent separately). */
 function giacom_suggest_username(array $account): string
 {
     $n = 1 + (int)db_value('SELECT COUNT(*) FROM giacom_orders WHERE account_id = ?', [$account['id']]);
-    $realm = (string)(setting('giacom_realm') ?: '');
-    return strtolower(preg_replace('/[^a-z0-9]/i', '', $account['account_number'])) . '-' . $n . ($realm !== '' ? '@' . $realm : '');
+    return strtolower(preg_replace('/[^a-z0-9]/i', '', $account['account_number'])) . '-' . $n;
+}
+
+/** Engineer appointment dates Giacom offers at an address (empty if it can't say). */
+function giacom_appointments(array $check, array $product): array
+{
+    $address = json_decode((string)$check['address'], true) ?: [];
+    try {
+        $r = giacom_call('available_appointments', array_filter([
+            'technology-type' => strtoupper($product['technology']),
+            'address-reference' => $address['address-reference'] ?? null,
+            'css-database-code' => $address['css-database-code'] ?? null,
+            'uprn' => $address['uprn'] ?? null,
+        ], fn($v) => $v !== null && $v !== ''), '2.0.1');
+    } catch (GiacomException) {
+        return [];
+    }
+    $out = [];
+    foreach ($r['appointments'] ?? [] as $a) {
+        if (!empty($a['date'])) {
+            $out[] = ['date' => substr($a['date'], 0, 10), 'slot' => $a['timeslot'] ?? ''];
+        }
+    }
+    usort($out, fn($x, $y) => strcmp($x['date'], $y['date']));
+    return $out;
 }
 
 /* ---------------------------------------------------------- Controller --- */
@@ -621,7 +664,16 @@ function giacom_controller(): void
             $site = $check['site_id'] ? db_one('SELECT * FROM sites WHERE id = ?', [$check['site_id']]) : null;
             $contact = db_one('SELECT * FROM contacts WHERE id = ?', [($site['contact_id'] ?? null) ?: ($account['main_contact_id'] ?: 0)]);
             [$title, $forename, $surname] = giacom_split_name((string)($contact['name'] ?? ''));
-            $lead = $product['leadtime']['first_date'] ?? date('Y-m-d', strtotime('+10 weekdays'));
+            // Earliest date: Giacom's lead time for the product, else its first appointment.
+            $appointments = [];
+            $lead = $product['leadtime']['first_date'] ?? null;
+            $leadSource = $lead ? 'lead time' : null;
+            if (!$lead) {
+                $appointments = giacom_appointments($check, $product);
+                $lead = $appointments[0]['date'] ?? null;
+                $leadSource = $lead ? 'appointment' : null;
+            }
+            $lead ??= date('Y-m-d', strtotime('+10 weekdays'));
             $values = [
                 'order_type' => in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide',
                 'cli' => (string)$check['cli'], 'crd' => max($lead, date('Y-m-d', strtotime('+1 weekday'))),
@@ -651,6 +703,13 @@ function giacom_controller(): void
                 $d = DateTimeImmutable::createFromFormat('!Y-m-d', $values['crd']);
                 if (!$d || $d->format('Y-m-d') !== $values['crd'] || $values['crd'] <= date('Y-m-d')) {
                     $errors['crd'] = 'Choose a date in the future.';
+                }
+                elseif ($leadSource && $values['crd'] < $lead) {
+                    $errors['crd'] = 'Giacom\'s earliest date for this product is ' . fmt_date($lead) . '.';
+                }
+                // The realm is sent on its own, so drop it if it was typed into the username.
+                if ($values['realm'] !== '' && str_ends_with(strtolower($values['bb_username']), '@' . strtolower($values['realm']))) {
+                    $values['bb_username'] = substr($values['bb_username'], 0, -strlen('@' . $values['realm']));
                 }
                 if (!preg_match('/^[A-Za-z0-9._@+-]{3,120}$/', $values['bb_username'])) {
                     $errors['bb_username'] = 'Use letters, numbers and . _ - @ only.';
@@ -684,7 +743,7 @@ function giacom_controller(): void
                 }
             }
             $crmProducts = ref_options('products', null, "category = 'broadband'");
-            page('giacom_order', compact('check', 'result', 'product', 'account', 'site', 'values', 'errors', 'crmProducts'), 'Place broadband order');
+            page('giacom_order', compact('check', 'result', 'product', 'account', 'site', 'values', 'errors', 'crmProducts', 'appointments', 'lead', 'leadSource'), 'Place broadband order');
             return;
 
         case 'view':

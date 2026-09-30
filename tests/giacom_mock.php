@@ -90,8 +90,8 @@ switch ($call) {
             reply(['addresses' => []]);
         }
         reply(['addresses' => [
-            ['building' => '12', 'street' => 'Canal Street', 'city' => 'Manchester', 'postcode' => 'M1 3HE', 'address-reference' => 'A00012345678', 'css-database-code' => 'LC'],
-            ['building' => '10', 'sub-premise' => 'Unit 2', 'organisation' => 'Bramble <Dental> & Co', 'street' => 'Canal Street', 'city' => 'Manchester', 'postcode' => 'M1 3HE', 'address-reference' => 'A00012345679', 'css-database-code' => 'LC'],
+            ['building' => '12', 'street' => 'Canal Street', 'city' => 'Manchester', 'postcode' => 'M13HE', 'address-reference' => 'A00012345678', 'css-database-code' => 'LC'],
+            ['building' => '10', 'sub-premise' => 'Unit 2', 'organisation' => 'Bramble <Dental> & Co', 'street' => 'Canal Street', 'city' => 'Manchester', 'postcode' => 'M13HE', 'address-reference' => 'A00012345679', 'css-database-code' => 'LC'],
         ]]);
     case 'availability':
         if (empty($req['address-reference']) && empty($req['cli'])) {
@@ -105,6 +105,7 @@ switch ($call) {
                 'exchange' => ['code' => 'LVMAN', 'name' => 'MANCHESTER CENTRAL', 'state' => 'E'],
                 'fttc-qualification' => ['likely-max-speed-down' => '63100000', 'likely-max-speed-up' => '19000000'],
                 'quick-result' => empty($req['cli']) ? '5' : '4',
+                'fttp' => ['leadtimes' => [['product-id' => '34360', 'first-date-int' => (string)strtotime('+30 days 00:00 UTC'), 'leadtime' => '20']]],
             ],
             'leadtimes' => [['product-id' => '34350', 'leadtime' => '10', 'first-date-text' => date('Y-m-d', strtotime('+14 days'))]],
             'products' => [
@@ -124,6 +125,9 @@ switch ($call) {
         if ($call === 'migrate' && empty($o['cli']) && empty($o['access-line-id'])) {
             reply([], 21, 'A CLI or access line ID is required for a migrate');
         }
+        if (!preg_match('/^[A-Z0-9]{2,4} [0-9][A-Z]{2}$/', $req['customer']['postcode'] ?? '')) {
+            reply([], 23, 'Failed validation: Post code must contain a space.');
+        }
         if (($req['customer']['surname'] ?? '') === '') {
             reply([], 22, 'Customer surname is required');
         }
@@ -131,6 +135,8 @@ switch ($call) {
         $state['orders'][$id] = ['type' => $call, 'status' => 'Awaiting Processing', 'request' => $req];
         $save();
         reply(['order-id' => $id, 'service-id' => '9' . $id]);
+    case 'available_appointments':
+        reply(['appointments' => [['date' => date('Y-m-d', strtotime('+9 days')), 'timeslot' => 'PM'], ['date' => date('Y-m-d', strtotime('+8 days')), 'timeslot' => 'AM']]]);
     case 'order_view':
         $o = $state['orders'][$req['order-id'] ?? ''] ?? null;
         if (!$o) {

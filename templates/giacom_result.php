@@ -33,4 +33,9 @@
 <?php else: ?>
   <div class="card empty"><p>Giacom didn't return any products for this address.</p></div>
 <?php endif; ?>
+<?php if (!empty($result['raw']) && can('settings.manage')): ?>
+  <details class="card"><summary>Giacom's full response (for troubleshooting)</summary>
+    <pre class="small" style="white-space:pre-wrap;max-height:30rem;overflow:auto"><?= h(json_encode($result['raw'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?></pre>
+  </details>
+<?php endif; ?>
 <?php if (!$check['account_id'] && can('orders.place')): ?><p class="help">To order, run the check from the customer's page.</p><?php endif; ?>
