@@ -305,11 +305,11 @@ function giacom_place_order(array $check, array $product, array $o): int
     $type = $o['order_type'] === 'migrate' ? 'migrate' : 'provide';
     $clientRef = mb_substr($account['account_number'] . ($o['client_ref'] !== '' ? ' ' . $o['client_ref'] : ''), 0, 60);
 
-    $fullUsername = giacom_full_username($o['bb_username'], $o['realm']);
+    $fullUsername = giacom_full_username($o['bb_username'], $o['bb_suffix'] ?? '', $o['realm']);
     if (!str_contains($fullUsername, '@')) {
         throw new GiacomException('Enter the broadband realm: Giacom needs the username as user@realm.');
     }
-    $realmAttr = str_contains($o['realm'], '@') ? substr($o['realm'], strrpos($o['realm'], '@') + 1) : $o['realm'];
+    $realmAttr = giacom_realm_value($o['bb_suffix'] ?? '', $o['realm']);
     $attributes = array_filter([
         'password' => $o['bb_password'],
         'realm' => $realmAttr,
@@ -508,18 +508,44 @@ function giacom_split_name(string $name): array
 }
 
 /**
- * The full broadband username Giacom expects: user@realm (Giacom finds the
- * realm from it). Realms given as a suffix such as "-public@GreatDSL" are
- * appended as they are.
+ * Split a realm as Giacom writes it into the part added after the username and
+ * the realm itself: "-Finn@surfdsluk" → ['-Finn', 'surfdsluk'], "@surfdsluk" → ['', 'surfdsluk'].
  */
-function giacom_full_username(string $user, string $realm): string
+function giacom_split_realm(string $realm): array
+{
+    $realm = trim($realm);
+    $at = strrpos($realm, '@');
+    return $at === false ? ['', $realm] : [substr($realm, 0, $at), substr($realm, $at + 1)];
+}
+
+/** The realm in Giacom's own form: "-Finn@surfdsluk", or just "surfdsluk" when there's no suffix. */
+function giacom_realm_value(string $suffix, string $realm): string
+{
+    [$inRealm, $realm] = giacom_split_realm($realm);
+    $suffix = trim($suffix) !== '' ? trim($suffix) : $inRealm;
+    return $suffix !== '' ? $suffix . '@' . $realm : $realm;
+}
+
+/**
+ * The full broadband username Giacom expects, e.g. joebloggs + "-Finn" + surfdsluk
+ * → joebloggs-Finn@surfdsluk (Giacom works out the realm from it).
+ */
+function giacom_full_username(string $user, string $suffix, string $realm): string
 {
     $user = trim($user);
-    $realm = trim($realm);
-    if ($realm === '' || str_contains($user, '@')) {
+    if (str_contains($user, '@')) {
+        $user = substr($user, 0, strpos($user, '@'));
+    }
+    [$inRealm, $realm] = giacom_split_realm($realm);
+    if ($realm === '') {
         return $user;
     }
-    return str_contains($realm, '@') ? $user . $realm : $user . '@' . $realm;
+    $suffix = trim($suffix) !== '' ? trim($suffix) : $inRealm;
+    // Don't add the suffix twice if it was typed into the username as well.
+    if ($suffix !== '' && str_ends_with(strtolower($user), strtolower($suffix))) {
+        $suffix = '';
+    }
+    return $user . $suffix . '@' . $realm;
 }
 
 /** A broadband username suggestion for a new order, e.g. acc10001-2 (the realm is sent separately). */
@@ -580,7 +606,11 @@ function giacom_controller(): void
                 flash('The API address must start with https://', 'error');
                 redirect(url('giacom', ['action' => 'settings']));
             }
-            set_setting('giacom_realm', trim((string)($_POST['realm'] ?? '')) ?: null);
+            // "-Finn@surfdsluk" typed as the realm is split into its two parts.
+            [$suffixInRealm, $realmOnly] = giacom_split_realm((string)($_POST['realm'] ?? ''));
+            $suffix = trim((string)($_POST['username_suffix'] ?? '')) ?: $suffixInRealm;
+            set_setting('giacom_realm', $realmOnly !== '' ? $realmOnly : null);
+            set_setting('giacom_username_suffix', $suffix !== '' ? $suffix : null);
             set_setting('giacom_care_level', isset(GIACOM_CARE_LEVELS[$_POST['care_level'] ?? '']) ? $_POST['care_level'] : null);
             set_setting('giacom_url', $apiUrl === '' || $apiUrl === GIACOM_DEFAULT_URL ? null : $apiUrl);
             if ($username !== '') {
@@ -699,7 +729,7 @@ function giacom_controller(): void
                 'order_type' => in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide',
                 'cli' => (string)$check['cli'], 'crd' => max($lead, date('Y-m-d', strtotime('+1 weekday'))),
                 'bb_username' => giacom_suggest_username($account), 'bb_password' => substr(strtr(base64_encode(random_bytes(9)), '+/', 'Kq'), 0, 12),
-                'realm' => (string)(in_array((string)setting('giacom_realm'), $product['realms'] ?? [], true) || empty($product['realms']) ? setting('giacom_realm') : $product['realms'][0]),
+                'bb_suffix' => (string)setting('giacom_username_suffix'), 'realm' => (string)setting('giacom_realm'),
                 'care_level' => in_array(setting('giacom_care_level'), $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS), true) ? setting('giacom_care_level') : ($product['care_default'] ?? 'standard'),
                 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => '',
                 'title' => $title, 'forename' => $forename, 'surname' => $surname,
@@ -728,17 +758,25 @@ function giacom_controller(): void
                 elseif ($leadSource && $values['crd'] < $lead) {
                     $errors['crd'] = 'Giacom\'s earliest date for this product is ' . fmt_date($lead) . '.';
                 }
-                // The realm is added on sending, so drop it if it was typed into the username too.
-                if ($values['realm'] !== '' && str_contains($values['bb_username'], '@')) {
+                // The suffix and realm are added on sending, so drop them if typed into the username too.
+                if (str_contains($values['bb_username'], '@')) {
                     $values['bb_username'] = substr($values['bb_username'], 0, strpos($values['bb_username'], '@'));
                 }
+                [$typedSuffix, $values['realm']] = giacom_split_realm($values['realm']);
+                if ($typedSuffix !== '' && $values['bb_suffix'] === '') {
+                    $values['bb_suffix'] = $typedSuffix;
+                }
+                if ($values['bb_suffix'] !== '' && !preg_match('/^[A-Za-z0-9._+-]{1,40}$/', $values['bb_suffix'])) {
+                    $errors['bb_suffix'] = 'Use letters, numbers and . _ - only.';
+                }
+                $offered = array_map('strtolower', $product['realms'] ?? []);
                 if ($values['realm'] === '') {
-                    $errors['realm'] = 'Giacom needs a realm to set up the broadband login. Your realms are in the Giacom portal; set a default under Admin → Giacom.';
-                } elseif (!empty($product['realms']) && !in_array($values['realm'], $product['realms'], true)) {
+                    $errors['realm'] = 'Giacom needs a realm to set up the broadband login. Set a default under Admin → Giacom.';
+                } elseif ($offered && !in_array(strtolower(giacom_realm_value($values['bb_suffix'], $values['realm'])), $offered, true)) {
                     $errors['realm'] = 'Giacom offers these realms for this product: ' . implode(', ', $product['realms']) . '.';
                 }
-                if (!preg_match('/^[A-Za-z0-9._@+-]{3,120}$/', $values['bb_username'])) {
-                    $errors['bb_username'] = 'Use letters, numbers and . _ - @ only.';
+                if (!preg_match('/^[A-Za-z0-9._+-]{2,100}$/', $values['bb_username'])) {
+                    $errors['bb_username'] = 'Use letters, numbers and . _ - only.';
                 }
                 if (strlen($values['bb_password']) < 6) {
                     $errors['bb_password'] = 'At least 6 characters.';

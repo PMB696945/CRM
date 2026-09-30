@@ -1265,9 +1265,15 @@ test('Giacom: status updates are picked up; completion makes the service live', 
     eq('Completed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$g['order']]));
     eq(3, (int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'giacom_status' AND account_id = ?", [$g['acc']]), 'placed → awaiting → in progress → completed');
     eq(['Dr', 'Priya', 'Shah'], giacom_split_name('Dr. Priya Shah'));
-    eq('off001-1@isp.example', giacom_full_username('off001-1', 'isp.example'));
-    eq('off001-1-public@GreatDSL', giacom_full_username('off001-1', '-public@GreatDSL'));
-    eq('off001-1@other.net', giacom_full_username('off001-1@other.net', 'isp.example'));
+    eq('joebloggs-Finn@surfdsluk', giacom_full_username('joebloggs', '-Finn', 'surfdsluk'));
+    eq('joebloggs-Finn@surfdsluk', giacom_full_username('joebloggs', '-Finn', '@surfdsluk'));
+    eq('joebloggs-Finn@surfdsluk', giacom_full_username('joebloggs', '', '-Finn@surfdsluk'));
+    eq('joebloggs-Finn@surfdsluk', giacom_full_username('joebloggs-Finn', '-Finn', 'surfdsluk'), 'suffix not added twice');
+    eq('joebloggs-Finn@surfdsluk', giacom_full_username('joebloggs@wrong', '-Finn', 'surfdsluk'));
+    eq('off001-1@isp.example', giacom_full_username('off001-1', '', 'isp.example'));
+    eq(['-Finn', 'surfdsluk'], giacom_split_realm('-Finn@surfdsluk'));
+    eq('-Finn@surfdsluk', giacom_realm_value('-Finn', '@surfdsluk'));
+    eq('surfdsluk', giacom_realm_value('', 'surfdsluk'));
     $r = json_decode(db_value('SELECT result FROM giacom_checks WHERE id = ?', [$g['check']]), true);
     eq(['isp.example', '-public@GreatDSL'], $r['products'][1]['realms'], 'realms offered per product');
     $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$g['acc']]);
@@ -1283,14 +1289,14 @@ test('Giacom: status updates are picked up; completion makes the service live', 
 test('Giacom: cancelling an order ceases its pending service', function () use (&$g) {
     $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
     $product = json_decode($check['result'], true)['products'][1];
-    $o = ['order_type' => 'migrate', 'cli' => '01614960001', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-2', 'bb_password' => 'secret12',
-        'realm' => '-public@GreatDSL', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => 'N',
+    $o = ['order_type' => 'migrate', 'cli' => '01614960001', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-2', 'bb_password' => 'secret12', 'bb_suffix' => '-public',
+        'realm' => 'GreatDSL', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => 'N',
         'title' => 'Ms', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '01614960000', 'email' => '', 'crm_product_id' => ''];
     $id = giacom_place_order($check, $product, $o);
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
     eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
-    eq('GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm']);
-    try { giacom_place_order($check, $product, ['realm' => ''] + $o); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'realm')); }
+    eq('-public@GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm'], 'realm sent as Giacom lists it');
+    try { giacom_place_order($check, $product, ['realm' => '', 'bb_suffix' => ''] + $o); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'realm')); }
     eq('N', g_state()['last']['migrate']['order']['attributes']['force-new-ont']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
     eq('Cancelled', giacom_abort_order($order, 'Customer changed their mind'));

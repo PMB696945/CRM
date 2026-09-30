@@ -40,15 +40,11 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <?php endif; ?>
 
   <div class="form-section wide"><h2>Broadband login</h2></div>
-  <?= $f('bb_username', 'Username', 'text', 'The part before the @. Sent to Giacom as ' . giacom_full_username($values['bb_username'] ?: 'username', $values['realm'] ?: 'realm'), true) ?>
+  <?= $f('bb_username', 'Username', 'text', 'e.g. joebloggs', true) ?>
   <?= $f('bb_password', 'Password', 'text', 'Saved with Giacom only. Give it to the customer or put it on the router.', true) ?>
-  <?php if (!empty($product['realms'])): ?>
-    <div class="field <?= isset($errors['realm']) ? 'has-error' : '' ?>"><label for="g_realm">Realm <span class="req">*</span></label>
-      <select id="g_realm" name="realm"><?php foreach ($product['realms'] as $r): ?><option value="<?= h($r) ?>" <?= $values['realm'] === $r ? 'selected' : '' ?>><?= h($r) ?></option><?php endforeach; ?></select>
-      <?php if (isset($errors['realm'])): ?><div class="error"><?= h($errors['realm']) ?></div><?php else: ?><div class="help">The realms Giacom offers for this product.</div><?php endif; ?></div>
-  <?php else: ?>
-    <?= $f('realm', 'Realm', 'text', 'Your broadband realm with Giacom, e.g. yourisp.net (the part after the @)', true) ?>
-  <?php endif; ?>
+  <?= $f('bb_suffix', 'Added after the username', 'text', 'The part Giacom puts in front of the realm on your account, e.g. -Finn') ?>
+  <?= $f('realm', 'Realm', 'text', !empty($product['realms']) ? 'Giacom offers: ' . implode(', ', $product['realms']) : 'e.g. surfdsluk (the part after the @)', true) ?>
+  <div class="field wide"><div class="help">Full username sent to Giacom: <b data-full-username><?= h(giacom_full_username($values['bb_username'] ?: 'username', $values['bb_suffix'], $values['realm'] ?: 'realm')) ?></b></div></div>
   <?= $f('client_ref', 'Your reference (optional)', 'text', 'Added after the account number, e.g. a PO or quote reference') ?>
 
   <div class="form-section wide"><h2>Contact at the address</h2><p class="help">Giacom and the carrier use this for access and appointments. Filled in from the <?= $site ? 'site' : 'main' ?> contact.</p></div>

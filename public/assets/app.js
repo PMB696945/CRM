@@ -175,3 +175,20 @@ if (bulkForm) {
   });
   update();
 }
+
+// Giacom order form: show the full broadband username as it's typed.
+document.querySelectorAll('[data-full-username]').forEach((out) => {
+  const form = out.closest('form');
+  const get = (n) => (form.querySelector(`[name="${n}"]`)?.value || '').trim();
+  const update = () => {
+    let user = get('bb_username').split('@')[0] || 'username';
+    let suffix = get('bb_suffix');
+    let realm = get('realm');
+    const at = realm.lastIndexOf('@');
+    if (at >= 0) { if (!suffix) suffix = realm.slice(0, at); realm = realm.slice(at + 1); }
+    if (suffix && user.toLowerCase().endsWith(suffix.toLowerCase())) suffix = '';
+    out.textContent = realm ? `${user}${suffix}@${realm}` : user;
+  };
+  form.addEventListener('input', update);
+  update();
+});
