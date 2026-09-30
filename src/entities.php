@@ -24,6 +24,23 @@ const CARRIERS = [
 const OPP_STAGES = ['lead', 'qualified', 'proposal', 'negotiation', 'won', 'lost'];
 const STAGE_PROBABILITY = ['lead' => 10, 'qualified' => 25, 'proposal' => 50, 'negotiation' => 75, 'won' => 100, 'lost' => 0];
 
+/** Billing cycles, and how many of each make a month (for MRR). */
+const BILLING_FREQUENCIES = [
+    'weekly' => 'Weekly', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'biannually' => 'Bi-annually', 'yearly' => 'Yearly',
+];
+const BILLING_PER_MONTH = ['weekly' => 52 / 12, 'monthly' => 1, 'quarterly' => 1 / 3, 'biannually' => 1 / 6, 'yearly' => 1 / 12];
+
+/** A price per billing cycle as a monthly amount (services and quotes work in monthly amounts). */
+function monthly_equivalent(mixed $price, ?string $frequency): float
+{
+    return round((float)$price * (BILLING_PER_MONTH[$frequency ?? 'monthly'] ?? 1), 2);
+}
+
+function billing_monthly_sql(string $price, string $frequency): string
+{
+    return "ROUND($price * CASE $frequency WHEN 'weekly' THEN 52/12 WHEN 'quarterly' THEN 1/3 WHEN 'biannually' THEN 1/6 WHEN 'yearly' THEN 1/12 ELSE 1 END, 2)";
+}
+
 const MARKETING_SOURCES = [
     'existing_customer' => 'Existing customer (soft opt-in)',
     'verbal'            => 'Verbally, on a call or in person',
@@ -205,19 +222,26 @@ function entities(): array
         'products' => [
             'label' => 'Product', 'plural' => 'Products & tariffs', 'icon' => '📦', 'perm' => 'products.edit',
             'fields' => [
-                'sku'           => ['label' => 'SKU', 'type' => 'text', 'required' => true],
-                'name'          => ['label' => 'Name', 'type' => 'text', 'required' => true],
-                'category'      => ['label' => 'Category', 'type' => 'select', 'options' => SERVICE_TYPES, 'required' => true],
-                'carrier'       => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
-                'monthly_price' => ['label' => 'Monthly price', 'type' => 'money', 'required' => true],
-                'setup_fee'     => ['label' => 'Setup fee', 'type' => 'money'],
-                'term_months'   => ['label' => 'Term (months)', 'type' => 'int', 'required' => true, 'min' => 0],
-                'active'        => ['label' => 'Available to sell', 'type' => 'bool', 'default' => 1],
-                'description'   => ['label' => 'Description', 'type' => 'textarea'],
+                'sku'               => ['label' => 'SKU', 'type' => 'text', 'required' => true, 'help' => 'Also the item code in Xero (up to 30 characters)'],
+                'name'              => ['label' => 'Name', 'type' => 'text', 'required' => true],
+                'category'          => ['label' => 'Category', 'type' => 'select', 'options' => SERVICE_TYPES, 'required' => true],
+                'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
+                'billing_frequency' => ['label' => 'Billing cycle', 'type' => 'select', 'options' => BILLING_FREQUENCIES, 'default' => 'monthly', 'help' => 'How often the customer is billed for it'],
+                'monthly_price'     => ['label' => 'Sale price', 'type' => 'money', 'required' => true, 'help' => 'Per billing cycle, excluding VAT'],
+                'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'help' => 'What it costs you per billing cycle. Only people who can see balances see this', 'if' => fn() => can('finance.view')],
+                'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money', 'help' => 'One-off'],
+                'term_months'       => ['label' => 'Term (months)', 'type' => 'int', 'required' => true, 'min' => 0],
+                'active'            => ['label' => 'Available to sell', 'type' => 'bool', 'default' => 1],
+                'description'       => ['label' => 'Description', 'type' => 'textarea'],
+                'xero_synced_at'    => ['label' => 'Sent to Xero', 'type' => 'datetime', 'readonly' => true, 'if' => 'xero_connected'],
+                'xero_sync_error'   => ['label' => 'Xero problem', 'type' => 'text', 'readonly' => true, 'if' => 'xero_connected'],
             ],
-            'list'    => ['sku', 'name', 'category', 'carrier', 'monthly_price', 'setup_fee', 'term_months', 'active'],
+            'list'    => ['sku', 'name', 'category', 'billing_frequency', 'monthly_price', 'cost_price', '_margin', '_monthly', 'setup_fee', 'active'],
             'search'  => ['sku', 'name', 'description'],
-            'filters' => ['category', 'carrier', 'active'],
+            'filters' => ['category', 'carrier', 'billing_frequency', 'active'],
+            'computed' => [
+                '_monthly' => ['label' => 'Per month', 'type' => 'money', 'sql' => billing_monthly_sql('t.monthly_price', 't.billing_frequency')],
+            ],
             'default_sort' => ['name', 'asc'],
         ],
 
@@ -226,7 +250,7 @@ function entities(): array
             'fields' => [
                 'account_id'        => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
                 'site_id'           => ['label' => 'Installation site', 'type' => 'ref', 'ref' => 'sites', 'scoped' => true, 'help' => 'From the customer\'s address book. Leave blank for head office.'],
-                'product_id'        => ['label' => 'Product / tariff', 'type' => 'ref', 'ref' => 'products', 'help' => 'Prices, term and type are copied from the product when left blank'],
+                'product_id'        => ['label' => 'Product / tariff', 'type' => 'ref', 'ref' => 'products', 'help' => 'Prices, term and type are copied from the product when left blank. Prices on services are per month, so a yearly product is divided by 12'],
                 'service_type'      => ['label' => 'Service type', 'type' => 'select', 'options' => SERVICE_TYPES],
                 'identifier'        => ['label' => 'Number / circuit ID', 'type' => 'text', 'required' => true, 'help' => 'MSISDN, CLI, circuit reference or serial number'],
                 'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
@@ -380,6 +404,24 @@ function entities(): array
         ],
     ];
 
+    // Cost prices and margins only for people allowed to see money.
+    if (can('finance.view')) {
+        $entities['products']['computed']['_margin'] = ['label' => 'Margin', 'type' => 'percent',
+            'sql' => '(CASE WHEN t.cost_price IS NULL OR t.monthly_price = 0 THEN NULL ELSE ROUND((t.monthly_price - t.cost_price) / t.monthly_price * 100, 1) END)'];
+    } else {
+        $entities['products']['list'] = array_values(array_diff($entities['products']['list'], ['cost_price', '_margin']));
+    }
+    if (xero_connected()) {
+        $entities['products']['list'][] = '_xero';
+        $entities['products']['computed']['_xero'] = ['label' => 'Xero', 'type' => 'xero_item',
+            'sql' => "(CASE WHEN t.xero_sync_error IS NOT NULL THEN 'error' WHEN t.xero_synced_at IS NULL THEN 'not_sent' WHEN t.xero_synced_at < t.updated_at THEN 'changed' ELSE 'sent' END)"];
+        $entities['products']['presets'] = [
+            'xero_not_sent' => ['label' => 'Not in Xero', 'sql' => 't.xero_synced_at IS NULL'],
+            'xero_changed'  => ['label' => 'Changed since sent to Xero', 'sql' => 't.xero_synced_at < t.updated_at'],
+            'xero_error'    => ['label' => 'Xero problems', 'sql' => 't.xero_sync_error IS NOT NULL'],
+        ];
+    }
+
     // Xero balances, once connected (and only for people allowed to see money).
     if (xero_connected() && can('finance.view')) {
         $balance = '(SELECT %s FROM xero_contacts x WHERE x.id = t.xero_contact_id)';
@@ -495,7 +537,7 @@ function before_save(string $name, array $data, ?array $existing): array
                 if ($product) {
                     $data['service_type'] = $data['service_type'] ?: $product['category'];
                     $data['carrier'] = $data['carrier'] ?: $product['carrier'];
-                    $data['monthly_price'] ??= $product['monthly_price'];
+                    $data['monthly_price'] ??= monthly_equivalent($product['monthly_price'], $product['billing_frequency'] ?? 'monthly');
                     $data['setup_fee'] ??= $product['setup_fee'];
                     $data['term_months'] ??= $product['term_months'];
                 }
@@ -557,6 +599,9 @@ function before_save(string $name, array $data, ?array $existing): array
 
         case 'products':
             $data['setup_fee'] ??= 0;
+            if (array_key_exists('billing_frequency', $data) || $existing === null) {
+                $data['billing_frequency'] = $data['billing_frequency'] ?? null ?: 'monthly';
+            }
             break;
     }
     return $data;

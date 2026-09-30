@@ -16,7 +16,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Contract renewals** | The contract end date is calculated from start date + term. Contracts ending within 90 days (configurable) or already out of contract are flagged, and "Start renewal" creates a renewal opportunity in one click |
 | **Support tickets** | Tickets get references (`TCK-000001`) and a category (fault / billing / order / porting / cancellation). Priorities P1–P4 have SLA timers, and you can record the carrier fault reference. The update thread supports internal and customer-facing notes and logs status changes |
 | **Sales pipeline** | Kanban board plus list view. Each deal has monthly and one-off value, term, total contract value and a probability that follows the stage. Deals are typed as new business, upsell or renewal |
-| **Products & tariffs** | A catalogue of products. Picking a product on a service fills in the price, setup fee, term, type and carrier |
+| **Products & tariffs** | A catalogue of products with a sale price, cost price (and margin), setup fee, term and billing cycle (weekly, monthly, quarterly, bi-annually or yearly). Picking a product on a service or quote fills in the details, converting the price to a monthly amount for MRR. Products can be sent to Xero as items: one at a time, several ticked at once, or automatically when saved |
 | **Activities** | Calls, emails, meetings, notes and tasks with due dates |
 | **Everywhere** | Global search (names, postcodes, phone numbers, circuit IDs, ticket refs), filters, sorting, pagination and CSV export on every list. Works on mobile and supports dark mode |
 | **Xero balances** | Connect Xero read-only to see each customer's outstanding and overdue balance and number of unpaid invoices. Adds an "In arrears" and "Over credit limit" filter, an overdue-debt total on the dashboard, and a link to the contact in Xero. Syncs on demand or by cron |
@@ -224,6 +224,19 @@ The CRM won't let a customer be its own dealer, sit under a customer that isn't 
 Staff can also **Record acceptance** for quotes agreed by phone, **Revise** a sent quote (the old link stops working), and send reminders or cancel contracts.
 
 Generated contracts and templates are stored in `storage/`, which the web can't access. **Include this folder in your backups.**
+
+## Products in Xero
+
+Products & tariffs can be created in Xero as **items**, so they can be picked on invoices.
+
+1. At Admin → Xero → Products, tick **Send products to Xero**. Optionally also tick **send automatically whenever it's created or saved**, and enter your sales account code, purchases account code and VAT tax type (e.g. `200`, `310`, `OUTPUT2`).
+2. Press **Reconnect** and approve the extra permission (Xero's `accounting.settings` scope, used for items).
+3. Send products:
+   - from a product's page: **Send to Xero** or **Update in Xero**
+   - from the product list: tick several (or the box at the top for the whole page), then **Send selected to Xero**
+   - from Admin → Xero: **Send all products now**
+
+The SKU becomes the Xero item code (Xero allows up to 30 characters), the name its name (first 50 characters), the sale price its sales price and the cost price its purchase price. The description notes the billing cycle. Sending again updates the same item. The product list shows whether each product is in Xero, has changed since it was sent, or had a problem, with tabs to find them. Xero's reason is shown on the product.
 
 ## Customers: head office, sites and contacts
 

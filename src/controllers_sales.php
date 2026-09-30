@@ -59,7 +59,8 @@ function quotes_controller(): void
                     redirect(url('quotes', ['action' => 'view', 'id' => $qid]));
                 }
             }
-            $products = db_all('SELECT id, name, category, monthly_price, setup_fee, term_months FROM products WHERE active = 1 ORDER BY name');
+            $products = array_map(fn($p) => ['monthly_price' => monthly_equivalent($p['monthly_price'], $p['billing_frequency'])] + $p,
+                db_all('SELECT id, name, category, monthly_price, billing_frequency, setup_fee, term_months FROM products WHERE active = 1 ORDER BY name'));
             page('quote_form', compact('quote', 'values', 'lines', 'errors', 'products'), $quote ? 'Edit quote' : 'New quote');
             return;
 

@@ -122,6 +122,24 @@ if (preg_match('#^/api.xro/2.0/Contacts/([0-9a-f-]{36})$#', $path, $m) && $_SERV
     json_out(200, ['Contacts' => [$body['Contacts'][0] + ['ContactID' => $m[1]]]]);
 }
 
+if ($path === '/api.xro/2.0/Items' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $body = json_decode(file_get_contents('php://input'), true);
+    $out = [];
+    foreach ($body['Items'] as $item) {
+        $errors = [];
+        if (mb_strlen($item['Code'] ?? '') > 30) $errors[] = ['Message' => 'Code must be 30 characters or less'];
+        if (mb_strlen($item['Name'] ?? '') > 50) $errors[] = ['Message' => 'Name must be 50 characters or less'];
+        if (($item['SalesDetails']['AccountCode'] ?? '200') === '999') $errors[] = ['Message' => 'Account code \'999\' is not a valid code for this document.'];
+        $existing = $state['items'][$item['Code']] ?? null;
+        $item['ItemID'] = $item['ItemID'] ?? $existing['ItemID'] ?? sprintf('i0000000-0000-0000-0000-%012d', count($state['items'] ?? []) + 1);
+        if (!$errors) $state['items'][$item['Code']] = $item;
+        $out[] = $item + ($errors ? ['ValidationErrors' => $errors, 'StatusAttributeString' => 'ERROR'] : ['StatusAttributeString' => 'OK']);
+    }
+    $state['item_posts'][] = $_SERVER['QUERY_STRING'] ?? '';
+    save($state);
+    json_out(200, ['Items' => $out]);
+}
+
 if ($path === '/api.xro/2.0/Contacts') {
     $contacts = [
         ['ContactID' => 'c1000000-0000-0000-0000-000000000001', 'Name' => 'Harbour View Dental Ltd', 'EmailAddress' => 'accounts@harbour.example.co.uk', 'ContactStatus' => 'ACTIVE'],

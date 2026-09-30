@@ -377,6 +377,48 @@ test('accounts contact can be sent to Xero once contacts write access is granted
     set_setting('xero_push_contacts', null);
 });
 
+test('products are sent to Xero as items: one, several, validation problems, updates', function () {
+    ok(!xero_can_write_items(), 'not allowed by default');
+    try { xero_push_products([1]); throw new Exception('expected failure'); } catch (XeroException $e) { ok(str_contains($e->getMessage(), 'Reconnect')); }
+    eq('offline_access accounting.contacts.read accounting.invoices.read accounting.settings', xero_item_scopes(XERO_DEFAULT_SCOPES));
+    eq('offline_access accounting.settings', xero_item_scopes('offline_access accounting.settings.read'));
+    set_setting('xero_scopes', xero_item_scopes(XERO_DEFAULT_SCOPES));
+    set_setting('xero_item_sales_account', '200');
+    set_setting('xero_item_tax_type', 'OUTPUT2');
+    $a = create('products', ['sku' => 'T-FTTP-900', 'name' => 'FTTP 900', 'category' => 'broadband', 'monthly_price' => '600', 'cost_price' => '360', 'billing_frequency' => 'yearly', 'term_months' => '12']);
+    $b = create('products', ['sku' => 'T-ROUTER', 'name' => 'Router', 'category' => 'hardware', 'monthly_price' => '5', 'term_months' => '0']);
+    $bad = create('products', ['sku' => str_repeat('X', 31), 'name' => 'Too long code', 'category' => 'other', 'monthly_price' => '1', 'term_months' => '0']);
+    $r = xero_push_products([$a, $b, $bad]);
+    eq(2, $r['sent']);
+    ok(str_contains($r['failed'][str_repeat('X', 31)], '30 characters'));
+    $items = mock_state()['items'];
+    $item = $items['T-FTTP-900'];
+    eq(600, $item['SalesDetails']['UnitPrice']); eq('200', $item['SalesDetails']['AccountCode']); eq('OUTPUT2', $item['SalesDetails']['TaxType']);
+    eq(360, $item['PurchaseDetails']['UnitPrice']); ok($item['IsPurchased']);
+    ok(str_contains($item['Description'], 'billed yearly'));
+    ok(!isset($items['T-ROUTER']['PurchaseDetails']), 'no cost price, no purchase details');
+    eq('summarizeErrors=false', end(mock_state()['item_posts']));
+    $p = db_one('SELECT * FROM products WHERE id = ?', [$a]);
+    ok($p['xero_item_id'] !== null && $p['xero_synced_at'] !== null && $p['xero_sync_error'] === null);
+    eq('sent', find('products', $a)['_xero']);
+    ok(db_value('SELECT xero_sync_error FROM products WHERE id = ?', [$bad]) !== null);
+    eq('error', find('products', $bad)['_xero']);
+    // A later edit shows as changed; sending again updates the same item.
+    sleep(1);
+    [$data] = validate(entity('products'), ['monthly_price' => '650'] + find('products', $a));
+    update_row('products', $a, $data);
+    eq('changed', find('products', $a)['_xero']);
+    xero_push_products([$a]);
+    eq(650, mock_state()['items']['T-FTTP-900']['SalesDetails']['UnitPrice']);
+    eq($p['xero_item_id'], mock_state()['items']['T-FTTP-900']['ItemID'], 'same Xero item updated');
+    // Xero's own validation errors are recorded against the product.
+    set_setting('xero_item_sales_account', '999');
+    $r = xero_push_products([$b]);
+    ok(str_contains($r['failed']['T-ROUTER'], 'not a valid code'));
+    ok(str_contains(xero_push_products_message($r), 'T-ROUTER'));
+    foreach (['xero_scopes', 'xero_item_sales_account', 'xero_item_tax_type'] as $k) { set_setting($k, null); }
+});
+
 test('revoked connection gives a clear error and is marked disconnected', function () {
     global $mockState;
     $st = mock_state(); $st['refresh'] = []; $st['tokens'] = []; file_put_contents($mockState, json_encode($st));
@@ -738,6 +780,29 @@ test('bad Signable key is reported; contract marked failed', function () use (&$
     set_setting('signable_api_key', 'signable-test-key');
 });
 
+
+echo "Products\n";
+test('billing cycles, cost price, margin and monthly equivalents', function () {
+    as_role('super_admin');
+    eq(50.0, monthly_equivalent(600, 'yearly'));
+    eq(20.0, monthly_equivalent(60, 'quarterly'));
+    eq(43.33, monthly_equivalent(10, 'weekly'));
+    eq(10.0, monthly_equivalent(60, 'biannually'));
+    $id = create('products', ['sku' => 'T-LL-100', 'name' => 'Leased line 100', 'category' => 'leased_line', 'monthly_price' => '1200', 'cost_price' => '900', 'billing_frequency' => 'quarterly', 'term_months' => '36', 'active' => '1']);
+    $p = find('products', $id);
+    eq('quarterly', $p['billing_frequency']); eq(400.0, (float)$p['_monthly']); eq(25.0, (float)$p['_margin']);
+    eq('monthly', find('products', create('products', ['sku' => 'X-1', 'name' => 'X', 'category' => 'other', 'monthly_price' => '1', 'term_months' => '0']))['billing_frequency'], 'defaults to monthly');
+    [, $errors] = validate(entity('products'), ['sku' => 'Y', 'name' => 'Y', 'category' => 'other', 'monthly_price' => '1', 'term_months' => '0', 'billing_frequency' => 'fortnightly']);
+    ok(isset($errors['billing_frequency']));
+    $acc = create('accounts', ['name' => 'Cycle Co', 'type' => 'business', 'status' => 'active']);
+    $svc = create('services', ['account_id' => $acc, 'product_id' => $id, 'identifier' => 'LL-CYCLE', 'status' => 'active']);
+    eq(400.0, (float)db_value('SELECT monthly_price FROM services WHERE id = ?', [$svc]), 'service gets the monthly equivalent');
+    ok(str_contains(ref_options('products')[$id], 'quarterly'));
+    as_role('sales');
+    ok(!field_enabled(entity('products')['fields']['cost_price']), 'cost price hidden without finance permission');
+    ok(!in_array('cost_price', entity('products')['list'], true) && !isset(entity('products')['computed']['_margin']));
+    as_role('super_admin');
+});
 
 echo "Roles, customers, approvals and audit\n";
 function as_role(string $role): void { db_exec('UPDATE users SET role = ? WHERE id = 1', [$role]); current_user(true); }

@@ -444,7 +444,18 @@ function entity_controller(string $name): void
                                 $message .= ' Couldn\'t update Xero: ' . $e->getMessage();
                             }
                         }
-                        flash($message);
+                        $type = 'success';
+                        if ($name === 'products' && setting('xero_push_products') === '1' && xero_connected() && xero_can_write_items()) {
+                            try {
+                                $r = xero_push_products([$savedId]);
+                                $message .= $r['failed'] ? ' But it couldn\'t be sent to Xero: ' . reset($r['failed']) : ' Sent to Xero.';
+                                $type = $r['failed'] ? 'error' : 'success';
+                            } catch (IntegrationException $e) {
+                                $message .= ' But it couldn\'t be sent to Xero: ' . $e->getMessage();
+                                $type = 'error';
+                            }
+                        }
+                        flash($message, $type);
                         redirect(safe_return($_POST['_return'] ?? null, url($name, ['action' => 'view', 'id' => $savedId])));
                     } catch (PDOException $e) {
                         if ($e->errorInfo[1] ?? null) {
@@ -480,6 +491,25 @@ function entity_controller(string $name): void
             }
             flash($entity['label'] . ' deleted.');
             redirect(safe_return($_POST['_return'] ?? null, url($name)));
+
+        case 'xero_push':
+            // Send one product (from its page) or several (ticked on the list) to Xero as items.
+            if ($name !== 'products' || !is_post()) {
+                not_found();
+            }
+            verify_csrf();
+            require_permission('products.edit');
+            $ids = $id ? [$id] : array_filter(array_map('intval', is_array($_POST['ids'] ?? null) ? $_POST['ids'] : []));
+            if (($_POST['all'] ?? '') === '1') {
+                $ids = array_map('intval', array_column(db_all('SELECT id FROM products WHERE active = 1'), 'id'));
+            }
+            try {
+                $r = xero_push_products($ids);
+                flash(xero_push_products_message($r), $r['failed'] ? 'error' : 'success');
+            } catch (IntegrationException $e) {
+                flash($e->getMessage(), 'error');
+            }
+            redirect(safe_return($_POST['_return'] ?? null, $id ? url('products', ['action' => 'view', 'id' => $id]) : url('products')));
 
         case 'comment':
             if ($name !== 'tickets' || !is_post() || !$id) {
@@ -652,6 +682,27 @@ function xero_controller(): void
     if (is_post()) {
         verify_csrf();
         switch ($action) {
+            case 'items_setting':
+                $on = !empty($_POST['push_products']);
+                $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
+                $newScopes = $on ? xero_item_scopes($scopes) : $scopes;
+                foreach (['xero_item_sales_account' => 'sales_account', 'xero_item_purchase_account' => 'purchase_account', 'xero_item_tax_type' => 'tax_type'] as $key => $field) {
+                    $value = trim((string)($_POST[$field] ?? ''));
+                    if ($value !== '' && !preg_match('/^[A-Za-z0-9._ -]{1,50}$/', $value)) {
+                        flash('That doesn\'t look like a Xero account code or tax type: ' . $value, 'error');
+                        redirect(url('xero'));
+                    }
+                    set_setting($key, $value === '' ? null : $value);
+                }
+                set_setting('xero_push_items', $on ? '1' : null);
+                set_setting('xero_push_products', $on && !empty($_POST['push_on_save']) ? '1' : null);
+                set_setting('xero_scopes', $newScopes === XERO_DEFAULT_SCOPES ? null : $newScopes);
+                audit('settings', 'Xero: send products to Xero ' . ($on ? 'on' . (setting('xero_push_products') ? ', automatically on save' : ', manually') : 'off'));
+                flash($on && $newScopes !== $scopes
+                    ? 'Saved. Press Reconnect so Xero can grant the CRM permission to create items.'
+                    : 'Saved.');
+                break;
+
             case 'push_setting':
                 $on = !empty($_POST['push_contacts']);
                 $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;

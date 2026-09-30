@@ -374,4 +374,21 @@ return [
             CONSTRAINT fk_cr_contact FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+
+    8 => function (): void {
+        // Products: cost price, billing frequency, and the matching item in Xero.
+        $columns = [
+            'cost_price'        => 'DECIMAL(10,2) NULL AFTER monthly_price',
+            'billing_frequency' => "ENUM('weekly','monthly','quarterly','biannually','yearly') NOT NULL DEFAULT 'monthly' AFTER cost_price",
+            'xero_item_id'      => 'CHAR(36) NULL',
+            'xero_synced_at'    => 'DATETIME NULL',
+            'xero_sync_error'   => 'VARCHAR(500) NULL',
+            'updated_at'        => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+        ];
+        foreach ($columns as $column => $definition) {
+            if (!column_exists('products', $column)) {
+                db()->exec("ALTER TABLE products ADD COLUMN $column $definition");
+            }
+        }
+    },
 ];

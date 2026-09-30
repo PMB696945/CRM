@@ -86,6 +86,25 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
 
 <?php if ($connected): ?>
 <section class="card">
+  <div class="card-head"><h2>Products</h2><?php if (setting('xero_push_items') === '1' && xero_can_write_items()): ?>
+    <form method="post" action="<?= h(url('products', ['action' => 'xero_push'])) ?>" class="inline" data-confirm="Send every product that's available to sell to Xero?"><?= csrf_field() ?><input type="hidden" name="all" value="1"><input type="hidden" name="_return" value="<?= h(url('xero')) ?>"><button class="btn btn-sm">Send all products now</button></form><?php endif; ?></div>
+  <p>Send products &amp; tariffs to Xero as <b>items</b>, so they can be picked on invoices. The SKU becomes the item code; the sale price and cost price become the item's sales and purchase prices. Sending again updates the same item.</p>
+  <form method="post" action="<?= h(url('xero', ['action' => 'items_setting'])) ?>" class="stack">
+    <?= csrf_field() ?>
+    <label class="check"><input type="checkbox" name="push_products" value="1" <?= setting('xero_push_items') === '1' ? 'checked' : '' ?>> Send products to Xero</label>
+    <label class="check"><input type="checkbox" name="push_on_save" value="1" <?= setting('xero_push_products') === '1' ? 'checked' : '' ?>> Also send a product automatically whenever it's created or saved</label>
+    <?php if (setting('xero_push_items') === '1' && !xero_can_write_items()): ?><p class="text-warning">Xero hasn't been given permission to create items. Press <b>Reconnect</b> above.</p><?php endif; ?>
+    <div class="form-grid">
+      <label>Sales account code<input name="sales_account" value="<?= h(setting('xero_item_sales_account')) ?>" placeholder="e.g. 200"></label>
+      <label>Purchases account code<input name="purchase_account" value="<?= h(setting('xero_item_purchase_account')) ?>" placeholder="e.g. 310"></label>
+      <label>Tax rate (Xero tax type)<input name="tax_type" value="<?= h(setting('xero_item_tax_type')) ?>" placeholder="e.g. OUTPUT2 (20% VAT on income)"></label>
+    </div>
+    <p class="help">Optional. They're used as the item's default account and VAT rate. The codes are on your Chart of accounts in Xero. This needs permission to manage items (the <code>accounting.settings</code> scope): after switching it on, press <b>Reconnect</b> and approve it.</p>
+    <button class="btn">Save</button>
+  </form>
+</section>
+
+<section class="card">
   <div class="card-head"><h2>Invoice emails</h2></div>
   <p>Each customer's <b>accounts contact</b> in the CRM is who should get invoices and statements. The CRM can tell Xero, by setting the Xero contact's email address.</p>
   <form method="post" action="<?= h(url('xero', ['action' => 'push_setting'])) ?>" class="stack">

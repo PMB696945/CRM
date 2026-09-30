@@ -279,11 +279,11 @@ function ref_options(string $ref, ?int $accountId = null, ?string $extraWhere = 
         $where[] = 'account_id = ?';
         $params[] = $accountId;
     }
-    $sql = "SELECT id, $label AS label" . ($ref === 'products' ? ', monthly_price' : '') . ($ref === 'sites' ? ', postcode' : '') . " FROM $ref"
+    $sql = "SELECT id, $label AS label" . ($ref === 'products' ? ', monthly_price, billing_frequency' : '') . ($ref === 'sites' ? ', postcode' : '') . " FROM $ref"
         . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . " ORDER BY $label";
     $out = [];
     foreach (db_all($sql, $params) as $row) {
-        $out[$row['id']] = $row['label'] . (isset($row['monthly_price']) ? ' (' . money($row['monthly_price']) . '/mo)' : '')
+        $out[$row['id']] = $row['label'] . (isset($row['monthly_price']) ? ' (' . money($row['monthly_price']) . ' ' . strtolower(BILLING_FREQUENCIES[$row['billing_frequency']] ?? 'monthly') . ')' : '')
             . (!empty($row['postcode']) ? ' (' . $row['postcode'] . ')' : '');
     }
     return $out;
@@ -320,6 +320,15 @@ function display_value(array $entity, string $column, array $row, bool $link = t
             return $value === null ? '<span class="muted">—</span>' : h(money($value));
         case 'mandate':
             return gc_mandate_badge($value);
+        case 'percent':
+            return $value === null ? '<span class="muted">—</span>' : '<span class="' . ((float)$value < 0 ? 'text-danger' : '') . '">' . h(rtrim(rtrim(number_format((float)$value, 1), '0'), '.')) . '%</span>';
+        case 'xero_item':
+            return match ($value) {
+                'sent'    => '<span class="badge badge-active">In Xero</span>',
+                'changed' => '<span class="badge badge-suspended">Changed</span>',
+                'error'   => '<span class="badge badge-failed">Problem</span>',
+                default   => '<span class="muted">—</span>',
+            };
         case 'bool':
             return $value ? '✔' : '<span class="muted">—</span>';
         case 'checkboxes':
@@ -392,6 +401,8 @@ function export_value(array $entity, string $column, array $row): string
         'bool'   => $value ? 'Yes' : 'No',
         'money'  => $value === null ? '' : number_format((float)$value, 2, '.', ''),
         'mandate' => gc_mandate_label($value),
+        'percent' => $value === null ? '' : (string)$value,
+        'xero_item' => ['sent' => 'In Xero', 'changed' => 'Changed since sent', 'error' => 'Problem', 'not_sent' => ''][$value] ?? '',
         'checkboxes' => checkbox_labels($def, $value),
         default  => (string)($value ?? ''),
     };

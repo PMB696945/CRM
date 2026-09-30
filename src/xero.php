@@ -426,3 +426,116 @@ function xero_push_billing_contact(int $accountId): string
     return $contact['email'];
 }
 
+
+/* ------------------------------------------------------ Products → items --- */
+
+/** Scopes with accounting.settings (write) added, which Xero needs to create and update items. */
+function xero_item_scopes(string $scopes): string
+{
+    $scopes = trim(preg_replace('/(^|\s)accounting\.settings\.read(?=\s|$)/', '', ' ' . $scopes . ' '));
+    return preg_match('/(^|\s)accounting\.settings(\s|$)/', $scopes) ? $scopes : $scopes . ' accounting.settings';
+}
+
+function xero_can_write_items(): bool
+{
+    return (bool)preg_match('/(^|\s)accounting\.settings(\s|$)/', (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES));
+}
+
+/** Xero item for a product: Code = SKU, sale price, and cost price as the purchase price. */
+function xero_item_payload(array $p): array
+{
+    $cycle = strtolower(BILLING_FREQUENCIES[$p['billing_frequency'] ?? 'monthly'] ?? 'monthly');
+    $description = trim((string)$p['description']) !== '' ? trim((string)$p['description']) : $p['name'];
+    $sales = ['UnitPrice' => (float)$p['monthly_price']];
+    if ($a = setting('xero_item_sales_account')) {
+        $sales['AccountCode'] = $a;
+    }
+    if ($t = setting('xero_item_tax_type')) {
+        $sales['TaxType'] = $t;
+    }
+    $item = [
+        'Code'        => (string)$p['sku'],
+        'Name'        => mb_substr((string)$p['name'], 0, 50),
+        'Description' => mb_substr($description . " (billed $cycle)", 0, 4000),
+        'IsSold'      => true,
+        'SalesDetails' => $sales,
+    ];
+    if ($p['cost_price'] !== null && $p['cost_price'] !== '') {
+        $purchase = ['UnitPrice' => (float)$p['cost_price']];
+        if ($a = setting('xero_item_purchase_account')) {
+            $purchase['AccountCode'] = $a;
+        }
+        $item['IsPurchased'] = true;
+        $item['PurchaseDescription'] = mb_substr($description, 0, 4000);
+        $item['PurchaseDetails'] = $purchase;
+    }
+    if (!empty($p['xero_item_id'])) {
+        $item['ItemID'] = $p['xero_item_id'];
+    }
+    return $item;
+}
+
+/**
+ * Create or update products as items in Xero (matched on the SKU / item code).
+ * Returns ['sent' => n, 'failed' => [sku => reason]].
+ */
+function xero_push_products(array $ids): array
+{
+    if (!xero_connected()) {
+        throw new XeroException('Connect Xero first (Admin → Xero).');
+    }
+    if (!xero_can_write_items()) {
+        throw new XeroException('Xero hasn\'t given the CRM permission to create items yet. Switch on "Send products to Xero" under Admin → Xero, then press Reconnect.');
+    }
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    if (!$ids) {
+        throw new XeroException('Choose at least one product.');
+    }
+    $products = db_all('SELECT * FROM products WHERE id IN (' . implode(',', $ids) . ')');
+    $result = ['sent' => 0, 'failed' => []];
+    $fail = function (array $p, string $reason) use (&$result): void {
+        $result['failed'][$p['sku']] = $reason;
+        db_exec('UPDATE products SET xero_sync_error = ? WHERE id = ?', [mb_substr($reason, 0, 500), $p['id']]);
+    };
+
+    $valid = [];
+    foreach ($products as $p) {
+        if (mb_strlen($p['sku']) > 30) {
+            $fail($p, 'The SKU is longer than the 30 characters Xero allows for an item code.');
+        } else {
+            $valid[] = $p;
+        }
+    }
+    foreach (array_chunk($valid, 50) as $chunk) {
+        $body = xero_api('POST', xero_urls()['api'] . '/Items', ['summarizeErrors' => 'false'], true,
+            ['Items' => array_map('xero_item_payload', $chunk)]);
+        $returned = $body['Items'] ?? [];
+        foreach ($chunk as $i => $p) {
+            $item = $returned[$i] ?? null;
+            $errors = array_column($item['ValidationErrors'] ?? [], 'Message');
+            if (!$item || $errors || ($item['StatusAttributeString'] ?? 'OK') === 'ERROR') {
+                $fail($p, $errors ? implode(' ', $errors) : 'Xero didn\'t confirm this item.');
+                continue;
+            }
+            db_exec('UPDATE products SET xero_item_id = ?, xero_synced_at = NOW(), xero_sync_error = NULL WHERE id = ?', [$item['ItemID'] ?? $p['xero_item_id'], $p['id']]);
+            $result['sent']++;
+        }
+    }
+    audit('xero_items', sprintf('Sent %d product%s to Xero as items%s', $result['sent'], $result['sent'] === 1 ? '' : 's',
+        $result['failed'] ? ', ' . count($result['failed']) . ' failed' : ''), 'products', count($ids) === 1 ? $ids[0] : null, null,
+        $result['failed'] ? array_map(fn($r) => ['from' => '', 'to' => $r], $result['failed']) : null);
+    return $result;
+}
+
+/** A readable one-line result of xero_push_products(). */
+function xero_push_products_message(array $r): string
+{
+    $msg = $r['sent'] ? sprintf('%d product%s sent to Xero.', $r['sent'], $r['sent'] === 1 ? '' : 's') : 'Nothing was sent to Xero.';
+    foreach (array_slice($r['failed'], 0, 5, true) as $sku => $reason) {
+        $msg .= " $sku: $reason";
+    }
+    if (count($r['failed']) > 5) {
+        $msg .= ' …and ' . (count($r['failed']) - 5) . ' more (see the "Xero problems" tab).';
+    }
+    return $msg;
+}

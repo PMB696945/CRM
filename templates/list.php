@@ -3,6 +3,8 @@ $pages = max(1, (int)ceil($result['total'] / PER_PAGE));
 $current = max(1, min($pages, (int)$opts['page']));
 $presets = $entity['presets'] ?? [];
 $exportParams = array_merge($_GET, ['page' => $name, 'action' => 'export', 'p' => null]);
+// Tick boxes to send several products to Xero at once.
+$bulk = $name === 'products' && xero_connected() && can('products.edit');
 ?>
 <div class="page-head">
   <h1><?= h($entity['plural']) ?> <small class="count"><?= (int)$result['total'] ?></small></h1>
@@ -47,7 +49,16 @@ $exportParams = array_merge($_GET, ['page' => $name, 'action' => 'export', 'p' =
   <?php endif; ?>
 </form>
 
-<?php render('_table', ['entity' => $entity, 'name' => $name, 'rows' => $result['rows'], 'columns' => $entity['list'], 'sortable' => true, 'opts' => $opts]); ?>
+<?php if ($bulk): ?>
+<form method="post" action="<?= h(url($name, ['action' => 'xero_push'])) ?>" id="bulk-form" class="bulk-bar">
+  <?= csrf_field() ?>
+  <input type="hidden" name="_return" value="<?= h(url($name, array_diff_key($_GET, ['page' => 1]))) ?>">
+  <span class="muted small" data-selected-count>Tick products to send them to Xero</span>
+  <button class="btn btn-sm" data-needs-selection disabled>Send selected to Xero</button>
+  <?php if (!xero_can_write_items()): ?><span class="small text-warning">Switch on "Send products to Xero" under <a href="<?= h(url('xero')) ?>">Admin → Xero</a> first.</span><?php endif; ?>
+</form>
+<?php endif; ?>
+<?php render('_table', ['entity' => $entity, 'name' => $name, 'rows' => $result['rows'], 'columns' => $entity['list'], 'sortable' => true, 'opts' => $opts, 'selectable' => $bulk]); ?>
 
 <?php if ($pages > 1): ?>
 <nav class="pager">

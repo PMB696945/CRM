@@ -158,3 +158,20 @@ document.querySelectorAll('[data-when]').forEach((el) => {
 document.querySelectorAll('form[data-auto-continue]').forEach((form) => {
   setTimeout(() => form.submit(), 1500);
 });
+
+// Tick-box selection on lists (e.g. send several products to Xero).
+const bulkForm = document.getElementById('bulk-form');
+if (bulkForm) {
+  const boxes = () => [...document.querySelectorAll('input[name="ids[]"][form="bulk-form"]')];
+  const update = () => {
+    const n = boxes().filter((b) => b.checked).length;
+    bulkForm.querySelectorAll('[data-needs-selection]').forEach((b) => { b.disabled = n === 0; });
+    const label = bulkForm.querySelector('[data-selected-count]');
+    if (label) label.textContent = n ? `${n} selected` : 'Tick products to send them to Xero';
+  };
+  document.addEventListener('change', (e) => {
+    if (e.target.matches('[data-check-all]')) boxes().forEach((b) => { b.checked = e.target.checked; });
+    if (e.target.matches('[data-check-all], input[name="ids[]"]')) update();
+  });
+  update();
+}

@@ -503,4 +503,6 @@
   .choice-cards label { @apply flex! cursor-pointer flex-row! items-start gap-3 rounded-xl border border-gray-200 p-4 font-normal has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:border-gray-800 dark:has-[:checked]:bg-brand-500/10; }
   .choice-cards label > span { @apply min-w-0 flex-1; }
   .choice-cards b { @apply block text-gray-800 dark:text-white/90; }
+  .bulk-bar { @apply mb-3 flex flex-wrap items-center gap-3; }
+  .check-col { @apply w-10 pr-0!; }
 }

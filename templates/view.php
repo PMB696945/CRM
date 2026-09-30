@@ -6,6 +6,9 @@
   </div>
   <div class="actions">
     <?php if (can('audit.view')): ?><a class="btn btn-ghost" href="<?= h(url('audit', ['entity' => $name, 'entity_id' => $row['id']])) ?>">History</a><?php endif; ?>
+    <?php if ($name === 'products' && xero_connected() && $canWrite): ?>
+      <form method="post" action="<?= h(url('products', ['action' => 'xero_push', 'id' => $row['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn"><?= $row['xero_synced_at'] ? 'Update in Xero' : 'Send to Xero' ?></button></form>
+    <?php endif; ?>
     <?php if ($canWrite): ?><a class="btn" href="<?= h(url($name, ['action' => 'edit', 'id' => $row['id']])) ?>">Edit</a><?php endif; ?>
     <?php if ($canWrite && can('records.delete')) render('_delete', ['name' => $name, 'id' => $row['id'], 'label' => $entity['label']]); ?>
   </div>
