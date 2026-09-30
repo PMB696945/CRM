@@ -859,7 +859,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     as_role('staff');
     ok(!array_key_exists('_balance', entity('accounts')['computed']) || can('finance.view'));
     as_role('finance');
-    ok(!can('services.edit') && can('finance.view'));
+    ok(!can('services.edit') && can('finance.view') && can('costs.edit') && !can('products.edit'), 'finance can change cost prices only');
     as_role('super_admin');
     eq([], users_with_permission('not.a.permission'));
     ok(in_array('test@example.com', array_column(users_with_permission('approvals.decide'), 'email'), true));

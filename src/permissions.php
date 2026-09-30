@@ -68,7 +68,7 @@ const DEFAULT_ROLE_PERMISSIONS = [
     'staff'     => ['customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'finance.view', 'costs.view'],
     'sales'     => ['customers.edit', 'sales.edit', 'tickets.edit', 'costs.view'],
     'support'   => ['customers.edit', 'services.edit', 'tickets.edit'],
-    'finance'   => ['customers.edit', 'finance.view', 'costs.view', 'export'],
+    'finance'   => ['customers.edit', 'finance.view', 'costs.view', 'costs.edit', 'export'],
     'read_only' => [],
 ];
 
