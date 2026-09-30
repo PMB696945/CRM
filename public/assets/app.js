@@ -1,6 +1,7 @@
 // Confirm destructive actions.
 document.addEventListener('submit', (e) => {
   const msg = e.target.dataset.confirm;
+  if (e.submitter && e.submitter.hasAttribute('data-skip-confirm')) return;
   if (msg && !window.confirm(msg)) e.preventDefault();
 });
 
@@ -191,4 +192,26 @@ document.querySelectorAll('[data-full-username]').forEach((out) => {
   };
   form.addEventListener('input', update);
   update();
+});
+
+// Filter a results table by supplier, technology and speed (data-filter-table).
+document.querySelectorAll('[data-filter-for]').forEach((bar) => {
+  const table = document.getElementById(bar.dataset.filterFor);
+  if (!table) return;
+  const rows = [...table.querySelectorAll('tbody tr[data-supplier]')];
+  const count = bar.querySelector('[data-filter-count]');
+  const apply = () => {
+    const supplier = bar.querySelector('[name=f_supplier]').value;
+    const tech = bar.querySelector('[name=f_tech]').value;
+    const speed = parseFloat(bar.querySelector('[name=f_speed]').value || '0');
+    let shown = 0;
+    rows.forEach((r) => {
+      const ok = (!supplier || r.dataset.supplier === supplier) && (!tech || r.dataset.tech === tech) && parseFloat(r.dataset.speed || '0') >= speed;
+      r.hidden = !ok;
+      if (ok) shown++;
+    });
+    if (count) count.textContent = `${shown} of ${rows.length} shown`;
+  };
+  bar.addEventListener('change', apply);
+  apply();
 });

@@ -17,7 +17,8 @@
         <dt>Address</dt><dd><?= h($order['address_label']) ?><?= $order['site_name'] ? ' <span class="muted">(' . h($order['site_name']) . ')</span>' : '' ?></dd>
         <?php if ($order['cli']): ?><dt>Line</dt><dd><?= h($order['cli']) ?></dd><?php endif; ?>
         <dt>Broadband username</dt><dd><?= h($order['broadband_username'] ?: '—') ?></dd>
-        <dt>Required by</dt><dd><?= h(fmt_date($order['crd'])) ?></dd>
+<?php $appt = (json_decode((string)$order['details'], true) ?: [])['appointment'] ?? null; ?>
+        <dt><?= $appt ? 'Install appointment' : 'Required by' ?></dt><dd><?= h(fmt_date($order['crd'])) ?><?= $appt && $appt['slot'] ? ' ' . h($appt['slot']) : '' ?></dd>
         <dt>Your reference</dt><dd><?= h($order['client_ref']) ?></dd>
         <dt>Giacom service ID</dt><dd><?= h($order['giacom_service_id'] ?: '—') ?></dd>
         <dt>Placed</dt><dd><?= h(fmt_datetime($order['created_at'])) ?> by <?= h($order['user_name'] ?? '—') ?></dd>
@@ -35,6 +36,26 @@
   </div>
   <aside>
     <?php if ($open && can('orders.place')): ?>
+      <section class="card">
+        <div class="card-head"><h2>Install appointment</h2></div>
+        <?php if ($slots === null): ?>
+          <p class="help">See the dates Giacom can offer and book or change the appointment.</p>
+          <a class="btn btn-sm" href="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'appointments' => 1])) ?>">Show available dates</a>
+        <?php elseif (!$slots['appointments']): ?>
+          <p class="muted">Giacom didn't offer any dates<?= $slots['error'] ? ': ' . h($slots['error']) : '' ?>.</p>
+        <?php else: ?>
+          <form method="post" action="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'do' => 'appointment'])) ?>" class="stack">
+            <?= csrf_field() ?><input type="hidden" name="visit" value="<?= h(query('visit', 'NO_SITE_VISIT')) ?>">
+            <div class="address-list">
+              <?php foreach ($slots['appointments'] as $i => $a): ?>
+                <label class="check"><input type="radio" name="appointment" value="<?= h(giacom_appointment_key($a)) ?>" <?= $i === 0 ? 'checked' : '' ?> required>
+                  <span><b><?= h(date('D j M Y', strtotime($a['date']))) ?></b> <?= h($a['slot']) ?></span></label>
+              <?php endforeach; ?>
+            </div>
+            <button class="btn btn-primary btn-sm">Book this appointment</button>
+          </form>
+        <?php endif; ?>
+      </section>
       <section class="card">
         <div class="card-head"><h2>Cancel order</h2></div>
         <form method="post" action="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'do' => 'abort'])) ?>" class="stack" data-confirm="Ask Giacom to cancel this order?">

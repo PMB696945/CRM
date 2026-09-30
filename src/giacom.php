@@ -187,6 +187,19 @@ function giacom_address_label(array $a): string
 function giacom_check(array $address, ?string $cli, ?int $accountId, ?int $siteId): int
 {
     $cli = $cli ? preg_replace('/\D/', '', $cli) : null;
+    // The UPRN lets Giacom include CityFibre FTTP; address_match knows it for each address.
+    if (empty($address['uprn']) && !empty($address['postcode'])) {
+        try {
+            foreach (giacom_call('address_match', ['postcode' => giacom_postcode($address['postcode'])])['addresses'] ?? [] as $m) {
+                if (($m['addressRef'] ?? null) === ($address['address-reference'] ?? '') && !empty($m['uprn'])) {
+                    $address['uprn'] = (string)$m['uprn'];
+                    break;
+                }
+            }
+        } catch (GiacomException) {
+            // Not essential: the check still works without it.
+        }
+    }
     $r = giacom_call('availability', array_filter([
         'cli' => $cli ?: null,
         'postcode' => !empty($address['postcode']) ? giacom_postcode($address['postcode']) : null,
@@ -250,6 +263,10 @@ function giacom_summarise_availability(array $r): array
             'name' => (string)($p['product-name'] ?? $p['product-id']),
             'technology' => strtolower((string)($p['technology-type'] ?? '')),
             'supplier_ref' => trim(($p['supplier-product-reference'] ?? '') . ' ' . ($p['supplier-product-subtype'] ?? '')),
+            'supplier' => giacom_supplier_name((string)($p['supplier'] ?? ($p['network'] ?? '')), (string)($p['supplier-product-reference'] ?? ''), (string)($p['product-name'] ?? '')),
+            'supplier_code' => $p['supplier'] ?? null,
+            'tech_label' => giacom_tech_label((string)($p['technology-type'] ?? ''), (string)($p['supplier-product-reference'] ?? ''), (string)($p['product-name'] ?? '')),
+            'install_type' => $p['expected-install-type'] ?? null,
             'speed' => isset($p['service-speed']) ? (float)$p['service-speed'] : null,
             'likely_range' => isset($p['likely-min-range'], $p['likely-max-range']) ? [(float)$p['likely-min-range'], (float)$p['likely-max-range']] : null,
             'estimate' => $estimates[$key] ?? null,
@@ -271,6 +288,36 @@ function giacom_summarise_availability(array $r): array
         'products' => $products,
         'raw' => $r,
     ];
+}
+
+/** Which network a product is on, from Giacom's supplier field or its product reference. */
+function giacom_supplier_name(string $supplier, string $ref, string $name = ''): string
+{
+    $hay = strtolower($supplier . ' ' . $ref . ' ' . $name);
+    return match (true) {
+        str_contains($hay, 'cityfibre') || str_contains($hay, 'city fibre') || preg_match('/(^|[\s_])cf[_\s]/', $hay) === 1 => 'CityFibre',
+        str_contains($hay, 'sky') => 'Sky',
+        str_contains($hay, 'vodafone') => 'Vodafone',
+        str_contains($hay, 'ttb') || str_contains($hay, 'talktalk') => 'TalkTalk',
+        str_contains($hay, 'bt_') || str_contains($hay, 'bt ') || str_contains($hay, 'openreach') || str_contains($hay, 'btw') => 'BT Wholesale',
+        $supplier !== '' => ucfirst($supplier),
+        default => 'Other',
+    };
+}
+
+/** A short technology label: SOADSL, SOGEA, FTTP, FTTC, G.fast… */
+function giacom_tech_label(string $tech, string $ref, string $name = ''): string
+{
+    $hay = strtoupper($ref . ' ' . $name . ' ' . $tech);
+    return match (true) {
+        str_contains($hay, 'SOGFAST') => 'SOGFAST',
+        str_contains($hay, 'SOADSL') || (str_contains($hay, 'SOGEA') && str_contains($hay, 'ADSL')) => 'SOADSL',
+        str_contains($hay, 'SOGEA') => 'SOGEA',
+        str_contains($hay, 'FTTP') => 'FTTP',
+        str_contains($hay, 'GFAST') || str_contains($hay, 'G.FAST') => 'G.fast',
+        str_contains($hay, 'FTTC') || strtoupper($tech) === 'VDSL' => 'FTTC',
+        default => strtoupper($tech) ?: 'Other',
+    };
 }
 
 /** Speeds come in bits/s (qualifications) or kbit/s (estimates); show Mbps. */
@@ -555,28 +602,67 @@ function giacom_suggest_username(array $account): string
     return strtolower(preg_replace('/[^a-z0-9]/i', '', $account['account_number'])) . '-' . $n;
 }
 
-/** Engineer appointment dates Giacom offers at an address (empty if it can't say). */
-function giacom_appointments(array $check, array $product): array
+/**
+ * Install/engineer appointments Giacom can offer for a product at an address.
+ * Returns ['appointments' => [['date', 'slot', 'ref'], ...], 'error' => ?string].
+ */
+function giacom_appointments(array $check, array $product, string $visitReason = 'NO_SITE_VISIT', string $orderType = ''): array
 {
     $address = json_decode((string)$check['address'], true) ?: [];
+    $supplier = $product['supplier_code'] ?? null;
+    if (!$supplier && ($product['supplier'] ?? '') === 'Sky') {
+        $supplier = 'SKY';
+    }
     try {
         $r = giacom_call('available_appointments', array_filter([
-            'technology-type' => strtoupper($product['technology']),
+            'technology-type' => strtoupper((string)$product['technology']),
             'address-reference' => $address['address-reference'] ?? null,
             'css-database-code' => $address['css-database-code'] ?? null,
             'uprn' => $address['uprn'] ?? null,
+            'supplier' => $supplier,
+            'site-visit-reason' => $visitReason ?: null,
+            'order-type' => $orderType ?: null,
         ], fn($v) => $v !== null && $v !== ''), '2.0.1');
-    } catch (GiacomException) {
-        return [];
+    } catch (GiacomException $e) {
+        return ['appointments' => [], 'error' => $e->getMessage()];
     }
     $out = [];
     foreach ($r['appointments'] ?? [] as $a) {
-        if (!empty($a['date'])) {
-            $out[] = ['date' => substr($a['date'], 0, 10), 'slot' => $a['timeslot'] ?? ''];
+        $date = $a['date'] ?? ($a['appointment-date'] ?? null);
+        if (!$date) {
+            continue;
         }
+        $out[] = [
+            'date' => substr((string)$date, 0, 10),
+            'slot' => (string)($a['timeslot'] ?? ($a['appointment-slot'] ?? ($a['slot'] ?? ''))),
+            'ref'  => (string)($a['appointment-ref'] ?? ($a['appointment-reference'] ?? ($a['reference'] ?? ''))),
+        ];
     }
-    usort($out, fn($x, $y) => strcmp($x['date'], $y['date']));
-    return $out;
+    usort($out, fn($x, $y) => strcmp($x['date'] . $x['slot'], $y['date'] . $y['slot']));
+    return ['appointments' => $out, 'error' => null];
+}
+
+/** "2026-10-14|AM|ref" for an appointment radio button, and back. */
+function giacom_appointment_key(array $a): string
+{
+    return $a['date'] . '|' . $a['slot'] . '|' . $a['ref'];
+}
+
+/** Book (or change) the appointment on an order that's been placed. */
+function giacom_book_appointment(array $order, array $appointment): void
+{
+    giacom_call('amend_order', array_filter([
+        'order-id' => $order['giacom_order_id'],
+        'appointment-date' => $appointment['date'],
+        'appointment-slot' => $appointment['slot'] ?: null,
+        'appointment-ref' => $appointment['ref'] ?: null,
+        'required-by-date' => $appointment['date'],
+    ], fn($v) => $v !== null && $v !== ''));
+    $details = json_decode((string)$order['details'], true) ?: [];
+    $details['appointment'] = $appointment;
+    db_exec('UPDATE giacom_orders SET crd = ?, details = ?, last_error = NULL WHERE id = ?', [$appointment['date'], json_encode($details), $order['id']]);
+    giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'appointment', 'Booked for ' . fmt_date($appointment['date']) . ($appointment['slot'] ? ' ' . $appointment['slot'] : ''));
+    audit('giacom_appointment', "Giacom order {$order['giacom_order_id']}: appointment booked for {$appointment['date']} {$appointment['slot']}", 'accounts', $order['account_id'] ? (int)$order['account_id'] : null);
 }
 
 /* ---------------------------------------------------------- Controller --- */
@@ -715,15 +801,13 @@ function giacom_controller(): void
             $site = $check['site_id'] ? db_one('SELECT * FROM sites WHERE id = ?', [$check['site_id']]) : null;
             $contact = db_one('SELECT * FROM contacts WHERE id = ?', [($site['contact_id'] ?? null) ?: ($account['main_contact_id'] ?: 0)]);
             [$title, $forename, $surname] = giacom_split_name((string)($contact['name'] ?? ''));
-            // Earliest date: Giacom's lead time for the product, else its first appointment.
-            $appointments = [];
-            $lead = $product['leadtime']['first_date'] ?? null;
-            $leadSource = $lead ? 'lead time' : null;
-            if (!$lead) {
-                $appointments = giacom_appointments($check, $product);
-                $lead = $appointments[0]['date'] ?? null;
-                $leadSource = $lead ? 'appointment' : null;
-            }
+            // Ask Giacom for the actual install dates for this product and address.
+            $visit = in_array($_POST['site_visit_reason'] ?? '', ['NO_SITE_VISIT', 'STANDARD_INSTALL', 'PREMIUM_INSTALL'], true) ? $_POST['site_visit_reason'] : 'NO_SITE_VISIT';
+            $slots = giacom_appointments($check, $product, $visit);
+            $appointments = $slots['appointments'];
+            $appointmentsError = $slots['error'];
+            $lead = $appointments[0]['date'] ?? ($product['leadtime']['first_date'] ?? null);
+            $leadSource = $appointments ? 'appointment' : (($product['leadtime']['first_date'] ?? null) ? 'lead time' : null);
             $lead ??= date('Y-m-d', strtotime('+10 weekdays'));
             $values = [
                 'order_type' => in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide',
@@ -731,7 +815,8 @@ function giacom_controller(): void
                 'bb_username' => giacom_suggest_username($account), 'bb_password' => substr(strtr(base64_encode(random_bytes(9)), '+/', 'Kq'), 0, 12),
                 'bb_suffix' => (string)setting('giacom_username_suffix'), 'realm' => (string)setting('giacom_realm'),
                 'care_level' => in_array(setting('giacom_care_level'), $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS), true) ? setting('giacom_care_level') : ($product['care_default'] ?? 'standard'),
-                'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => '',
+                'site_visit_reason' => $visit, 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => '',
+                'appointment' => $appointments ? giacom_appointment_key($appointments[0]) : '',
                 'title' => $title, 'forename' => $forename, 'surname' => $surname,
                 'telephone' => (string)(($contact['phone'] ?? '') ?: ($contact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
                 'email' => (string)($contact['email'] ?? $account['email']), 'crm_product_id' => '',
@@ -743,6 +828,19 @@ function giacom_controller(): void
                     $values[$k] = trim((string)($_POST[$k] ?? ''));
                 }
                 $values['order_type'] = $values['order_type'] === 'migrate' ? 'migrate' : 'provide';
+                // An offered appointment sets the required-by date.
+                $chosen = null;
+                foreach ($appointments as $a) {
+                    if (giacom_appointment_key($a) === $values['appointment']) {
+                        $chosen = $a;
+                    }
+                }
+                if ($values['appointment'] !== '' && !$chosen && empty($_POST['refresh'])) {
+                    $errors['appointment'] = 'That appointment is no longer available. Choose another.';
+                }
+                if ($chosen) {
+                    $values['crd'] = $chosen['date'];
+                }
                 $values['force_new_ont'] = in_array($values['force_new_ont'], ['Y', 'N'], true) ? $values['force_new_ont'] : '';
                 $values['cli'] = preg_replace('/\D/', '', $values['cli']);
                 if ($values['cli'] !== '' && !preg_match('/^0\d{9,10}$/', $values['cli'])) {
@@ -796,9 +894,20 @@ function giacom_controller(): void
                 if ($values['crm_product_id'] !== '' && !db_value('SELECT id FROM products WHERE id = ?', [(int)$values['crm_product_id']])) {
                     $values['crm_product_id'] = '';
                 }
-                if (!$errors) {
+                if (!empty($_POST['refresh'])) {
+                    $errors = []; // just updating the appointment list
+                } elseif (!$errors) {
                     try {
                         $id = giacom_place_order($check, $product, $values);
+                        if ($chosen) {
+                            try {
+                                giacom_book_appointment(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]), $chosen);
+                            } catch (GiacomException $e) {
+                                db_exec('UPDATE giacom_orders SET last_error = ? WHERE id = ?', ['Order placed, but the appointment couldn\'t be booked: ' . mb_substr($e->getMessage(), 0, 400), $id]);
+                                flash('Order placed with Giacom, but the appointment couldn\'t be booked: ' . $e->getMessage() . ' Choose another on the order page.', 'error');
+                                redirect(url('giacom', ['action' => 'view', 'id' => $id]));
+                            }
+                        }
                         flash('Order placed with Giacom. Its progress will show here and on the customer\'s page.');
                         redirect(url('giacom', ['action' => 'view', 'id' => $id]));
                     } catch (GiacomException $e) {
@@ -807,7 +916,7 @@ function giacom_controller(): void
                 }
             }
             $crmProducts = ref_options('products', null, "category = 'broadband'");
-            page('giacom_order', compact('check', 'result', 'product', 'account', 'site', 'values', 'errors', 'crmProducts', 'appointments', 'lead', 'leadSource'), 'Place broadband order');
+            page('giacom_order', compact('check', 'result', 'product', 'account', 'site', 'values', 'errors', 'crmProducts', 'appointments', 'appointmentsError', 'lead', 'leadSource'), 'Place broadband order');
             return;
 
         case 'view':
@@ -817,7 +926,19 @@ function giacom_controller(): void
             if (is_post()) {
                 verify_csrf();
                 try {
-                    if (query('do') === 'abort') {
+                    if (query('do') === 'appointment') {
+                        require_permission('orders.place');
+                        $product = ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null];
+                        $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
+                        $key = (string)($_POST['appointment'] ?? '');
+                        $offered = $check ? giacom_appointments($check, $product, (string)($_POST['visit'] ?? 'NO_SITE_VISIT'))['appointments'] : [];
+                        $chosen = array_values(array_filter($offered, fn($a) => giacom_appointment_key($a) === $key))[0] ?? null;
+                        if (!$chosen) {
+                            throw new GiacomException('That appointment is no longer available. Show the dates again and choose another.');
+                        }
+                        giacom_book_appointment($order, $chosen);
+                        flash('Appointment booked for ' . fmt_date($chosen['date']) . ($chosen['slot'] ? ' ' . $chosen['slot'] : '') . '.');
+                    } elseif (query('do') === 'abort') {
                         require_permission('orders.place');
                         $reason = trim((string)($_POST['reason'] ?? ''));
                         if ($reason === '') {
@@ -835,7 +956,13 @@ function giacom_controller(): void
                 redirect($back($order));
             }
             $events = db_all('SELECT * FROM giacom_order_events WHERE order_id = ? ORDER BY event_date DESC, id DESC', [$order['id']]);
-            page('giacom_view', compact('order', 'events'), 'Giacom order ' . $order['giacom_order_id']);
+            $slots = null;
+            if (query('appointments') === '1' && can('orders.place')) {
+                $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
+                $slots = $check ? giacom_appointments($check, ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null], query('visit', 'NO_SITE_VISIT'))
+                    : ['appointments' => [], 'error' => 'The availability check for this order is no longer available.'];
+            }
+            page('giacom_view', compact('order', 'events', 'slots'), 'Giacom order ' . $order['giacom_order_id']);
             return;
 
         case 'sync':

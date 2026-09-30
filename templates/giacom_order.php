@@ -23,17 +23,30 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   </div>
   <?= $f('cli', 'Phone number on the line', 'tel', 'Needed for a migrate. Leave blank for a new provide with no line.') ?>
   <div data-when="order_type=migrate"><?= $f('access_line_id', 'Access line ID (optional)', 'text', 'For SOGEA/FTTP take-overs, if you have it') ?></div>
-  <?= $f('crd', 'Required by', 'date', $leadSource === 'lead time'
-      ? 'Giacom\'s earliest date for this product: ' . fmt_date($lead) . ($product['leadtime']['days'] ? ' (' . (int)$product['leadtime']['days'] . ' working days)' : '')
-      : ($leadSource === 'appointment' ? 'Giacom\'s first engineer appointment: ' . fmt_date($lead) : 'Giacom didn\'t give an earliest date for this product, so this is a guess. Check the lead time with Giacom.'), true) ?>
+  <div class="form-section wide"><h2>Install date</h2>
+    <p class="help"><?= $appointments
+        ? 'Giacom\'s earliest install date for this product here is <b>' . h(fmt_date($appointments[0]['date'])) . ($appointments[0]['slot'] ? ' (' . h($appointments[0]['slot']) . ')' : '') . '</b>. Choose it or another date below.'
+        : ($leadSource === 'lead time' ? 'Giacom\'s earliest date for this product: <b>' . h(fmt_date($lead)) . '</b>.' : 'Giacom didn\'t offer any install dates' . ($appointmentsError ? ' (' . h($appointmentsError) . ')' : '') . '. Enter the date you need.') ?></p></div>
   <?php if ($appointments): ?>
-    <div class="field"><span class="help"><b>Engineer appointments offered:</b> <?= h(implode(', ', array_map(fn($a) => fmt_date($a['date']) . ($a['slot'] ? ' ' . $a['slot'] : ''), array_slice($appointments, 0, 8)))) ?></span></div>
+    <div class="field wide <?= isset($errors['appointment']) ? 'has-error' : '' ?>">
+      <div class="appointment-grid">
+        <?php foreach ($appointments as $i => $a): $key = giacom_appointment_key($a); ?>
+          <label class="check"><input type="radio" name="appointment" value="<?= h($key) ?>" <?= $values['appointment'] === $key ? 'checked' : '' ?>>
+            <span><b><?= h(date('D j M', strtotime($a['date']))) ?></b> <?= h($a['slot']) ?><?= $i === 0 ? ' <span class="badge badge-active">Earliest</span>' : '' ?></span></label>
+        <?php endforeach; ?>
+        <label class="check"><input type="radio" name="appointment" value="" <?= $values['appointment'] === '' ? 'checked' : '' ?>><span>Another date (enter below)</span></label>
+      </div>
+      <?php if (isset($errors['appointment'])): ?><div class="error"><?= h($errors['appointment']) ?></div><?php endif; ?>
+    </div>
+    <div data-when="appointment="><?= $f('crd', 'Required by (if not one of the dates above)', 'date', 'Giacom will fit the install around this date') ?></div>
+  <?php else: ?>
+    <?= $f('crd', 'Required by', 'date', $leadSource === 'lead time' ? 'Earliest: ' . fmt_date($lead) : 'Check the lead time with Giacom', true) ?>
   <?php endif; ?>
-  <div class="field <?= isset($errors['care_level']) ? 'has-error' : '' ?>"><label for="g_care">Care level</label>
-    <select id="g_care" name="care_level"><?php foreach ($levels as $l): ?><option value="<?= h($l) ?>" <?= $values['care_level'] === $l ? 'selected' : '' ?>><?= h(GIACOM_CARE_LEVELS[$l] ?? ucfirst($l)) ?></option><?php endforeach; ?></select></div>
   <div class="field"><label for="g_visit">Engineer visit</label>
     <select id="g_visit" name="site_visit_reason"><?php foreach (['NO_SITE_VISIT' => 'Not needed', 'STANDARD_INSTALL' => 'Standard install', 'PREMIUM_INSTALL' => 'Premium install'] as $k => $l): ?><option value="<?= $k ?>" <?= $values['site_visit_reason'] === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
-    <div class="help">Giacom may still require a visit for some orders.</div></div>
+    <div class="help">The dates on offer depend on this. <button class="btn btn-sm" name="refresh" value="1" formnovalidate data-skip-confirm>Show dates for this</button></div></div>
+  <div class="field <?= isset($errors['care_level']) ? 'has-error' : '' ?>"><label for="g_care">Care level</label>
+    <select id="g_care" name="care_level"><?php foreach ($levels as $l): ?><option value="<?= h($l) ?>" <?= $values['care_level'] === $l ? 'selected' : '' ?>><?= h(GIACOM_CARE_LEVELS[$l] ?? ucfirst($l)) ?></option><?php endforeach; ?></select></div>
   <?php if (str_contains($product['technology'], 'fttp')): ?>
   <div class="field"><label for="g_ont">FTTP ONT</label>
     <select id="g_ont" name="force_new_ont"><option value="">Giacom decides</option><option value="Y" <?= $values['force_new_ont'] === 'Y' ? 'selected' : '' ?>>New ONT</option><option value="N" <?= $values['force_new_ont'] === 'N' ? 'selected' : '' ?>>Use existing ONT</option></select></div>

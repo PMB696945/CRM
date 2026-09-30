@@ -111,6 +111,8 @@ switch ($call) {
             'products' => [
                 ['product-id' => '34350', 'product-name' => 'Business FTTC 80/20', 'technology-type' => 'fttc', 'supplier-product-reference' => 'BT_21CN_FTTC', 'supplier-product-subtype' => 'plus',
                     'service-speed' => '80000000', 'care-level' => 'standard', 'care-level-options' => 'standard,enhanced'],
+                ['product-id' => '34370', 'product-name' => 'CityFibre FTTP 500', 'technology-type' => 'fttp', 'supplier' => 'CITYFIBRE', 'supplier-product-reference' => 'CF_FTTP', 'service-speed' => '500000000', 'expected-install-type' => 'Standard'],
+                ['product-id' => '34380', 'product-name' => 'SOGEA 80/20', 'technology-type' => 'sogea', 'supplier-product-reference' => 'BT_21CN_SOGEA', 'service-speed' => '80000000'],
                 ['product-id' => '34360', 'product-name' => 'Business FTTP 900', 'technology-type' => 'fttp', 'supplier-product-reference' => 'BT_FTTP', 'service-speed' => '900000000', 'realms' => [['realm' => 'isp.example'], ['realm' => '-public@GreatDSL']]],
             ],
         ]);
@@ -139,7 +141,17 @@ switch ($call) {
         $save();
         reply(['order-id' => $id, 'service-id' => '9' . $id]);
     case 'available_appointments':
-        reply(['appointments' => [['date' => date('Y-m-d', strtotime('+9 days')), 'timeslot' => 'PM'], ['date' => date('Y-m-d', strtotime('+8 days')), 'timeslot' => 'AM']]]);
+        $extra = ($req['site-visit-reason'] ?? '') === 'STANDARD_INSTALL' ? 5 : 0;
+        reply(['appointments' => [
+            ['date' => date('Y-m-d', strtotime('+' . (9 + $extra) . ' days')), 'timeslot' => 'PM', 'appointment-ref' => 'APT9'],
+            ['date' => date('Y-m-d', strtotime('+' . (8 + $extra) . ' days')), 'timeslot' => 'AM', 'appointment-ref' => 'APT8'],
+        ]]);
+    case 'address_match':
+        reply(['addresses' => [['addressRef' => 'A00012345679', 'uprn' => '77001234', 'postCode' => 'M1 3HE']]]);
+    case 'amend_order':
+        $state['orders'][$req['order-id']]['appointment'] = $req;
+        $save();
+        reply([]);
     case 'order_view':
         $o = $state['orders'][$req['order-id'] ?? ''] ?? null;
         if (!$o) {

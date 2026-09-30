@@ -509,4 +509,6 @@
   .address-list { @apply flex max-h-96 flex-col gap-1 overflow-y-auto rounded-xl border border-gray-200 p-2 dark:border-gray-800; }
   .stack .address-list label, .address-list label { @apply flex! flex-row! items-start gap-3 rounded-lg px-2 py-2 font-normal hover:bg-gray-50 has-[:checked]:bg-brand-50 dark:hover:bg-white/5 dark:has-[:checked]:bg-brand-500/10; }
   .address-list input, .choice-cards input { @apply mt-0.5 shrink-0; }
+  .appointment-grid { @apply grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3; }
+  .appointment-grid label { @apply flex! flex-row! items-center gap-3 rounded-lg border border-gray-200 px-3 py-2 font-normal has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:border-gray-800 dark:has-[:checked]:bg-brand-500/10; }
 }

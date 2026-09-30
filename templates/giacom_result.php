@@ -13,18 +13,34 @@
 </div>
 <?php if ($result['quick_text'] ?? null): ?><div class="flash <?= in_array($result['quick_result'], [5, 12], true) ? 'flash-success' : 'flash-info' ?>"><?= h($result['quick_text']) ?></div><?php endif; ?>
 
-<?php if ($result['products']): ?>
-<div class="table-wrap"><table class="table">
-  <thead><tr><th>Product</th><th>Technology</th><th>Speed</th><th>Estimated download</th><th>Care levels</th><th>Earliest date</th><?php if ($canOrder): ?><th></th><?php endif; ?></tr></thead>
+<?php if ($result['products']):
+    $rows = [];
+    foreach ($result['products'] as $i => $p) {
+        $p['supplier'] ??= giacom_supplier_name('', (string)$p['supplier_ref'], (string)$p['name']);
+        $p['tech_label'] ??= giacom_tech_label((string)$p['technology'], (string)$p['supplier_ref'], (string)$p['name']);
+        $p['mbps'] = $p['speed'] ? $p['speed'] / 1000000 : 0;
+        $rows[$i] = $p;
+    }
+    $suppliers = array_unique(array_column($rows, 'supplier')); sort($suppliers);
+    $techs = array_unique(array_column($rows, 'tech_label')); sort($techs); ?>
+<div class="filters" data-filter-for="giacom-products">
+  <select name="f_supplier" aria-label="Supplier"><option value="">Supplier: any</option><?php foreach ($suppliers as $x): ?><option value="<?= h($x) ?>"><?= h($x) ?></option><?php endforeach; ?></select>
+  <select name="f_tech" aria-label="Technology"><option value="">Technology: any</option><?php foreach ($techs as $x): ?><option value="<?= h($x) ?>"><?= h($x) ?></option><?php endforeach; ?></select>
+  <select name="f_speed" aria-label="Speed"><option value="0">Speed: any</option><?php foreach ([10, 30, 70, 150, 300, 500, 900] as $mb): ?><option value="<?= $mb ?>">At least <?= $mb ?> Mbps</option><?php endforeach; ?></select>
+  <span class="muted small" data-filter-count></span>
+</div>
+<div class="table-wrap"><table class="table" id="giacom-products">
+  <thead><tr><th>Product</th><th>Supplier</th><th>Technology</th><th>Speed</th><th>Estimated download</th><th>Care levels</th><th>Earliest date</th><?php if ($canOrder): ?><th></th><?php endif; ?></tr></thead>
   <tbody>
-  <?php foreach ($result['products'] as $i => $p): ?>
-    <tr>
-      <td><b><?= h($p['name']) ?></b><div class="muted small"><?= h($p['product_id']) ?> · <?= h($p['supplier_ref']) ?></div></td>
-      <td><?= h(strtoupper($p['technology'])) ?></td>
+  <?php foreach ($rows as $i => $p): ?>
+    <tr data-supplier="<?= h($p['supplier']) ?>" data-tech="<?= h($p['tech_label']) ?>" data-speed="<?= h((string)$p['mbps']) ?>">
+      <td><b><?= h($p['name']) ?></b><div class="muted small"><?= h($p['product_id']) ?> · <?= h($p['supplier_ref']) ?><?= !empty($p['install_type']) ? ' · ' . h($p['install_type']) . ' install' : '' ?></div></td>
+      <td><?= h($p['supplier']) ?></td>
+      <td><?= h($p['tech_label']) ?></td>
       <td><?= h(giacom_mbps($p['speed'])) ?></td>
       <td><?= $p['estimate'] ? h(giacom_mbps($p['estimate']['down'], 'kbps')) . '<div class="muted small">up ' . h(giacom_mbps($p['estimate']['up'], 'kbps')) . '</div>' : ($p['likely_range'] ? h(giacom_mbps($p['likely_range'][0]) . ' – ' . giacom_mbps($p['likely_range'][1])) : '<span class="muted">—</span>') ?></td>
       <td class="small"><?= h(implode(', ', array_map('ucfirst', $p['care_levels']))) ?: '<span class="muted">—</span>' ?></td>
-      <td><?= $p['leadtime'] ? h(fmt_date($p['leadtime']['first_date'])) . '<div class="muted small">' . (int)$p['leadtime']['days'] . ' working days</div>' : '<span class="muted">—</span>' ?></td>
+      <td><?= $p['leadtime'] ? h(fmt_date($p['leadtime']['first_date'])) . '<div class="muted small">' . (int)$p['leadtime']['days'] . ' working days</div>' : '<span class="muted">On order</span>' ?></td>
       <?php if ($canOrder): ?><td class="right"><a class="btn btn-sm btn-primary" href="<?= h(url('giacom', ['action' => 'order', 'check' => $check['id'], 'product' => $i])) ?>">Order</a></td><?php endif; ?>
     </tr>
   <?php endforeach; ?>
