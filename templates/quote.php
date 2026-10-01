@@ -111,7 +111,8 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
     <section class="card">
       <div class="card-head"><h2>Customer link</h2></div>
       <div class="copy-row"><input id="quote-link" readonly value="<?= h(quote_public_url($quote)) ?>" data-select-all><button type="button" class="btn btn-sm" data-copy="#quote-link">Copy</button></div>
-      <p class="help mt-2">Anyone with this link can view and respond to the quote.</p>
+      <p class="help mt-2">Anyone with this link can view and respond to the quote. <a href="<?= h(quote_public_url($quote)) ?>" target="_blank" rel="noopener">Open it as the customer sees it ↗</a></p>
+      <?php if ($warn = app_url_mismatch()): ?><p class="help text-warning mt-2"><?= h($warn) ?> <a href="<?= h(url('settings')) ?>">Settings</a></p><?php endif; ?>
     </section>
     <?php endif; ?>
 

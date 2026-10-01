@@ -41,12 +41,18 @@ function xero_redirect_uri(): string
     if ($fixed = setting('xero_redirect_uri')) {
         return $fixed;
     }
+    return detected_app_url() . '/xero-callback.php';
+}
+
+/** The address this request reached the CRM at, e.g. https://example.com/crm (no trailing slash). */
+function detected_app_url(): string
+{
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
         || strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
     $dir = str_ends_with($path, '/') ? rtrim($path, '/') : rtrim(dirname($path), '/\\');
-    return ($https ? 'https' : 'http') . '://' . $host . $dir . '/xero-callback.php';
+    return ($https ? 'https' : 'http') . '://' . $host . $dir;
 }
 
 function xero_authorize_url(string $state, string $redirectUri): string

@@ -12,7 +12,8 @@
       <div class="field"><label for="s_cp">Phone</label><input id="s_cp" name="company_phone" value="<?= $v('company_phone') ?>"></div>
       <div class="field"><label for="s_ce">Email</label><input id="s_ce" type="email" name="company_email" value="<?= $v('company_email') ?>"></div>
       <div class="field wide"><label for="s_url">CRM web address</label><input id="s_url" name="app_url" value="<?= $v('app_url') ?>" placeholder="<?= h($detectedUrl) ?>">
-        <div class="help">Used for links in emails. Leave blank to use <?= h($detectedUrl) ?>. Set it if emails sent by the cron job have the wrong link.</div></div>
+        <div class="help">Used for links in emails, such as the customer's quote link. Leave blank to use the address you're using now, <?= h($detectedUrl) ?>. Only set it if emails sent by the cron job have the wrong link.</div>
+        <?php if ($warn = app_url_mismatch()): ?><div class="error"><?= h($warn) ?></div><?php endif; ?></div>
     </section>
 
     <section class="card form-grid">

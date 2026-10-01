@@ -457,7 +457,7 @@ function settings_controller(): void
         }
         redirect(url('settings'));
     }
-    page('settings', ['detectedUrl' => preg_replace('#/xero-callback\.php$#', '', xero_redirect_uri())], 'Settings');
+    page('settings', ['detectedUrl' => detected_app_url()], 'Settings');
 }
 
 function signable_controller(): void

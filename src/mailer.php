@@ -232,5 +232,25 @@ function app_url(): string
     if ($fixed = setting('app_url')) {
         return rtrim($fixed, '/');
     }
-    return preg_replace('#/xero-callback\.php$#', '', xero_redirect_uri());
+    return detected_app_url();
+}
+
+/**
+ * When the "CRM web address" setting doesn't match the address the CRM is being
+ * used at, links in emails (quotes, contracts) go to the wrong place. Returns a
+ * warning, or null when they match (or there's no request to compare with).
+ */
+function app_url_mismatch(): ?string
+{
+    $set = rtrim((string)setting('app_url'), '/');
+    if ($set === '' || PHP_SAPI === 'cli') {
+        return null;
+    }
+    $here = detected_app_url();
+    $norm = fn($u) => strtolower(preg_replace('#^https?://#i', '', rtrim($u, '/')));
+    if ($norm($set) === $norm($here)) {
+        return null;
+    }
+    return "Links in emails use the CRM web address $set (Settings), but you're using the CRM at $here. "
+        . 'If customers can\'t open links, change or clear that setting.';
 }
