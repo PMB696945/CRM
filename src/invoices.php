@@ -152,6 +152,62 @@ function invoice_schema(): array
     ];
 }
 
+/** Seconds to wait before retry $attempt (1, 2, …): exponential with jitter, or the server's retry-after (capped). */
+function anthropic_retry_delay(int $attempt, ?string $retryAfter): float
+{
+    if ($retryAfter !== null && is_numeric($retryAfter)) {
+        return min(20.0, max(0.0, (float)$retryAfter));
+    }
+    return min(8.0, 2 ** ($attempt - 1)) * (0.75 + mt_rand() / mt_getrandmax() * 0.5);
+}
+
+/**
+ * POST to the Messages API, retrying when Anthropic is briefly unavailable:
+ * rate limits (429), overloaded (529), other server errors (5xx), timeouts (408),
+ * lock conflicts (409) and dropped connections. Up to 3 attempts in all, the same
+ * as the official SDKs. Other errors (bad key, bad request) aren't retried.
+ * Returns [status, decoded body].
+ */
+function anthropic_request(string $key, array $body, int $attempts = 3): array
+{
+    $url = (config('anthropic_url') ?? 'https://api.anthropic.com') . '/v1/messages';
+    $payload = json_encode($body);
+    for ($attempt = 1; ; $attempt++) {
+        $headers = [
+            'Content-Type: application/json',
+            'x-api-key: ' . $key,
+            'anthropic-version: 2023-06-01',
+            'anthropic-beta: server-side-fallback-2026-07-01',
+        ];
+        try {
+            [$status, $res, $responseHeaders] = http_request('POST', $url, $headers, $payload, 180);
+        } catch (IntegrationException $e) {
+            // Couldn't connect, or the connection dropped.
+            if ($attempt >= $attempts) {
+                throw new IntegrationException("Couldn't reach Claude after $attempts tries: " . $e->getMessage());
+            }
+            anthropic_sleep(anthropic_retry_delay($attempt, null));
+            continue;
+        }
+        $retryable = in_array($status, [408, 409, 429], true) || $status >= 500;
+        if (!$retryable || $attempt >= $attempts) {
+            return [$status, $res];
+        }
+        // The API says when to retry; it also says when not to.
+        if (strtolower((string)($responseHeaders['x-should-retry'] ?? '')) === 'false') {
+            return [$status, $res];
+        }
+        anthropic_sleep(anthropic_retry_delay($attempt, $responseHeaders['retry-after'] ?? null));
+    }
+}
+
+function anthropic_sleep(float $seconds): void
+{
+    if ($seconds > 0 && !config('anthropic_no_sleep')) {
+        usleep((int)($seconds * 1000000));
+    }
+}
+
 /** Read an invoice file with Claude. Returns the fields, or throws IntegrationException. */
 function invoice_read_claude(string $path, string $mime): array
 {
@@ -174,12 +230,7 @@ function invoice_read_claude(string $path, string $mime): array
         'fallbacks' => 'default',
         'messages' => [['role' => 'user', 'content' => [$file, ['type' => 'text', 'text' => $prompt]]]],
     ];
-    [$status, $res] = http_request('POST', (config('anthropic_url') ?? 'https://api.anthropic.com') . '/v1/messages', [
-        'Content-Type: application/json',
-        'x-api-key: ' . $key,
-        'anthropic-version: 2023-06-01',
-        'anthropic-beta: server-side-fallback-2026-07-01',
-    ], json_encode($body), 180);
+    [$status, $res] = anthropic_request($key, $body);
     if ($status !== 200 || !is_array($res)) {
         $msg = is_array($res) ? ($res['error']['message'] ?? json_encode($res)) : substr((string)$res, 0, 200);
         throw new IntegrationException("Claude couldn't read the invoice ($status): $msg");

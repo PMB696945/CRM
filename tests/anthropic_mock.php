@@ -12,8 +12,18 @@ if (($body['output_config']['format']['type'] ?? '') !== 'json_schema') $problem
 if (isset($body['thinking']) || isset($body['temperature'])) $problems[] = 'unsupported params';
 $file = $body['messages'][0]['content'][0] ?? [];
 if (!in_array($file['type'] ?? '', ['document', 'image'], true) || ($file['source']['type'] ?? '') !== 'base64') $problems[] = 'file block';
-file_put_contents($state, json_encode(['last' => $body, 'problems' => $problems]));
+$prev = is_file($state) ? (json_decode((string)file_get_contents($state), true) ?: []) : [];
+$requests = (int)($prev['requests'] ?? 0) + 1;
+file_put_contents($state, json_encode(['last' => $body, 'problems' => $problems, 'requests' => $requests]));
 header('Content-Type: application/json');
+// Simulated outages: "$state.fail" holds "count status" (e.g. "2 529"); each request uses one up.
+if (is_file("$state.fail") && ([$left, $code] = array_map('intval', explode(' ', trim(file_get_contents("$state.fail"))) + [0, 529])) && $left > 0) {
+    file_put_contents("$state.fail", ($left - 1) . " $code");
+    http_response_code($code);
+    if ($code === 429) header('retry-after: 0');
+    echo json_encode(['type' => 'error', 'error' => ['type' => $code === 429 ? 'rate_limit_error' : 'overloaded_error', 'message' => $code === 429 ? 'Rate limited' : 'Overloaded']]);
+    exit;
+}
 if ($problems) {
     http_response_code(400);
     echo json_encode(['type' => 'error', 'error' => ['type' => 'invalid_request_error', 'message' => implode(', ', $problems)]]);

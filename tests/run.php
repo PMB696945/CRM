@@ -2032,10 +2032,28 @@ test('supplier invoices are read and matched to their purchase order, with warni
     ok(str_contains(implode(' ', $problems($c)), 'under by £55.50'), implode(' ', $problems($c)));
     @unlink("$anthState.po");
     eq('Switch', json_decode($cr['line_items'], true)[0]['description']);
+    // Brief outages are retried: two "overloaded" replies, then success.
+    config_ref()['anthropic_no_sleep'] = true;
+    $retry = fn(string $fail) => (file_put_contents("$anthState.fail", $fail) || true) && (file_put_contents($anthState, json_encode(['requests' => 0])) || true);
+    $retry('2 529');
+    $r1 = invoice_upload(['name' => 'scan2.png', 'tmp_name' => $png, 'error' => UPLOAD_ERR_OK], null, null, false);
+    eq(['claude', 3], [$row($r1)['reader'], json_decode(file_get_contents($anthState), true)['requests']], 'third attempt succeeded');
+    $retry('1 429');
+    $r2 = invoice_upload(['name' => 'scan3.png', 'tmp_name' => $png, 'error' => UPLOAD_ERR_OK], null, null, false);
+    eq(['claude', 2], [$row($r2)['reader'], json_decode(file_get_contents($anthState), true)['requests']], 'rate limit retried');
+    $retry('5 529');
+    $r3 = invoice_upload(['name' => 'scan4.png', 'tmp_name' => $png, 'error' => UPLOAD_ERR_OK], null, null, false);
+    eq(3, json_decode(file_get_contents($anthState), true)['requests'], 'gives up after 3 attempts');
+    ok(str_contains(implode(' ', $problems($r3)), "Claude couldn't read the invoice (529)"));
+    @unlink("$anthState.fail");
+    $retry('0 529');
     set_setting('anthropic_api_key', 'wrong');
     $bad = invoice_upload(['name' => 'inv.pdf', 'tmp_name' => make_test_invoice_pdf(['Kit Distribution Ltd', 'Invoice No: KD-4009', 'Total £5.00']), 'error' => UPLOAD_ERR_OK], null, null, false);
     eq(['builtin', 'KD-4009'], [$row($bad)['reader'], $row($bad)['invoice_number']], 'falls back to the built-in reader if Claude fails');
     ok(str_contains(implode(' ', $problems($bad)), "Claude couldn't read the invoice"));
+    eq(1, json_decode(file_get_contents($anthState), true)['requests'], 'a bad key (400) is not retried');
+    db_exec('DELETE FROM supplier_invoices WHERE id IN (?, ?, ?)', [$r1, $r2, $r3]);
+    ok(anthropic_retry_delay(1, '7') === 7.0 && anthropic_retry_delay(1, '600') === 20.0 && anthropic_retry_delay(3, null) <= 5.0);
     set_setting('invoice_reader', 'builtin');
     set_setting('anthropic_api_key', null);
 
