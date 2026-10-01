@@ -742,6 +742,12 @@ for ($i = 0; $i < 50 && (!@fsockopen('127.0.0.1', $smtpPort) || !@fsockopen('127
 $cfg = &config_ref();
 $cfg['signable_url'] = "http://127.0.0.1:$sgPort/v1";
 $cfg['storage_path'] = sys_get_temp_dir() . '/crm_storage_' . getmypid();
+$anthState = sys_get_temp_dir() . '/crm_anth_' . getmypid() . '.json';
+$anthPort = 17000 + getmypid() % 1000;
+$anthProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$anthPort", APP_ROOT . '/tests/anthropic_mock.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p9, null, ['MOCK_STATE' => $anthState] + getenv());
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $anthPort); $i++) {
+    usleep(100000);
+}
 function sent_mails(): array { global $smtpDir; $files = glob("$smtpDir/*.eml") ?: []; sort($files); return array_map('file_get_contents', $files); }
 function mail_body(string $raw): string { preg_match_all('/Content-Transfer-Encoding: base64\r?\n\r?\n([A-Za-z0-9+\/=\r\n]+)/', $raw, $m); return implode("\n", array_map(fn($b) => base64_decode(preg_replace('/\s+/', '', $b)), $m[1])); }
 function sg_state(): array { global $sgState; return json_decode(file_get_contents($sgState), true); }
@@ -1834,7 +1840,162 @@ test('purchase orders: lines, totals, emailing the supplier and receiving', func
     try { db_exec('DELETE FROM suppliers WHERE id = ?', [$supplier['id']]); throw new Exception('expected'); } catch (PDOException $e) { eq(1451, (int)$e->errorInfo[1], 'suppliers with orders are kept'); }
 });
 
+test('orders raise a purchase order per supplier, emailed and linked; portal/API suppliers are left out', function () use (&$docIds) {
+    as_role('super_admin');
+    $acct = $docIds['acct'];
+    $kit = (int)db_value("SELECT id FROM suppliers WHERE name = 'Kit Distribution Ltd'");
+    $giacom = (int)db_value("SELECT id FROM suppliers WHERE name = 'Giacom'");
+    eq('api', db_value('SELECT ordering FROM suppliers WHERE id = ?', [$giacom]), 'Giacom is ordered through the integration');
+    $other = create('suppliers', ['name' => 'Phones Direct', 'active' => '1', 'email' => 'po@phones.example', 'ordering' => 'email']);
+    $mk = fn($sku, $name, $cat) => create('products', ['sku' => $sku, 'name' => $name, 'category' => $cat, 'billing_frequency' => 'monthly', 'monthly_price' => '30', 'term_months' => '36', 'active' => '1']);
+    $router = $mk('T-RTR2', 'Router (rented)', 'hardware');
+    $handset = $mk('T-HS', 'Desk phone', 'hardware');
+    $fibre = $mk('T-FIB', 'Fibre 900', 'broadband');
+    create('supplier_products', ['supplier_id' => $kit, 'supplier_sku' => 'RT-9', 'description' => 'Router 9', 'product_id' => $router, 'cost_price' => '6.00', 'setup_cost' => '40', 'billing_frequency' => 'monthly', 'preferred' => '1', 'active' => '1']);
+    create('supplier_products', ['supplier_id' => $other, 'supplier_sku' => 'YL-T54', 'description' => 'Yealink T54W', 'product_id' => $handset, 'cost_price' => '95.00', 'billing_frequency' => 'yearly', 'preferred' => '1', 'active' => '1']);
+    create('supplier_products', ['supplier_id' => $giacom, 'supplier_sku' => 'FTTP900', 'description' => 'FTTP 900', 'product_id' => $fibre, 'cost_price' => '32.00', 'billing_frequency' => 'monthly', 'preferred' => '1', 'active' => '1']);
+
+    db_exec('INSERT INTO quotes (account_id, title, created_by, status, recipient_name, recipient_email) VALUES (?, ?, 1, ?, ?, ?)', [$acct, 'Office kit', 'sent', 'Bea Boss', 'bea@files.example']);
+    $qid = (int)db()->lastInsertId();
+    db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
+    quote_save_lines($qid, [
+        ['product_id' => $router, 'service_type' => 'hardware', 'description' => 'Router', 'quantity' => 2, 'monthly_price' => 10, 'setup_fee' => 0, 'term_months' => 36],
+        ['product_id' => $handset, 'service_type' => 'hardware', 'description' => 'Desk phones', 'quantity' => 5, 'monthly_price' => 8, 'setup_fee' => 0, 'term_months' => 36],
+        ['product_id' => $fibre, 'service_type' => 'broadband', 'description' => 'Fibre', 'quantity' => 1, 'monthly_price' => 60, 'setup_fee' => 0, 'term_months' => 36],
+        ['product_id' => null, 'service_type' => 'other', 'description' => 'Cabling', 'quantity' => 1, 'monthly_price' => 0, 'setup_fee' => 150, 'term_months' => 1],
+    ]);
+    quote_accept(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'Bea Boss', '198.51.100.7', false, 'bea@files.example', 'Firefox', false);
+    $order = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$qid]);
+    $plan = order_po_plan($order);
+    eq([$kit, $other], array_keys($plan['suppliers']));
+    eq([['Router 9 (monthly)', 2, 6.0], ['Setup / one-off: Router 9', 2, 40.0]], array_map(fn($l) => [$l['description'], $l['quantity'], $l['unit_cost']], $plan['suppliers'][$kit]['lines']));
+    eq(['Fibre', 'Cabling'], array_column($plan['skipped'], 0), 'Giacom (integration) and the custom line are left out');
+    ok(str_contains($plan['skipped'][0][1], 'integration'));
+
+    $before = count(sent_mails());
+    $r = order_raise_purchase_orders($order, null, true);
+    usleep(300000);
+    eq(2, count($r));
+    eq(['orders@kit.example', 'po@phones.example'], array_column($r, 'emailed_to'));
+    $pos = order_purchase_orders((int)$order['id']);
+    eq(['sent', 'sent'], array_column($pos, 'status'));
+    eq(92.0, (float)$pos[0]['total'], '2 × £6 + 2 × £40');
+    $mails = array_slice(sent_mails(), $before);
+    ok(str_contains(mail_body($mails[0]), $pos[0]['reference']) && str_contains(mail_body($mails[0]), 'Files & Co Ltd'), 'supplier email names the PO and the customer');
+    ok(str_contains((string)db_value('SELECT note FROM customer_order_events WHERE order_id = ? ORDER BY id DESC LIMIT 1', [$order['id']]), $pos[0]['reference']), 'noted on the order');
+    $again = order_po_plan($order);
+    eq([], $again['suppliers'], 'already ordered');
+    ok(str_contains(implode(' ', array_column($again['skipped'], 1)), 'Already on ' . $pos[0]['reference']));
+    $GLOBALS['invoiceTest'] = ['po' => $pos[0], 'kit' => $kit, 'other' => $other];
+});
+
+function make_test_invoice_pdf(array $lines): string
+{
+    $pdf = new SimplePdf(50, 'Invoice');
+    $pdf->addPage();
+    foreach ($lines as $l) {
+        $pdf->text(50, $pdf->y, $l, 10);
+        $pdf->y += 16;
+    }
+    $path = tempnam(sys_get_temp_dir(), 'inv') . '.pdf';
+    file_put_contents($path, $pdf->output());
+    return $path;
+}
+
+test('PDF text: plain fonts, and compressed streams with embedded fonts (ToUnicode)', function () {
+    $text = pdf_extract_text(file_get_contents(make_test_invoice_pdf(['Kit Distribution Ltd', 'Invoice No: KD-1', 'Total £1,234.50'])));
+    eq("Kit Distribution Ltd\nInvoice No: KD-1\nTotal £1,234.50", $text);
+    // Hand-made PDF like accounting software writes: Type0 font, two-byte codes, Flate-compressed, kerning moves.
+    $cmap = "/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange\n2 beginbfrange\n<0024> <003D> <0041>\n<0044> <005D> <0061>\nendbfrange\n2 beginbfchar\n<0003> <0020>\n<0011> <002E>\nendbfchar\nendcmap";
+    $code = fn($s) => implode('', array_map(fn($c) => sprintf('%04X', ctype_upper($c) ? ord($c) - 29 : (ctype_lower($c) ? ord($c) - 29 : ($c === ' ' ? 3 : 17))), str_split($s)));
+    $content = "BT /F1 10 Tf 1 0 0 1 50 700 Tm <" . $code('T') . "> Tj 6.1 0 Td <" . $code('otal due') . "> Tj ET\nBT /F1 10 Tf 1 0 0 1 50 680 Tm [<" . $code('Ref') . "> -300 <" . $code('ABC') . ">] TJ ET";
+    $z = gzcompress($content);
+    $zc = gzcompress($cmap);
+    $raw = "%PDF-1.7\n1 0 obj << /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /DescendantFonts [2 0 R] /ToUnicode 3 0 R >> endobj\n"
+        . "2 0 obj << /Type /Font /Subtype /CIDFontType2 /DW 1000 /W [55 [610]] >> endobj\n"
+        . "3 0 obj << /Length " . strlen($zc) . " /Filter /FlateDecode >> stream\n$zc\nendstream endobj\n"
+        . "4 0 obj << /Type /Page /Resources << /Font << /F1 1 0 R >> >> /Contents 5 0 R >> endobj\n"
+        . "5 0 obj << /Length " . strlen($z) . " /Filter /FlateDecode >> stream\n$z\nendstream endobj\n%%EOF";
+    eq("Total due\nRef ABC", pdf_extract_text($raw), 'kerning move not taken as a space; TJ gap is');
+});
+
+test('supplier invoices are read and matched to their purchase order, with warnings when they differ', function () {
+    ['po' => $po, 'kit' => $kit, 'other' => $other] = $GLOBALS['invoiceTest'];
+    $upload = fn(array $lines) => invoice_upload(['name' => 'invoice.pdf', 'tmp_name' => make_test_invoice_pdf($lines), 'error' => UPLOAD_ERR_OK], null, null, false);
+    $row = fn($id) => db_one('SELECT * FROM supplier_invoices WHERE id = ?', [$id]);
+    $problems = fn($id) => json_decode((string)$row($id)['problems'], true) ?: [];
+    set_setting('invoice_reader', 'builtin');
+
+    // A good one: matched by PO number, supplier and amount.
+    $good = $upload(['Kit Distribution Ltd', 'VAT Reg No: GB 123 4567 89', 'Invoice No: KD-4001', 'Invoice Date: 03/10/2026', 'Your order ref: ' . $po['reference'],
+        'Subtotal £92.00', 'VAT @ 20% £18.40', 'Total due £110.40']);
+    $g = $row($good);
+    eq(['KD-4001', '2026-10-03', 92.0, 18.4, 110.4, $kit, (int)$po['id'], 'matched', 'builtin'],
+        [$g['invoice_number'], $g['invoice_date'], (float)$g['net'], (float)$g['vat'], (float)$g['total'], (int)$g['supplier_id'], (int)$g['po_id'], $g['status'], $g['reader']]);
+    eq([], $problems($good));
+
+    // Wrong amount, and the same PO billed again: warned, and the team is emailed.
+    $before = count(sent_mails());
+    $over = $upload(['Kit Distribution Ltd', 'Invoice No: KD-4002', 'PO number: ' . $po['reference'], 'Net total £120.00', 'VAT £24.00', 'Total £144.00']);
+    usleep(300000);
+    eq('needs_review', $row($over)['status']);
+    $p = implode(' ', $problems($over));
+    ok(str_contains($p, 'over by £28.00'), $p);
+    ok(str_contains($p, 'already been invoiced'), $p);
+    ok((bool)array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'Invoice to check')), 'warning emailed');
+
+    // No PO number; duplicate invoice number; unknown PO; wrong supplier.
+    $noPo = $upload(['Kit Distribution Ltd', 'Invoice No: KD-4003', 'Total £10.00']);
+    ok(str_contains(implode(' ', $problems($noPo)), 'no purchase order number'));
+    $dup = $upload(['Kit Distribution Ltd', 'Invoice No: KD-4001', 'Order ref: ' . $po['reference'], 'Subtotal £92.00', 'Total £110.40']);
+    ok(str_contains(implode(' ', $problems($dup)), 'duplicate'));
+    $unknown = $upload(['Kit Distribution Ltd', 'Invoice No: KD-4004', 'PO: PO-999999', 'Total £10.00']);
+    ok(str_contains(implode(' ', $problems($unknown)), "doesn't match any of ours"));
+    $wrong = $upload(['Phones Direct', 'Invoice No: PD-1', 'Your order ref: ' . $po['reference'], 'Subtotal £92.00', 'Total £110.40']);
+    ok(str_contains(implode(' ', $problems($wrong)), 'was raised with Kit Distribution Ltd'));
+    $png = tempnam(sys_get_temp_dir(), 'png');
+    file_put_contents($png, base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='));
+    // A scan (no text) with the built-in reader asks for Claude or manual entry.
+    $img = invoice_upload(['name' => 'photo.jpg', 'tmp_name' => $png, 'error' => UPLOAD_ERR_OK], (int)$po['id'], null, false);
+    ok(str_contains(implode(' ', $problems($img)), 'Photos can only be read with Claude'));
+
+    // Claude reads it instead (stand-in API checks the request).
+    global $anthPort, $anthState;
+    config_ref()['anthropic_url'] = "http://127.0.0.1:$anthPort";
+    set_setting('invoice_reader', 'claude');
+    set_setting('anthropic_api_key', 'sk-ant-test');
+    eq('claude', invoice_reader());
+    file_put_contents("$anthState.po", $po['reference']);
+    $c = invoice_upload(['name' => 'scan.png', 'tmp_name' => $png, 'error' => UPLOAD_ERR_OK], null, null, false);
+    $state = json_decode(file_get_contents($anthState), true);
+    eq([], $state['problems'], 'request shape');
+    eq(['claude-opus-5-5', 'low', 'image'], [$state['last']['model'], $state['last']['output_config']['effort'], $state['last']['messages'][0]['content'][0]['type']]);
+    $cr = $row($c);
+    eq(['KD-5001', 'claude', $kit, (int)$po['id'], 36.5], [$cr['invoice_number'], $cr['reader'], (int)$cr['supplier_id'], (int)$cr['po_id'], (float)$cr['net']]);
+    ok(str_contains(implode(' ', $problems($c)), 'under by £55.50'), implode(' ', $problems($c)));
+    @unlink("$anthState.po");
+    eq('Switch', json_decode($cr['line_items'], true)[0]['description']);
+    set_setting('anthropic_api_key', 'wrong');
+    $bad = invoice_upload(['name' => 'inv.pdf', 'tmp_name' => make_test_invoice_pdf(['Kit Distribution Ltd', 'Invoice No: KD-4009', 'Total £5.00']), 'error' => UPLOAD_ERR_OK], null, null, false);
+    eq(['builtin', 'KD-4009'], [$row($bad)['reader'], $row($bad)['invoice_number']], 'falls back to the built-in reader if Claude fails');
+    ok(str_contains(implode(' ', $problems($bad)), "Claude couldn't read the invoice"));
+    set_setting('invoice_reader', 'builtin');
+    set_setting('anthropic_api_key', null);
+
+    // Correcting by hand re-matches; approving records who.
+    db_exec('UPDATE supplier_invoices SET net = 92, vat = 18.40, total = 110.40, invoice_number = ? WHERE id = ?', ['KD-4002b', $over]);
+    db_exec('DELETE FROM supplier_invoices WHERE id IN (?, ?, ?)', [$dup, $wrong, $c]);
+    db_exec('UPDATE supplier_invoices SET status = ? WHERE id = ?', ['disputed', $good]);
+    eq([], invoice_match($over), 'now matches once the first invoice is disputed');
+    eq('matched', $row($over)['status']);
+    eq(['KD-1', 9.5], [invoice_read_text("Invoice no: KD-1\nTotal: 9.50")['invoice_number'], invoice_read_text("Invoice no: KD-1\nTotal: 9.50")['gross_total']]);
+    eq(['2026-03-04', '2026-10-03', null], [invoice_date('04/03/2026'), invoice_date('3rd October 2026'), invoice_date('')]);
+    eq([1234.5, 1234.5, null], [invoice_amount('£1,234.50'), invoice_amount('1234,50'), invoice_amount('n/a')]);
+});
+
 proc_terminate($sinkProc);
+proc_terminate($anthProc);
+@unlink($anthState);
 proc_terminate($sgProc);
 @unlink($sgState);
 array_map('unlink', glob("$smtpDir/*") ?: []);

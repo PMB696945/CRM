@@ -3,6 +3,7 @@
 <form method="get" class="card stack" style="max-width:32rem">
   <input type="hidden" name="page" value="purchase_orders"><input type="hidden" name="action" value="new">
   <?php if ($accountId): ?><input type="hidden" name="account_id" value="<?= (int)$accountId ?>"><?php endif; ?>
+  <?php if (!empty($orderId)): ?><input type="hidden" name="customer_order_id" value="<?= (int)$orderId ?>"><?php endif; ?>
   <label>Who are you ordering from?
     <select name="supplier_id" required><option value="">Choose a supplier…</option>
       <?php foreach ($suppliers as $s): ?><option value="<?= (int)$s['id'] ?>"><?= h($s['name']) ?></option><?php endforeach; ?>

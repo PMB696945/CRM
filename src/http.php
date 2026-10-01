@@ -9,7 +9,7 @@ class IntegrationException extends RuntimeException
 /**
  * Minimal HTTP client. Returns [status, decoded JSON body (or raw string), lower-cased headers].
  */
-function http_request(string $method, string $url, array $headers = [], ?string $body = null): array
+function http_request(string $method, string $url, array $headers = [], ?string $body = null, int $timeout = 60): array
 {
     $responseHeaders = [];
     $ch = curl_init($url);
@@ -18,7 +18,7 @@ function http_request(string $method, string $url, array $headers = [], ?string 
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER     => $headers,
         CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT        => 60,
+        CURLOPT_TIMEOUT        => $timeout,
         CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$responseHeaders) {
             if (str_contains($line, ':')) {
                 [$k, $v] = explode(':', $line, 2);

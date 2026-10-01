@@ -271,3 +271,15 @@ document.querySelectorAll('[data-order-step]').forEach((form) => {
     last = msg;
   });
 });
+
+// Show options that only apply to one order step (e.g. raising purchase orders when processing).
+document.querySelectorAll('[data-order-step]').forEach((form) => {
+  const select = form.querySelector('[data-step-select]');
+  const sync = () => form.querySelectorAll('[data-when-step]').forEach((el) => {
+    const on = el.dataset.whenStep === select.value;
+    el.hidden = !on;
+    el.querySelectorAll('input').forEach((i) => { i.disabled = !on; });
+  });
+  select.addEventListener('change', sync);
+  sync();
+});

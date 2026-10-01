@@ -44,6 +44,23 @@
   </section>
 
   <section class="card form-grid">
+    <h2 class="wide">Supplier invoices</h2>
+    <p class="wide muted">Uploaded supplier invoices are read and matched to their purchase order. The built-in reader handles PDFs made by accounting software; Claude reads anything, including scans and phone photos, and is more accurate on unusual layouts.</p>
+    <div class="field"><label for="s_ir">Read invoices with</label>
+      <select id="s_ir" name="invoice_reader">
+        <option value="builtin" <?= setting('invoice_reader') !== 'claude' ? 'selected' : '' ?>>Built-in reader (PDFs with text, free)</option>
+        <option value="claude" <?= setting('invoice_reader') === 'claude' ? 'selected' : '' ?>>Claude (any PDF or photo; uses your Anthropic API key)</option>
+      </select></div>
+    <div class="field"><label for="s_ak">Anthropic API key</label><input id="s_ak" type="password" name="anthropic_api_key" autocomplete="new-password" placeholder="<?= setting('anthropic_api_key') ? '•••••••• saved (leave blank to keep)' : 'sk-ant-…' ?>">
+      <div class="help">From <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Stored encrypted. Each invoice read costs a few pence.</div></div>
+    <div class="field"><label for="s_im">Claude model</label><input id="s_im" name="invoice_model" value="<?= $v('invoice_model') ?>" placeholder="<?= h(INVOICE_DEFAULT_MODEL) ?>" spellcheck="false"></div>
+    <div class="field"><label for="s_it">Allowed difference from the PO (£)</label><input id="s_it" name="invoice_tolerance" value="<?= h(setting('invoice_tolerance') ?? '1.00') ?>" inputmode="decimal">
+      <div class="help">Invoices further than this from their purchase order (before VAT) are flagged.</div></div>
+    <div class="field"><label for="s_ia">Send invoice warnings to</label><input id="s_ia" type="email" name="invoice_alert_email" value="<?= $v('invoice_alert_email') ?>" placeholder="Everyone who can raise purchase orders">
+      <div class="help">Leave blank to email everyone whose role can raise purchase orders.</div></div>
+  </section>
+
+  <section class="card form-grid">
     <h2 class="wide">Orders</h2>
     <p class="wide muted">When a quote is accepted an order is created and the team below is alerted. As they move it through the steps, the customer is emailed with the message for that step (which can be changed each time).</p>
     <div class="field"><label for="s_og">Onboarding team</label>

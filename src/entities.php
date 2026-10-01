@@ -454,6 +454,9 @@ function entities(): array
                 'name'           => ['label' => 'Name', 'type' => 'text', 'required' => true],
                 'account_number' => ['label' => 'Our account no.', 'type' => 'text', 'help' => 'Your account number with them'],
                 'category'       => ['label' => 'Type', 'type' => 'select', 'options' => SUPPLIER_CATEGORIES],
+                'ordering'       => ['label' => 'How we order', 'type' => 'select', 'options' => SUPPLIER_ORDERING, 'default' => 'email',
+                    'help' => 'Orders only raise purchase orders for suppliers ordered by email'],
+                'vat_number'     => ['label' => 'VAT number', 'type' => 'text', 'help' => 'Helps match their invoices'],
                 'active'         => ['label' => 'Active', 'type' => 'bool', 'default' => 1],
                 'contact_name'   => ['label' => 'Account manager', 'type' => 'text', 'section' => 'Contact'],
                 'email'          => ['label' => 'Orders email', 'type' => 'email', 'help' => 'Purchase orders are emailed here'],
@@ -761,6 +764,12 @@ function before_save(string $name, array $data, ?array $existing): array
             }
             if (($data['type'] ?? '') !== 'task') {
                 $data['done'] = 1;
+            }
+            break;
+
+        case 'suppliers':
+            if (array_key_exists('ordering', $data) && empty($data['ordering'])) {
+                $data['ordering'] = 'email';
             }
             break;
 

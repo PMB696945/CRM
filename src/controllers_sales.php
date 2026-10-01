@@ -416,6 +416,7 @@ function settings_controller(): void
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
         'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https',
         'marketing_topics', 'campaign_batch_size',
+        'invoice_reader', 'invoice_model', 'invoice_tolerance', 'invoice_alert_email',
         'order_group_id', 'order_message_processing', 'order_message_confirmed', 'order_message_completed', 'order_message_cancelled'];
     $before = array_combine($keys, array_map(fn($k) => (string)setting($k), $keys));
     if (is_post()) {
@@ -442,6 +443,18 @@ function settings_controller(): void
                 $value = '0'; // set it up yourself first
                 flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
             }
+            if ($key === 'invoice_reader' && !in_array($value, ['builtin', 'claude'], true)) {
+                $value = 'builtin';
+            }
+            if ($key === 'invoice_tolerance') {
+                $value = is_numeric($value) ? (string)round(max(0, (float)$value), 2) : '';
+            }
+            if ($key === 'invoice_alert_email' && $value !== '' && !filter_var($value, FILTER_VALIDATE_EMAIL)) {
+                $value = '';
+            }
+            if ($key === 'invoice_model' && !preg_match('/^[a-z0-9.\-]{3,60}$/', $value)) {
+                $value = '';
+            }
             if ($key === 'order_group_id' && !($value !== '' && ctype_digit($value) && db_value('SELECT 1 FROM ticket_groups WHERE id = ?', [$value]))) {
                 $value = '';
             }
@@ -459,7 +472,7 @@ function settings_controller(): void
             }
             set_setting($key, $value === '' ? null : $value);
         }
-        foreach (['smtp_password', 'mandrill_api_key'] as $secret) {
+        foreach (['smtp_password', 'mandrill_api_key', 'anthropic_api_key'] as $secret) {
             if (($pw = trim((string)($_POST[$secret] ?? ''))) !== '') {
                 set_setting($secret, $pw);
                 $before[$secret] = '';

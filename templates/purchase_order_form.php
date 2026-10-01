@@ -9,6 +9,7 @@ $accountId = $values['account_id'] ?? null;
 
 <form method="post" class="po-form">
   <?= csrf_field() ?>
+  <?php if (!$po && query_int('customer_order_id')): ?><input type="hidden" name="customer_order_id" value="<?= (int)query_int('customer_order_id') ?>"><?php endif; ?>
   <section class="card form-grid">
     <div class="field"><label>Supplier</label><input value="<?= h($supplier['name']) ?>" disabled></div>
     <div class="field <?= isset($errors['account_id']) ? 'has-error' : '' ?>"><label for="po_account">For customer (optional)</label>

@@ -298,6 +298,21 @@ Orders waiting to be picked up are counted next to **Orders** in the menu. Whoev
 
 The order page links to everything needed to fulfil it: the contract, broadband checks and orders (Giacom), purchase orders and services. Signing the contract is noted on the order's timeline. Quotes accepted before orders existed have a **Create order** button.
 
+## Purchase orders from orders, and supplier invoices
+
+**Purchase orders from an order.** On an order, the *Purchase orders* section works out what to buy: each product's preferred supplier price (or the cheapest active one), grouped into one purchase order per supplier. Tick the suppliers and press **Raise purchase orders** to create them, linked to the order and emailed to each supplier's orders email. The same can happen automatically when you move the order to *Order processing*. Suppliers set to be ordered through their portal or an integration (Giacom is set this way) are left out, as are custom quote lines with no product; the order lists what wasn't put on a purchase order and why. Each purchase order shows its order, and the order shows every purchase order with its status and invoice.
+
+**Supplier invoices** (under Purchasing) works like Hubdoc: upload invoices (PDFs or photos, several at once, or from a purchase order's page) and each is read and matched to its purchase order. It warns when:
+
+- there's no PO number on the invoice, or it isn't one of ours
+- the PO was raised with a different supplier, was cancelled, or was never sent
+- the amount before VAT differs from the PO by more than the allowed difference (Settings, default £1.00)
+- the PO has already been invoiced, or the invoice is a duplicate (same number from the same supplier, or the same file)
+
+Invoices that need checking are counted in the menu, and the people who can raise purchase orders (or an address set in Settings) are emailed. Correct anything by hand and it re-matches; then **Approve to pay** or **Mark as disputed**. Suppliers ordered without POs (like Giacom) aren't warned about missing PO numbers.
+
+**Reading invoices.** The built-in reader handles PDFs made by accounting and billing systems (it reads the text in the PDF). Scanned invoices and phone photos have no text, so for those switch on **Claude** under Settings → Supplier invoices and add an Anthropic API key (console.anthropic.com). Claude reads any layout and also picks up the invoice's lines; each invoice costs a few pence. If Claude can't be reached, the built-in reader is used instead.
+
 ## Documents
 
 **Documents** (under Sales) is a library of spec sheets, brochures and the like, in folders. People whose role can "Upload and organise documents" (admins and managers by default) add folders and upload files; everyone can view and download them. When you email a quote, tick any library documents (or the customer's own files) to attach them; up to 15 MB in total.

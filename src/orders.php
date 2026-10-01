@@ -253,10 +253,10 @@ function customer_orders_controller(): void
         $events = order_events((int)$order['id']);
         $assignee = $order['assigned_to'] ? db_one('SELECT id, name FROM users WHERE id = ?', [$order['assigned_to']]) : null;
         $users = db_all('SELECT id, name FROM users WHERE active = 1 ORDER BY name');
-        $purchaseOrders = can('suppliers.view') ? db_all('SELECT p.*, s.name AS supplier_name FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id WHERE p.account_id = ? AND p.created_at >= ? ORDER BY p.id DESC',
-            [$order['account_id'], $order['created_at']]) : [];
+        $purchaseOrders = can('suppliers.view') ? order_purchase_orders((int)$order['id']) : [];
+        $poPlan = can('purchasing.edit') && order_is_open($order) ? order_po_plan($order) : ['suppliers' => [], 'skipped' => []];
         $giacomOrders = can('orders.check') ? db_all('SELECT * FROM giacom_orders WHERE account_id = ? AND created_at >= ? ORDER BY id DESC', [$order['account_id'], $order['created_at']]) : [];
-        page('customer_order', compact('order', 'account', 'quote', 'lines', 'contracts', 'events', 'assignee', 'users', 'purchaseOrders', 'giacomOrders'),
+        page('customer_order', compact('order', 'account', 'quote', 'lines', 'contracts', 'events', 'assignee', 'users', 'purchaseOrders', 'giacomOrders', 'poPlan'),
             $order['reference'] . ' ' . $order['title']);
         return;
     }
@@ -287,8 +287,23 @@ function customer_orders_controller(): void
                 break;
             case 'status':
                 $status = (string)($_POST['status'] ?? '');
-                $emailed = order_set_status($order, $status, trim((string)($_POST['message'] ?? '')), !empty($_POST['notify']), trim((string)($_POST['note'] ?? '')));
-                flash('Order moved to "' . order_status_label($status) . '".' . ($emailed ? " The customer has been emailed at $emailed." : ''));
+                $raised = null;
+                if (!empty($_POST['raise_pos']) && $status === 'processing' && order_is_open($order) && can('purchasing.edit')) {
+                    $raised = order_raise_purchase_orders($order, null, true);
+                }
+                $emailed = order_set_status(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]), $status, trim((string)($_POST['message'] ?? '')),
+                    !empty($_POST['notify']), trim((string)($_POST['note'] ?? '')));
+                flash('Order moved to "' . order_status_label($status) . '".' . ($emailed ? " The customer has been emailed at $emailed." : '')
+                    . ($raised !== null ? ' ' . order_raise_message($raised) : ''), $raised && array_filter(array_column($raised, 'problem')) ? 'error' : 'success');
+                break;
+            case 'raise_pos':
+                require_permission('purchasing.edit');
+                $ids = array_map('intval', is_array($_POST['suppliers'] ?? null) ? $_POST['suppliers'] : []);
+                if (!$ids) {
+                    throw new IntegrationException('Tick at least one supplier.');
+                }
+                $r = order_raise_purchase_orders($order, $ids, !empty($_POST['send']));
+                flash(order_raise_message($r), array_filter(array_column($r, 'problem')) ? 'error' : 'success');
                 break;
             case 'note':
                 $note = trim((string)($_POST['note'] ?? ''));
@@ -315,4 +330,120 @@ function customer_orders_controller(): void
         flash($e->getMessage(), 'error');
     }
     redirect($back);
+}
+
+/* ------------------------------------------------- Purchase orders --- */
+
+const SUPPLIER_ORDERING = ['email' => 'Purchase order by email', 'portal' => 'Their online portal', 'api' => 'Automatically (integration, e.g. Giacom)'];
+
+/** Purchase orders raised for an order. */
+function order_purchase_orders(int $orderId): array
+{
+    return db_all('SELECT p.*, s.name AS supplier_name, s.email AS supplier_email FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
+        WHERE p.customer_order_id = ? ORDER BY p.id', [$orderId]);
+}
+
+/**
+ * Work out which suppliers need a purchase order for an order: each quote line's
+ * product, bought from its preferred supplier (or the cheapest active one).
+ * Returns ['suppliers' => [id => ['supplier' => row, 'lines' => [po lines]]], 'skipped' => [[line, reason]]].
+ */
+function order_po_plan(array $order): array
+{
+    $plan = ['suppliers' => [], 'skipped' => []];
+    $lines = $order['quote_id'] ? quote_lines((int)$order['quote_id']) : [];
+    $raised = [];
+    foreach (order_purchase_orders((int)$order['id']) as $po) {
+        if ($po['status'] !== 'cancelled') {
+            $raised[(int)$po['supplier_id']] = $po['reference'];
+        }
+    }
+    foreach ($lines as $l) {
+        if (!$l['product_id']) {
+            $plan['skipped'][] = [$l['description'], 'Not linked to a product, so there is no supplier to order from'];
+            continue;
+        }
+        $sp = db_one('SELECT sp.*, s.name AS supplier_name, s.ordering, s.active AS supplier_active FROM supplier_products sp JOIN suppliers s ON s.id = sp.supplier_id
+            WHERE sp.product_id = ? AND sp.active = 1 AND s.active = 1 ORDER BY sp.preferred DESC, sp.cost_price LIMIT 1', [$l['product_id']]);
+        if (!$sp) {
+            $plan['skipped'][] = [$l['description'], 'No supplier price is set up for this product'];
+            continue;
+        }
+        if ($sp['ordering'] !== 'email') {
+            $plan['skipped'][] = [$l['description'], "Ordered from {$sp['supplier_name']} " . ($sp['ordering'] === 'api' ? 'through the integration' : 'on their portal') . ', not by purchase order'];
+            continue;
+        }
+        if (isset($raised[(int)$sp['supplier_id']])) {
+            $plan['skipped'][] = [$l['description'], "Already on {$raised[(int)$sp['supplier_id']]} with {$sp['supplier_name']}"];
+            continue;
+        }
+        $sid = (int)$sp['supplier_id'];
+        $plan['suppliers'][$sid] ??= ['supplier' => db_one('SELECT * FROM suppliers WHERE id = ?', [$sid]), 'lines' => []];
+        $freq = $sp['billing_frequency'] ?? 'monthly';
+        $plan['suppliers'][$sid]['lines'][] = [
+            'supplier_product_id' => (int)$sp['id'], 'sku' => $sp['supplier_sku'],
+            'description' => $sp['description'] . ($freq ? ' (' . strtolower(BILLING_FREQUENCIES[$freq] ?? $freq) . ')' : ''),
+            'quantity' => (int)$l['quantity'], 'unit_cost' => (float)$sp['cost_price'],
+        ];
+        if ((float)$sp['setup_cost'] > 0) {
+            $plan['suppliers'][$sid]['lines'][] = [
+                'supplier_product_id' => (int)$sp['id'], 'sku' => $sp['supplier_sku'], 'description' => 'Setup / one-off: ' . $sp['description'],
+                'quantity' => (int)$l['quantity'], 'unit_cost' => (float)$sp['setup_cost'],
+            ];
+        }
+    }
+    return $plan;
+}
+
+/**
+ * Raise the planned purchase orders (for the chosen suppliers, or all), linked to
+ * the order, and email them to each supplier if asked. Returns a summary list.
+ */
+function order_raise_purchase_orders(array $order, ?array $supplierIds = null, bool $send = true): array
+{
+    $plan = order_po_plan($order);
+    $account = db_one('SELECT * FROM accounts WHERE id = ?', [$order['account_id']]);
+    $out = [];
+    foreach ($plan['suppliers'] as $sid => $p) {
+        if ($supplierIds !== null && !in_array($sid, $supplierIds, true)) {
+            continue;
+        }
+        db_exec('INSERT INTO purchase_orders (supplier_id, account_id, customer_order_id, order_date, deliver_to, notes, created_by) VALUES (?, ?, ?, CURDATE(), ?, ?, ?)', [
+            $sid, $account['id'], $order['id'], po_default_delivery($account),
+            "For our customer {$account['name']} (our order {$order['reference']}).", current_user()['id'] ?? null,
+        ]);
+        $poId = (int)db()->lastInsertId();
+        $ref = sprintf('PO-%06d', $poId);
+        db_exec('UPDATE purchase_orders SET reference = ? WHERE id = ?', [$ref, $poId]);
+        po_save_lines($poId, $p['lines']);
+        audit('create', "Purchase order $ref raised with {$p['supplier']['name']} for order {$order['reference']}", 'purchase_orders', $poId, null, null, (int)$account['id']);
+        $result = ['po_id' => $poId, 'reference' => $ref, 'supplier' => $p['supplier']['name'], 'emailed_to' => null, 'problem' => null];
+        if ($send) {
+            if (!$p['supplier']['email']) {
+                $result['problem'] = 'no orders email for this supplier';
+            } else {
+                try {
+                    po_send(db_one('SELECT * FROM purchase_orders WHERE id = ?', [$poId]), $p['supplier']['email'], (string)$p['supplier']['contact_name']);
+                    audit('po_send', "Purchase order $ref emailed to {$p['supplier']['email']}", 'purchase_orders', $poId);
+                    $result['emailed_to'] = $p['supplier']['email'];
+                } catch (IntegrationException $e) {
+                    $result['problem'] = $e->getMessage();
+                }
+            }
+        }
+        $out[] = $result;
+    }
+    if ($out) {
+        order_add_event((int)$order['id'], null, null, 'Purchase orders raised: ' . implode('; ', array_map(fn($r) => "{$r['reference']} with {$r['supplier']}"
+            . ($r['emailed_to'] ? " (emailed to {$r['emailed_to']})" : ($r['problem'] ? " (not emailed: {$r['problem']})" : ' (not sent yet)')), $out)));
+    }
+    return $out;
+}
+
+function order_raise_message(array $results): string
+{
+    if (!$results) {
+        return 'There were no purchase orders to raise.';
+    }
+    return 'Raised ' . implode(', ', array_map(fn($r) => "{$r['reference']} ({$r['supplier']}" . ($r['emailed_to'] ? ', emailed' : ($r['problem'] ? ", not emailed: {$r['problem']}" : '')) . ')', $results)) . '.';
 }

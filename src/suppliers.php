@@ -66,7 +66,8 @@ function supplier_view(array $entity, array $supplier): void
     $orders = list_rows('purchase_orders', ['filters' => ['supplier_id' => $id], 'per_page' => 20, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
     $files = supplier_documents($id);
     $canWrite = can('suppliers.edit');
-    page('supplier', compact('entity', 'supplier', 'products', 'orders', 'files', 'canWrite'), $supplier['name']);
+    $invoices = db_all('SELECT * FROM supplier_invoices WHERE supplier_id = ? ORDER BY id DESC LIMIT 10', [$id]);
+    page('supplier', compact('entity', 'supplier', 'products', 'orders', 'files', 'canWrite', 'invoices'), $supplier['name']);
 }
 
 /* ------------------------------------------------ Purchase orders --- */
@@ -194,7 +195,9 @@ function purchase_orders_controller(): void
             $account = $po['account_id'] ? db_one('SELECT id, name FROM accounts WHERE id = ?', [$po['account_id']]) : null;
             $lines = po_lines((int)$po['id']);
             $creator = $po['created_by'] ? db_value('SELECT name FROM users WHERE id = ?', [$po['created_by']]) : null;
-            page('purchase_order', compact('po', 'supplier', 'account', 'lines', 'creator'), $po['reference']);
+            $customerOrder = $po['customer_order_id'] ? db_one('SELECT id, reference, status FROM customer_orders WHERE id = ?', [$po['customer_order_id']]) : null;
+            $invoices = db_all('SELECT * FROM supplier_invoices WHERE po_id = ? ORDER BY id DESC', [$po['id']]);
+            page('purchase_order', compact('po', 'supplier', 'account', 'lines', 'creator', 'customerOrder', 'invoices'), $po['reference']);
             return;
 
         case 'new':
@@ -208,7 +211,7 @@ function purchase_orders_controller(): void
             if (!$supplier) {
                 // Pick the supplier first: the lines come from their products.
                 page('purchase_order_pick', ['suppliers' => db_all('SELECT id, name, category FROM suppliers WHERE active = 1 ORDER BY name'),
-                    'accountId' => query_int('account_id')], 'New purchase order');
+                    'accountId' => query_int('account_id'), 'orderId' => query_int('customer_order_id')], 'New purchase order');
                 return;
             }
             $account = null;
@@ -234,8 +237,10 @@ function purchase_orders_controller(): void
                         $poId = (int)$po['id'];
                         audit('update', "Purchase order {$po['reference']} updated", 'purchase_orders', $poId);
                     } else {
-                        db_exec('INSERT INTO purchase_orders (supplier_id, ' . implode(', ', $cols) . ', created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                            array_merge([$supplierId], array_map(fn($c) => $data[$c], $cols), [current_user()['id']]));
+                        $orderId = (int)($_POST['customer_order_id'] ?? 0);
+                        $orderId = $orderId && db_value('SELECT 1 FROM customer_orders WHERE id = ?', [$orderId]) ? $orderId : null;
+                        db_exec('INSERT INTO purchase_orders (supplier_id, ' . implode(', ', $cols) . ', customer_order_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                            array_merge([$supplierId], array_map(fn($c) => $data[$c], $cols), [$orderId, current_user()['id']]));
                         $poId = (int)db()->lastInsertId();
                         $ref = sprintf('PO-%06d', $poId);
                         db_exec('UPDATE purchase_orders SET reference = ? WHERE id = ?', [$ref, $poId]);

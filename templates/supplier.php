@@ -78,6 +78,16 @@ $link = fn($u) => $u ? '<a href="' . h(preg_match('#^https?://#i', $u) ? $u : 'h
       </dl>
     </section>
 
+    <?php if ($invoices): ?>
+    <section class="card">
+      <div class="card-head"><h2>Invoices</h2><a href="<?= h(url('supplier_invoices', ['status' => ''])) ?>">All →</a></div>
+      <?php foreach ($invoices as $i): ?>
+        <p class="small"><a href="<?= h(url('supplier_invoices', ['action' => 'view', 'id' => $i['id']])) ?>"><?= h($i['invoice_number'] ?: $i['file_name']) ?></a>
+          <?= h(fmt_date($i['invoice_date'])) ?> · <?= $i['total'] !== null ? h(money($i['total'])) : '' ?> <?= invoice_status_badge($i['status']) ?></p>
+      <?php endforeach; ?>
+    </section>
+    <?php endif; ?>
+
     <?php render('_files', ['docs' => $files, 'where' => ['supplier_id' => $id]]); ?>
   </aside>
 </div>

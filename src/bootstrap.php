@@ -46,3 +46,5 @@ require_once __DIR__ . '/ticket_groups.php';
 require_once __DIR__ . '/documents.php';
 require_once __DIR__ . '/suppliers.php';
 require_once __DIR__ . '/orders.php';
+require_once __DIR__ . '/pdf_text.php';
+require_once __DIR__ . '/invoices.php';

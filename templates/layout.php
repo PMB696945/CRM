@@ -25,6 +25,7 @@ if (can('suppliers.view') || can('suppliers.edit') || can('purchasing.edit')) {
     $nav['Purchasing'] = [
         'suppliers'         => ['truck', 'Suppliers'],
         'purchase_orders'   => ['cart', 'Purchase orders'],
+        'supplier_invoices' => ['document', 'Supplier invoices'],
         'supplier_products' => ['pound', 'Supplier prices'],
     ];
 }
@@ -70,7 +71,7 @@ $flash = flash();
         <h3 class="menu-group-title"><?= h($group) ?></h3>
         <div class="menu">
           <?php foreach ($items as $key => [$ico, $label]): ?>
-            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?><?php if ($key === 'customer_orders' && can('onboarding.edit') && ($waiting = orders_waiting_count())): ?><span class="menu-count" title="Waiting to be picked up"><?= $waiting ?></span><?php endif; ?></a>
+            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?><?php if ($key === 'supplier_invoices' && ($toCheck = invoices_attention_count())): ?><span class="menu-count" title="Need checking"><?= $toCheck ?></span><?php endif; ?><?php if ($key === 'customer_orders' && can('onboarding.edit') && ($waiting = orders_waiting_count())): ?><span class="menu-count" title="Waiting to be picked up"><?= $waiting ?></span><?php endif; ?></a>
           <?php endforeach; ?>
         </div>
       <?php endforeach; ?>

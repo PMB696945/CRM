@@ -8,7 +8,7 @@ $canEdit = can('purchasing.edit');
   <div>
     <div class="crumbs"><a href="<?= h(url('purchase_orders')) ?>">Purchase orders</a> · <a href="<?= h(url('suppliers', ['action' => 'view', 'id' => $supplier['id']])) ?>"><?= h($supplier['name']) ?></a></div>
     <h1><?= h($po['reference']) ?> <?= badge($status) ?></h1>
-    <p class="muted"><?= $account ? 'For <a href="' . h(url('accounts', ['action' => 'view', 'id' => $account['id']])) . '">' . h($account['name']) . '</a> · ' : '' ?>Raised <?= h(fmt_date($po['created_at'])) ?><?= $creator ? ' by ' . h($creator) : '' ?></p>
+    <p class="muted"><?= $customerOrder ? 'Order <a href="' . h(url('customer_orders', ['action' => 'view', 'id' => $customerOrder['id']])) . '">' . h($customerOrder['reference']) . '</a> · ' : '' ?><?= $account ? 'For <a href="' . h(url('accounts', ['action' => 'view', 'id' => $account['id']])) . '">' . h($account['name']) . '</a> · ' : '' ?>Raised <?= h(fmt_date($po['created_at'])) ?><?= $creator ? ' by ' . h($creator) : '' ?></p>
   </div>
   <div class="actions">
     <button type="button" class="btn btn-ghost" data-print>Print</button>
@@ -55,6 +55,22 @@ $canEdit = can('purchasing.edit');
   </div>
 
   <aside class="no-print">
+    <?php if ($invoices || ($canEdit && in_array($status, ['sent', 'received'], true))): ?>
+    <section class="card">
+      <div class="card-head"><h2>Supplier invoices</h2></div>
+      <?php foreach ($invoices as $i): ?>
+        <p class="small"><a href="<?= h(url('supplier_invoices', ['action' => 'view', 'id' => $i['id']])) ?>"><?= h($i['invoice_number'] ?: $i['file_name']) ?></a>
+          <?= $i['total'] !== null ? h(money($i['total'])) : '' ?> <?= invoice_status_badge($i['status']) ?></p>
+      <?php endforeach; ?>
+      <?php if ($canEdit): ?>
+        <form method="post" action="<?= h(url('supplier_invoices', ['action' => 'upload'])) ?>" enctype="multipart/form-data" class="stack mt-2">
+          <?= csrf_field() ?><input type="hidden" name="po_id" value="<?= $id ?>"><input type="hidden" name="_return" value="<?= h(current_url()) ?>">
+          <label>Upload their invoice<input type="file" name="files[]" required accept=".pdf,.png,.jpg,.jpeg,.gif,.webp"></label>
+          <button class="btn btn-sm">Upload and check</button>
+        </form>
+      <?php endif; ?>
+    </section>
+    <?php endif; ?>
     <?php if ($canEdit && in_array($status, ['draft', 'sent'], true)): ?>
     <section class="card">
       <div class="card-head"><h2><?= $status === 'draft' ? 'Send to supplier' : 'Send again' ?></h2></div>

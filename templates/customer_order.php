@@ -50,9 +50,50 @@ $me = (int)current_user()['id'];
           <textarea name="message" rows="4" data-step-message><?= h(order_default_message($next ?? 'cancelled')) ?></textarea></label>
         <label class="check"><input type="checkbox" name="notify" value="1" <?= $order['contact_email'] ? 'checked' : 'disabled' ?>>
           Email <?= $order['contact_email'] ? h($order['contact_name'] ?: 'the customer') . ' at ' . h($order['contact_email']) : 'the customer (add their email below first)' ?></label>
+        <?php if ($poPlan['suppliers'] && can('purchasing.edit') && $order['status'] === 'accepted'): ?>
+          <label class="check" data-when-step="processing"><input type="checkbox" name="raise_pos" value="1" checked>
+            Raise and email purchase orders to <?= h(implode(', ', array_map(fn($p) => $p['supplier']['name'], $poPlan['suppliers']))) ?></label>
+        <?php endif; ?>
         <label>Internal note (optional)<input name="note" placeholder="Only staff see this"></label>
         <div><button class="btn btn-primary">Update the order</button></div>
       </form>
+    </section>
+    <?php endif; ?>
+
+    <?php if (can('suppliers.view') && ($purchaseOrders || $poPlan['suppliers'] || $poPlan['skipped'])): ?>
+    <section class="card" id="purchase-orders">
+      <div class="card-head"><h2>Purchase orders</h2></div>
+      <?php if ($purchaseOrders): ?>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>PO</th><th>Supplier</th><th>Status</th><th class="num">Total</th><th>Sent</th><th>Invoice</th></tr></thead>
+          <tbody><?php foreach ($purchaseOrders as $p): $inv = db_one("SELECT id, status, total FROM supplier_invoices WHERE po_id = ? ORDER BY id DESC LIMIT 1", [$p['id']]); ?>
+            <tr><td><a class="row-link" href="<?= h(url('purchase_orders', ['action' => 'view', 'id' => $p['id']])) ?>"><?= h($p['reference']) ?></a></td>
+              <td><?= h($p['supplier_name']) ?></td><td><?= badge($p['status']) ?></td><td class="num"><?= h(money($p['total'])) ?></td>
+              <td class="small"><?= h(fmt_datetime($p['sent_at'])) ?: '<span class="muted">—</span>' ?></td>
+              <td class="small"><?= $inv ? '<a href="' . h(url('supplier_invoices', ['action' => 'view', 'id' => $inv['id']])) . '">' . invoice_status_badge($inv['status']) . '</a>' : '<span class="muted">Not yet</span>' ?></td></tr>
+          <?php endforeach; ?></tbody>
+        </table></div>
+      <?php endif; ?>
+      <?php if ($poPlan['suppliers']): ?>
+        <form method="post" action="<?= h($act('raise_pos')) ?>" class="stack mt-4">
+          <?= csrf_field() ?>
+          <p class="small muted"><?= $purchaseOrders ? 'Still to order:' : 'From the products on this order and their preferred suppliers:' ?></p>
+          <?php foreach ($poPlan['suppliers'] as $sid => $p): $total = po_total($p['lines']); ?>
+            <label class="check"><input type="checkbox" name="suppliers[]" value="<?= (int)$sid ?>" checked>
+              <span><b><?= h($p['supplier']['name']) ?></b> – <?= count($p['lines']) ?> line<?= count($p['lines']) === 1 ? '' : 's' ?>, <?= h(money($total)) ?>
+                <span class="muted small"><?= $p['supplier']['email'] ? 'to ' . h($p['supplier']['email']) : '· no orders email set, so it will be saved as a draft' ?></span>
+                <span class="block small muted"><?= h(implode(' · ', array_map(fn($l) => $l['quantity'] . ' × ' . $l['description'], $p['lines']))) ?></span></span></label>
+          <?php endforeach; ?>
+          <label class="check"><input type="checkbox" name="send" value="1" checked> Email them to the suppliers now</label>
+          <div><button class="btn btn-primary">Raise purchase orders</button></div>
+        </form>
+      <?php endif; ?>
+      <?php if ($poPlan['skipped']): ?>
+        <p class="small muted mt-4">Not on a purchase order:</p>
+        <ul class="small">
+          <?php foreach ($poPlan['skipped'] as [$what, $why]): ?><li><b><?= h($what) ?></b>: <?= h($why) ?></li><?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
     </section>
     <?php endif; ?>
 
@@ -120,8 +161,7 @@ $me = (int)current_user()['id'];
         <?php if (!$contracts && $quote): ?><li class="muted">No contract yet</li><?php endif; ?>
         <?php if (can('orders.check') && giacom_configured()): ?><li><a href="<?= h(url('giacom', ['action' => 'check', 'account_id' => $account['id']])) ?>">Check and order broadband (Giacom)</a></li><?php endif; ?>
         <?php foreach ($giacomOrders as $g): ?><li>Broadband order <a href="<?= h(url('giacom', ['action' => 'view', 'id' => $g['id']])) ?>"><?= h($g['giacom_order_id'] ?: '#' . $g['id']) ?></a> <?= badge(strtolower((string)$g['status'])) ?></li><?php endforeach; ?>
-        <?php if (can('purchasing.edit')): ?><li><a href="<?= h(url('purchase_orders', ['action' => 'new', 'account_id' => $account['id']])) ?>">Raise a purchase order</a></li><?php endif; ?>
-        <?php foreach ($purchaseOrders as $p): ?><li>PO <a href="<?= h(url('purchase_orders', ['action' => 'view', 'id' => $p['id']])) ?>"><?= h($p['reference']) ?></a> with <?= h($p['supplier_name']) ?> <?= badge($p['status']) ?></li><?php endforeach; ?>
+        <?php if (can('purchasing.edit')): ?><li><a href="<?= h(url('purchase_orders', ['action' => 'new', 'account_id' => $account['id'], 'customer_order_id' => $order['id']])) ?>">Raise another purchase order</a></li><?php endif; ?>
         <?php if (can('services.edit')): ?><li><a href="<?= h(url('services', ['action' => 'new', 'account_id' => $account['id']])) ?>">Add a service</a> · <a href="<?= h(url('services', ['account_id' => $account['id']])) ?>">their services</a></li><?php endif; ?>
       </ul>
     </section>

@@ -720,4 +720,58 @@ return [
             db_exec("INSERT INTO settings (name, value) VALUES ('order_group_id', ?)", [(string)$group]);
         }
     },
+    16 => function (): void {
+        // Purchase orders raised for a customer order, how each supplier is ordered from, and supplier invoices.
+        if (!column_exists('purchase_orders', 'customer_order_id')) {
+            db()->exec('ALTER TABLE purchase_orders ADD COLUMN customer_order_id INT UNSIGNED NULL AFTER account_id, ADD KEY idx_po_order (customer_order_id)');
+        }
+        if (!constraint_exists('purchase_orders', 'fk_po_customer_order')) {
+            db()->exec('ALTER TABLE purchase_orders ADD CONSTRAINT fk_po_customer_order FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE SET NULL');
+        }
+        if (!column_exists('suppliers', 'ordering')) {
+            db()->exec("ALTER TABLE suppliers ADD COLUMN ordering VARCHAR(10) NOT NULL DEFAULT 'email' AFTER category");
+            db_exec("UPDATE suppliers SET ordering = 'api' WHERE name = 'Giacom'");
+        }
+        if (!column_exists('suppliers', 'vat_number')) {
+            db()->exec('ALTER TABLE suppliers ADD COLUMN vat_number VARCHAR(30) NULL AFTER account_number');
+        }
+        db()->exec("CREATE TABLE IF NOT EXISTS supplier_invoices (
+            id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            supplier_id    INT UNSIGNED NULL,
+            po_id          INT UNSIGNED NULL,
+            status         VARCHAR(20) NOT NULL DEFAULT 'needs_review',
+            invoice_number VARCHAR(80) NULL,
+            invoice_date   DATE NULL,
+            due_date       DATE NULL,
+            po_reference   VARCHAR(255) NULL COMMENT 'As printed on the invoice',
+            supplier_name  VARCHAR(190) NULL COMMENT 'As printed on the invoice',
+            net            DECIMAL(12,2) NULL,
+            vat            DECIMAL(12,2) NULL,
+            total          DECIMAL(12,2) NULL,
+            currency       CHAR(3) NULL,
+            line_items     MEDIUMTEXT NULL,
+            problems       TEXT NULL,
+            reader         VARCHAR(10) NULL,
+            read_error     VARCHAR(500) NULL,
+            raw_text       MEDIUMTEXT NULL,
+            file_name      VARCHAR(255) NOT NULL,
+            stored_name    VARCHAR(64) NOT NULL,
+            mime           VARCHAR(100) NULL,
+            size           INT UNSIGNED NOT NULL DEFAULT 0,
+            file_hash      CHAR(64) NULL,
+            notes          TEXT NULL,
+            approved_by    INT UNSIGNED NULL,
+            approved_at    DATETIME NULL,
+            created_by     INT UNSIGNED NULL,
+            created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_si_status (status),
+            KEY idx_si_supplier (supplier_id, invoice_number),
+            KEY idx_si_po (po_id),
+            CONSTRAINT fk_si_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
+            CONSTRAINT fk_si_po FOREIGN KEY (po_id) REFERENCES purchase_orders(id) ON DELETE SET NULL,
+            CONSTRAINT fk_si_approver FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL,
+            CONSTRAINT fk_si_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];
