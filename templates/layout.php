@@ -38,6 +38,7 @@ $admin = array_filter([
     'ticket_groups' => can('users.manage') ? ['inbox', 'Ticket groups'] : null,
     'roles'      => is_super_admin() ? ['shield', 'Roles & permissions'] : null,
     'audit'      => can('audit.view') ? ['clipboard', 'Audit trail'] : null,
+    'error_log'  => is_super_admin() ? ['shield', 'Error log'] : null,
     'contract_templates' => can('settings.manage') ? ['template', 'Contract templates'] : null,
     'signable'   => can('settings.manage') ? ['signature', 'Signable'] : null,
     'xero'       => can('settings.manage') ? ['link', 'Xero'] : null,

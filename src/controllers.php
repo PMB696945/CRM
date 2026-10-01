@@ -1104,3 +1104,38 @@ function audit_changes_text(?string $json): string
 {
     return implode("\n", array_map(fn($c) => $c[0] . ': ' . ($c[1] === '' ? '' : $c[1] . ' → ') . $c[2], audit_changes($json)));
 }
+
+/** Super admins: the newest entries in the CRM's error log (public/app/crm-error.log). */
+function error_log_controller(): void
+{
+    if (!is_super_admin()) {
+        forbidden();
+    }
+    $path = (string)ini_get('error_log');
+    if ($path === '' || !str_ends_with($path, 'crm-error.log')) {
+        $path = APP_ROOT . '/public/app/crm-error.log';
+    }
+    if (is_post()) {
+        verify_csrf();
+        if (is_file($path) && @file_put_contents($path, '') !== false) {
+            audit('settings', 'Error log cleared');
+            flash('Error log cleared.');
+        } else {
+            flash('Couldn\'t clear the log file. Check it is writable.', 'error');
+        }
+        redirect(url('error_log'));
+    }
+    $lines = [];
+    $size = is_file($path) ? (int)filesize($path) : 0;
+    if ($size) {
+        // Only the end of a large log.
+        $fh = fopen($path, 'r');
+        fseek($fh, max(0, $size - 256 * 1024));
+        $chunk = (string)stream_get_contents($fh);
+        fclose($fh);
+        // Multi-line entries (stack traces) stay with the line that starts them.
+        $entries = preg_split('/\n(?=\[\d{2}-\w{3}-\d{4} )/', trim($chunk)) ?: [];
+        $lines = array_reverse(array_slice($entries, -300));
+    }
+    page('error_log', ['lines' => $lines, 'path' => $path, 'size' => $size], 'Error log');
+}
