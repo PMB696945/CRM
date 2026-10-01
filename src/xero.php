@@ -134,7 +134,7 @@ function xero_access_token(bool $forceRefresh = false): string
 }
 
 /** Authorised GET/POST against the Xero API, with one retry for expired tokens and rate limits. */
-function xero_api(string $method, string $url, array $query = [], bool $withTenant = true, ?array $json = null): mixed
+function xero_api(string $method, string $url, array $query = [], bool $withTenant = true, ?array $json = null, ?string $raw = null, string $rawType = ''): mixed
 {
     if ($query) {
         $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
@@ -147,8 +147,10 @@ function xero_api(string $method, string $url, array $query = [], bool $withTena
         }
         if ($json !== null) {
             $headers[] = 'Content-Type: application/json';
+        } elseif ($raw !== null) {
+            $headers[] = 'Content-Type: ' . ($rawType ?: 'application/octet-stream');
         }
-        [$status, $body, $responseHeaders] = xero_http($method, $url, $headers, $json === null ? null : json_encode($json));
+        [$status, $body, $responseHeaders] = xero_http($method, $url, $headers, $json !== null ? json_encode($json) : $raw);
 
         if ($status >= 200 && $status < 300) {
             return $body;
@@ -162,6 +164,16 @@ function xero_api(string $method, string $url, array $query = [], bool $withTena
             continue;
         }
         $detail = is_array($body) ? ($body['Detail'] ?? $body['Message'] ?? $body['Title'] ?? json_encode($body)) : substr(strip_tags((string)$body), 0, 200);
+        // Validation problems are listed per element.
+        $validation = [];
+        foreach (is_array($body) ? ($body['Elements'] ?? []) : [] as $el) {
+            foreach ($el['ValidationErrors'] ?? [] as $ve) {
+                $validation[] = $ve['Message'] ?? '';
+            }
+        }
+        if ($validation) {
+            $detail = implode(' ', array_unique(array_filter($validation)));
+        }
         if ($status === 403) {
             $detail .= ' — check the app has the scopes: ' . (setting('xero_scopes') ?: XERO_DEFAULT_SCOPES);
         }
@@ -540,6 +552,140 @@ function xero_push_billing_contact(int $accountId): string
 /* ------------------------------------------------------ Products → items --- */
 
 /** Scopes with accounting.settings (write) added, which Xero needs to create and update items. */
+/** Scopes needed to create bills and attach files (granular scopes, or the older transactions scope). */
+function xero_bill_scopes(string $scopes): string
+{
+    $scopes = ' ' . $scopes . ' ';
+    $scopes = preg_replace('/(^|\s)accounting\.invoices\.read(?=\s|$)/', '$1accounting.invoices', $scopes);
+    $scopes = preg_replace('/(^|\s)accounting\.transactions\.read(?=\s|$)/', '$1accounting.transactions', $scopes);
+    $scopes = trim(preg_replace('/\s+/', ' ', $scopes));
+    if (!preg_match('/(^|\s)accounting\.(invoices|transactions)(\s|$)/', $scopes)) {
+        $scopes .= ' accounting.invoices';
+    }
+    return preg_match('/(^|\s)accounting\.attachments(\s|$)/', $scopes) ? $scopes : $scopes . ' accounting.attachments';
+}
+
+function xero_can_write_bills(): bool
+{
+    $s = (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES);
+    return (bool)preg_match('/(^|\s)accounting\.(invoices|transactions)(\s|$)/', $s) && (bool)preg_match('/(^|\s)accounting\.attachments(\s|$)/', $s);
+}
+
+function xero_bills_enabled(): bool
+{
+    return xero_connected() && setting('xero_push_bills') === '1' && xero_can_write_bills();
+}
+
+/** Link to a bill in Xero. */
+function xero_bill_url(string $invoiceId): string
+{
+    return 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' . rawurlencode($invoiceId);
+}
+
+/** The bill for a supplier invoice, in Xero's format. */
+function xero_bill_payload(array $inv): array
+{
+    $supplier = $inv['supplier_id'] ? db_one('SELECT * FROM suppliers WHERE id = ?', [$inv['supplier_id']]) : null;
+    if (!$supplier) {
+        throw new IntegrationException('Choose which supplier the invoice is from first.');
+    }
+    $po = $inv['po_id'] ? db_one('SELECT * FROM purchase_orders WHERE id = ?', [$inv['po_id']]) : null;
+    $xc = $supplier['xero_contact_id'] ? db_value('SELECT contact_id FROM xero_contacts WHERE id = ?', [$supplier['xero_contact_id']]) : null;
+    $account = (string)(setting('xero_bill_account') ?: (setting('xero_item_purchase_account') ?: '310'));
+    $tax = (string)(setting('xero_bill_tax_type') ?: 'INPUT2');
+    $net = $inv['net'] !== null ? (float)$inv['net'] : null;
+    $tolerance = invoice_tolerance();
+    $lines = [];
+    $amountTypes = 'Exclusive';
+
+    // Lines: the purchase order's (when the invoice agrees with it), else what was read from the invoice, else one line.
+    $poLines = $po ? po_lines((int)$po['id']) : [];
+    if ($poLines && $net !== null && abs($net - po_total($poLines)) <= $tolerance) {
+        foreach ($poLines as $l) {
+            $code = $l['supplier_product_id'] ? db_value('SELECT p.purchase_account_code FROM supplier_products sp JOIN products p ON p.id = sp.product_id WHERE sp.id = ?', [$l['supplier_product_id']]) : null;
+            $lines[] = ['Description' => trim(($l['sku'] ? $l['sku'] . ' ' : '') . $l['description']), 'Quantity' => (float)$l['quantity'],
+                'UnitAmount' => (float)$l['unit_cost'], 'AccountCode' => $code ?: $account, 'TaxType' => $tax];
+        }
+        // Pennies the supplier rounded differently.
+        $diff = round($net - po_total($poLines), 2);
+        if (abs($diff) >= 0.01) {
+            $lines[] = ['Description' => 'Rounding', 'Quantity' => 1, 'UnitAmount' => $diff, 'AccountCode' => $account, 'TaxType' => $tax];
+        }
+    } else {
+        $read = json_decode((string)$inv['line_items'], true) ?: [];
+        $sum = array_sum(array_map(fn($l) => (float)($l['net_amount'] ?? 0), $read));
+        if ($read && $net !== null && abs($sum - $net) <= 0.05) {
+            foreach ($read as $l) {
+                $qty = (float)($l['quantity'] ?? 0) ?: 1;
+                $lines[] = ['Description' => mb_substr((string)$l['description'], 0, 4000) ?: 'Item', 'Quantity' => $qty,
+                    'UnitAmount' => round((float)$l['net_amount'] / $qty, 4), 'AccountCode' => $account, 'TaxType' => $tax];
+            }
+        } elseif ($net !== null) {
+            $lines[] = ['Description' => 'Invoice ' . ($inv['invoice_number'] ?: '') . ($po ? " ({$po['reference']})" : ''), 'Quantity' => 1, 'UnitAmount' => $net, 'AccountCode' => $account, 'TaxType' => $tax];
+        } elseif ($inv['total'] !== null) {
+            // Only a VAT-inclusive total is known: let Xero work the VAT out.
+            $amountTypes = 'Inclusive';
+            $lines[] = ['Description' => 'Invoice ' . ($inv['invoice_number'] ?: '') . ($po ? " ({$po['reference']})" : ''), 'Quantity' => 1, 'UnitAmount' => (float)$inv['total'], 'AccountCode' => $account, 'TaxType' => $tax];
+        } else {
+            throw new IntegrationException('The invoice has no amount yet. Enter it first.');
+        }
+    }
+    $bill = array_filter([
+        'Type' => 'ACCPAY',
+        'Contact' => $xc ? ['ContactID' => $xc] : ['Name' => $supplier['name']],
+        'InvoiceNumber' => $inv['invoice_number'] ?: null,
+        'Reference' => $po['reference'] ?? ($inv['po_reference'] ?: null),
+        'Date' => $inv['invoice_date'] ?: date('Y-m-d'),
+        'DueDate' => $inv['due_date'] ?: null,
+        'CurrencyCode' => $inv['currency'] ?: 'GBP',
+        'LineAmountTypes' => $amountTypes,
+        'Status' => in_array(setting('xero_bill_status'), ['DRAFT', 'SUBMITTED', 'AUTHORISED'], true) ? setting('xero_bill_status') : 'DRAFT',
+        'LineItems' => $lines,
+    ], fn($v) => $v !== null);
+    if (!empty($inv['xero_invoice_id'])) {
+        $bill['InvoiceID'] = $inv['xero_invoice_id'];
+    }
+    return $bill;
+}
+
+/**
+ * Send a supplier invoice to Xero as a bill (or update the one already sent),
+ * with the uploaded file attached. Returns the Xero InvoiceID.
+ */
+function xero_post_bill(int $id): string
+{
+    if (!xero_connected()) {
+        throw new IntegrationException('Xero isn\'t connected.');
+    }
+    if (!xero_can_write_bills()) {
+        throw new IntegrationException('Xero hasn\'t been given permission to create bills. Switch it on under Admin → Xero and press Reconnect.');
+    }
+    $inv = db_one('SELECT * FROM supplier_invoices WHERE id = ?', [$id]);
+    try {
+        $bill = xero_bill_payload($inv);
+        $res = xero_api('POST', xero_urls()['api'] . '/Invoices', ['summarizeErrors' => 'false'], true, ['Invoices' => [$bill]]);
+        $out = $res['Invoices'][0] ?? [];
+        if (!empty($out['ValidationErrors']) || empty($out['InvoiceID'])) {
+            throw new XeroException('Xero said: ' . implode(' ', array_column($out['ValidationErrors'] ?? [['Message' => 'no bill was created']], 'Message')));
+        }
+        $xid = $out['InvoiceID'];
+        $attached = (int)$inv['xero_attached'];
+        if (setting('xero_bill_attach', '1') === '1' && !$attached && is_file($path = invoice_path($inv))) {
+            $name = preg_replace('/[^\w.\- ]+/', '_', $inv['file_name']) ?: 'invoice.pdf';
+            xero_api('PUT', xero_urls()['api'] . '/Invoices/' . rawurlencode($xid) . '/Attachments/' . rawurlencode($name), [], true, null,
+                (string)file_get_contents($path), (string)$inv['mime']);
+            $attached = 1;
+        }
+        db_exec('UPDATE supplier_invoices SET xero_invoice_id = ?, xero_posted_at = NOW(), xero_error = NULL, xero_attached = ? WHERE id = ?', [$xid, $attached, $id]);
+        audit('xero_bill', 'Supplier invoice ' . ($inv['invoice_number'] ?: '#' . $id) . ($inv['xero_invoice_id'] ? ' updated in' : ' sent to') . ' Xero as a bill'
+            . ($attached && !$inv['xero_attached'] ? ' with the invoice attached' : ''), 'supplier_invoices', $id);
+        return $xid;
+    } catch (IntegrationException $e) {
+        db_exec('UPDATE supplier_invoices SET xero_error = ? WHERE id = ?', [mb_substr($e->getMessage(), 0, 500), $id]);
+        throw $e;
+    }
+}
+
 function xero_item_scopes(string $scopes): string
 {
     $scopes = trim(preg_replace('/(^|\s)accounting\.settings\.read(?=\s|$)/', '', ' ' . $scopes . ' '));

@@ -171,6 +171,33 @@ if ($path === '/api.xro/2.0/Contacts') {
     json_out(200, ['Contacts' => array_slice($contacts, ($page - 1) * 100, 100)]);
 }
 
+if ($path === '/api.xro/2.0/Invoices' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $body = json_decode(file_get_contents('php://input'), true);
+    $out = [];
+    foreach ($body['Invoices'] ?? [] as $inv) {
+        $errors = [];
+        if (($inv['Type'] ?? '') !== 'ACCPAY') $errors[] = ['Message' => 'Type must be ACCPAY'];
+        if (empty($inv['Contact']['ContactID']) && empty($inv['Contact']['Name'])) $errors[] = ['Message' => 'A Contact must be specified'];
+        if (empty($inv['LineItems'])) $errors[] = ['Message' => 'At least one line item is required'];
+        if (isset($inv['InvoiceID']) && ($state['bills'][$inv['InvoiceID']]['Status'] ?? '') === 'PAID') $errors[] = ['Message' => 'Paid bills cannot be changed'];
+        if ($errors) {
+            json_out(400, ['Message' => 'A validation exception occurred', 'Elements' => [$inv + ['ValidationErrors' => $errors]]]);
+        }
+        $inv['InvoiceID'] ??= sprintf('b0000000-0000-0000-0000-%012d', count($state['bills'] ?? []) + 1);
+        $state['bills'][$inv['InvoiceID']] = $inv;
+        $out[] = $inv + ['StatusAttributeString' => 'OK'];
+    }
+    save($state);
+    json_out(200, ['Invoices' => $out]);
+}
+
+if (preg_match('#^/api.xro/2.0/Invoices/([0-9a-f-]{36})/Attachments/(.+)$#', $path, $m) && $_SERVER['REQUEST_METHOD'] === 'PUT') {
+    $data = file_get_contents('php://input');
+    $state['attachments'][] = ['invoice' => $m[1], 'name' => rawurldecode($m[2]), 'type' => $_SERVER['CONTENT_TYPE'] ?? '', 'size' => strlen($data), 'sha' => hash('sha256', $data)];
+    save($state);
+    json_out(200, ['Attachments' => [['FileName' => rawurldecode($m[2]), 'ContentLength' => strlen($data)]]]);
+}
+
 if ($path === '/api.xro/2.0/Invoices') {
     if (!$state['rate_limited']) {
         $state['rate_limited'] = true;

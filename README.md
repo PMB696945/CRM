@@ -311,6 +311,8 @@ The order page links to everything needed to fulfil it: the contract, broadband 
 
 Invoices that need checking are counted in the menu, and the people who can raise purchase orders (or an address set in Settings) are emailed. Correct anything by hand and it re-matches; then **Approve to pay** or **Mark as disputed**. Suppliers ordered without POs (like Giacom) aren't warned about missing PO numbers.
 
+**Bills in Xero.** Under Admin → Xero → *Supplier bills*, switch on sending approved supplier invoices to Xero as bills (then press Reconnect to grant the permission to create invoices and attachments). Approving an invoice then creates the bill on the supplier's linked Xero contact (or Xero matches or adds one by name), with the supplier's invoice number, the PO number as the reference, the dates, and the uploaded invoice attached. Lines come from the purchase order when the amounts agree (using each product's purchases nominal code), otherwise from the invoice. Choose whether bills arrive as Draft, Awaiting approval or Awaiting payment. **Send/Update in Xero** on the invoice re-sends it; problems Xero reports are shown on the invoice.
+
 **Reading invoices.** The built-in reader handles PDFs made by accounting and billing systems (it reads the text in the PDF). Scanned invoices and phone photos have no text, so for those switch on **Claude** under Settings → Supplier invoices and add an Anthropic API key (console.anthropic.com). Claude reads any layout and also picks up the invoice's lines; each invoice costs a few pence. If Claude can't be reached, the built-in reader is used instead.
 
 ## Documents

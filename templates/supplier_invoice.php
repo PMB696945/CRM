@@ -15,6 +15,10 @@ $isImage = str_starts_with((string)$inv['mime'], 'image/');
   </div>
   <div class="actions">
     <a class="btn btn-ghost" href="<?= h($act('file')) ?>" target="_blank" rel="noopener">Open the invoice ↗</a>
+    <?php if ($inv['xero_invoice_id']): ?><a class="btn btn-ghost" href="<?= h(xero_bill_url($inv['xero_invoice_id'])) ?>" target="_blank" rel="noopener">Bill in Xero ↗</a><?php endif; ?>
+    <?php if ($canEdit && $inv['status'] === 'approved' && xero_connected() && xero_can_write_bills()): ?>
+      <form method="post" action="<?= h($act('xero')) ?>" class="inline"><?= csrf_field() ?><button class="btn"><?= $inv['xero_invoice_id'] ? 'Update in Xero' : 'Send to Xero' ?></button></form>
+    <?php endif; ?>
     <?php if ($canEdit): ?>
       <form method="post" action="<?= h($act('reread')) ?>" class="inline"><?= csrf_field() ?><button class="btn">Read again</button></form>
       <?php if ($inv['status'] === 'approved' || $inv['status'] === 'disputed'): ?>
@@ -27,6 +31,8 @@ $isImage = str_starts_with((string)$inv['mime'], 'image/');
   </div>
 </div>
 
+<?php if ($inv['xero_error']): ?><div class="flash flash-error">Xero: <?= h($inv['xero_error']) ?></div><?php endif; ?>
+<?php if ($inv['xero_invoice_id'] && !$inv['xero_error']): ?><div class="flash flash-info">In Xero as a bill since <?= h(fmt_datetime($inv['xero_posted_at'])) ?><?= $inv['xero_attached'] ? ', with the invoice attached' : '' ?>.</div><?php endif; ?>
 <?php if ($problems && $inv['status'] !== 'approved'): ?>
   <div class="flash flash-warning"><b>Check this invoice:</b><ul class="mt-1"><?php foreach ($problems as $p): ?><li><?= h($p) ?></li><?php endforeach; ?></ul></div>
 <?php elseif ($inv['status'] === 'matched'): ?>

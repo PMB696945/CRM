@@ -20,7 +20,7 @@
 </nav>
 
 <div class="table-wrap"><table class="table">
-  <thead><tr><th>Invoice</th><th>Supplier</th><th>Date</th><th>PO</th><th class="num">Net</th><th class="num">Total</th><th>Status</th></tr></thead>
+  <thead><tr><th>Invoice</th><th>Supplier</th><th>Date</th><th>PO</th><th class="num">Net</th><th class="num">Total</th><th>Status</th><th>Xero</th></tr></thead>
   <tbody>
   <?php foreach ($rows as $r): $problems = json_decode((string)$r['problems'], true) ?: []; ?>
     <tr>
@@ -32,8 +32,9 @@
       <td class="num"><?= $r['net'] !== null ? h(money($r['net'])) : '<span class="muted">—</span>' ?></td>
       <td class="num"><?= $r['total'] !== null ? h(money($r['total'])) : '<span class="muted">—</span>' ?></td>
       <td><?= invoice_status_badge($r['status']) ?></td>
+      <td class="small"><?= $r['xero_invoice_id'] ? '<a href="' . h(xero_bill_url($r['xero_invoice_id'])) . '" target="_blank" rel="noopener">Bill ↗</a>' : ($r['xero_error'] ? '<span class="text-danger">Problem</span>' : '<span class="muted">—</span>') ?></td>
     </tr>
   <?php endforeach; ?>
-  <?php if (!$rows): ?><tr><td colspan="7" class="empty-row">No invoices here.</td></tr><?php endif; ?>
+  <?php if (!$rows): ?><tr><td colspan="8" class="empty-row">No invoices here.</td></tr><?php endif; ?>
   </tbody>
 </table></div>

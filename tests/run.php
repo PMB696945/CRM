@@ -391,6 +391,63 @@ test('suppliers are brought in from Xero: same name linked, others added with de
     eq('0800 000', db_value('SELECT phone FROM suppliers WHERE id = ?', [$s1['id']]));
 });
 
+test('approved supplier invoices go to Xero as bills, with the uploaded invoice attached', function () {
+    as_role('super_admin');
+    $sup = (int)db_value("SELECT id FROM suppliers WHERE name = 'Supplier 1'");
+    db_exec('INSERT INTO purchase_orders (supplier_id, status, total, created_by) VALUES (?, ?, 0, 1)', [$sup, 'sent']);
+    $poId = (int)db()->lastInsertId();
+    db_exec('UPDATE purchase_orders SET reference = ? WHERE id = ?', [sprintf('PO-%06d', $poId), $poId]);
+    po_save_lines($poId, [['supplier_product_id' => null, 'sku' => 'SW-1', 'description' => 'Switch', 'quantity' => 2, 'unit_cost' => 18.25]]);
+    $file = storage_path('invoices') . '/xtest.pdf';
+    file_put_contents($file, '%PDF-1.4 bill');
+    db_exec("INSERT INTO supplier_invoices (supplier_id, po_id, status, invoice_number, invoice_date, due_date, net, vat, total, currency, file_name, stored_name, mime, size)
+        VALUES (?, ?, 'approved', 'S1-77', '2026-10-01', '2026-10-31', 36.51, 7.30, 43.81, 'GBP', 'S1 invoice 77.pdf', 'xtest.pdf', 'application/pdf', 13)", [$sup, $poId]);
+    $id = (int)db()->lastInsertId();
+
+    eq('offline_access accounting.contacts.read accounting.invoices accounting.attachments', xero_bill_scopes(XERO_DEFAULT_SCOPES));
+    eq('offline_access accounting.contacts.read accounting.transactions accounting.attachments', xero_bill_scopes('offline_access accounting.contacts.read accounting.transactions.read'));
+    ok(!xero_can_write_bills());
+    try { xero_post_bill($id); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Reconnect')); }
+    set_setting('xero_scopes', xero_bill_scopes(XERO_DEFAULT_SCOPES));
+    set_setting('xero_push_bills', '1');
+    ok(xero_bills_enabled());
+
+    $xid = xero_post_bill($id);
+    $st = mock_state();
+    $bill = $st['bills'][$xid];
+    $xc = db_value('SELECT x.contact_id FROM suppliers s JOIN xero_contacts x ON x.id = s.xero_contact_id WHERE s.id = ?', [$sup]);
+    eq(['ACCPAY', $xc, 'S1-77', sprintf('PO-%06d', $poId), '2026-10-01', '2026-10-31', 'DRAFT', 'Exclusive'],
+        [$bill['Type'], $bill['Contact']['ContactID'], $bill['InvoiceNumber'], $bill['Reference'], $bill['Date'], $bill['DueDate'], $bill['Status'], $bill['LineAmountTypes']]);
+    eq([['SW-1 Switch', 2, 18.25, '310', 'INPUT2'], ['Rounding', 1, 0.01, '310', 'INPUT2']],
+        array_map(fn($l) => [$l['Description'], $l['Quantity'], $l['UnitAmount'], $l['AccountCode'], $l['TaxType']], $bill['LineItems']), 'PO lines plus the penny difference');
+    $att = end($st['attachments']);
+    eq([$xid, 'S1 invoice 77.pdf', 'application/pdf', hash('sha256', '%PDF-1.4 bill')], [$att['invoice'], $att['name'], $att['type'], $att['sha']]);
+    $row = db_one('SELECT * FROM supplier_invoices WHERE id = ?', [$id]);
+    eq([$xid, 1, null], [$row['xero_invoice_id'], (int)$row['xero_attached'], $row['xero_error']]);
+
+    // Sending again updates the same bill and doesn't attach a second copy.
+    $count = count($st['attachments']);
+    eq($xid, xero_post_bill($id));
+    eq($count, count(mock_state()['attachments']));
+    eq($xid, mock_state()['bills'][$xid]['InvoiceID']);
+
+    // Without a PO: one line for the net amount; only a gross total: sent VAT-inclusive.
+    db_exec('UPDATE supplier_invoices SET po_id = NULL, xero_invoice_id = NULL, xero_attached = 0 WHERE id = ?', [$id]);
+    $p = xero_bill_payload(db_one('SELECT * FROM supplier_invoices WHERE id = ?', [$id]));
+    eq([['Invoice S1-77', 1, 36.51]], array_map(fn($l) => [$l['Description'], $l['Quantity'], $l['UnitAmount']], $p['LineItems']));
+    db_exec('UPDATE supplier_invoices SET net = NULL, vat = NULL WHERE id = ?', [$id]);
+    $p = xero_bill_payload(db_one('SELECT * FROM supplier_invoices WHERE id = ?', [$id]));
+    eq(['Inclusive', 43.81], [$p['LineAmountTypes'], $p['LineItems'][0]['UnitAmount']]);
+
+    // Xero's validation errors are reported and kept on the invoice.
+    db_exec('UPDATE supplier_invoices SET xero_invoice_id = ? WHERE id = ?', [$xid, $id]);
+    $st = mock_state(); $st['bills'][$xid]['Status'] = 'PAID'; file_put_contents($GLOBALS['mockState'], json_encode($st));
+    try { xero_post_bill($id); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Paid bills cannot be changed'), $e->getMessage()); }
+    ok(str_contains((string)db_value('SELECT xero_error FROM supplier_invoices WHERE id = ?', [$id]), 'Paid bills'));
+    set_setting('xero_push_bills', null);
+    set_setting('xero_scopes', null);
+});
+
 test('balances appear in customer lists and presets', function () {
     ok(isset(entities()['accounts']['computed']['_balance']), 'balance column added once connected');
     $arrears = list_rows('accounts', ['preset' => 'arrears']);

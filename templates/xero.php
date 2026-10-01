@@ -112,6 +112,25 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
 </section>
 
 <section class="card">
+  <div class="card-head"><h2>Supplier bills</h2></div>
+  <p>When a supplier invoice is approved to pay (Purchasing → Supplier invoices), send it to Xero as a <b>bill</b>, with the uploaded invoice attached. The lines come from its purchase order when the amounts agree, otherwise from the invoice.</p>
+  <form method="post" action="<?= h(url('xero', ['action' => 'bills_setting'])) ?>" class="stack">
+    <?= csrf_field() ?>
+    <label class="check"><input type="checkbox" name="push_bills" value="1" <?= setting('xero_push_bills') === '1' ? 'checked' : '' ?>> Send approved supplier invoices to Xero as bills</label>
+    <label class="check"><input type="checkbox" name="bill_attach" value="1" <?= setting('xero_bill_attach', '1') === '1' ? 'checked' : '' ?>> Attach the uploaded invoice to the bill</label>
+    <?php if (setting('xero_push_bills') === '1' && !xero_can_write_bills()): ?><p class="text-warning">Xero hasn't been given permission to create bills. Press <b>Reconnect</b> above.</p><?php endif; ?>
+    <div class="form-grid">
+      <label>Bills arrive in Xero as
+        <select name="bill_status"><?php foreach (['DRAFT' => 'Draft', 'SUBMITTED' => 'Awaiting approval', 'AUTHORISED' => 'Awaiting payment'] as $k => $l): ?><option value="<?= $k ?>" <?= (setting('xero_bill_status') ?: 'DRAFT') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
+      <label>Purchases account code<input name="bill_account" value="<?= h(setting('xero_bill_account')) ?>" placeholder="<?= h(setting('xero_item_purchase_account') ?: '310') ?>"></label>
+      <label>Tax rate (Xero tax type)<input name="bill_tax_type" value="<?= h(setting('xero_bill_tax_type')) ?>" placeholder="INPUT2 (20% VAT on expenses)"></label>
+    </div>
+    <p class="help">Lines for products use the product's purchases nominal code; the code above is used otherwise. Bills go to the supplier's linked Xero contact, or Xero matches (or adds) one by name. This needs permission to create invoices and attachments: after switching it on, press <b>Reconnect</b> and approve.</p>
+    <button class="btn">Save</button>
+  </form>
+</section>
+
+<section class="card">
   <div class="card-head"><h2>Suppliers</h2>
     <form method="post" action="<?= h(url('suppliers', ['action' => 'xero_import'])) ?>" class="inline"><?= csrf_field() ?><input type="hidden" name="_return" value="<?= h(url('xero')) ?>"><button class="btn btn-sm">Bring in suppliers now</button></form></div>
   <p>Contacts Xero marks as <b>suppliers</b> (anyone you've entered a bill for) can be brought into the CRM's Suppliers. A supplier with the same name is linked rather than duplicated, and blank details (email, phone, address, website, payment terms) are filled in from Xero. Anything already typed in the CRM is kept.

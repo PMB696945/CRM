@@ -774,4 +774,17 @@ return [
             CONSTRAINT fk_si_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+    17 => function (): void {
+        // Supplier invoices sent to Xero as bills.
+        foreach ([
+            'xero_invoice_id' => 'CHAR(36) NULL AFTER notes',
+            'xero_posted_at'  => 'DATETIME NULL AFTER xero_invoice_id',
+            'xero_error'      => 'VARCHAR(500) NULL AFTER xero_posted_at',
+            'xero_attached'   => 'TINYINT(1) NOT NULL DEFAULT 0 AFTER xero_error',
+        ] as $col => $def) {
+            if (!column_exists('supplier_invoices', $col)) {
+                db()->exec("ALTER TABLE supplier_invoices ADD COLUMN $col $def");
+            }
+        }
+    },
 ];

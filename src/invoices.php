@@ -509,7 +509,23 @@ function supplier_invoices_controller(): void
                     db_exec("UPDATE supplier_invoices SET status = 'approved', approved_by = ?, approved_at = NOW() WHERE id = ?", [current_user()['id'], $inv['id']]);
                     audit('invoice_approve', 'Supplier invoice ' . ($inv['invoice_number'] ?: '#' . $inv['id']) . ' approved to pay'
                         . ($inv['problems'] ? ' despite: ' . implode(' ', json_decode($inv['problems'], true) ?: []) : ''), 'supplier_invoices', (int)$inv['id']);
-                    flash('Approved to pay.');
+                    if (xero_bills_enabled()) {
+                        try {
+                            xero_post_bill((int)$inv['id']);
+                            flash('Approved to pay and sent to Xero as a bill' . (setting('xero_bill_attach', '1') === '1' ? ', with the invoice attached.' : '.'));
+                        } catch (IntegrationException $e) {
+                            flash('Approved to pay, but it couldn\'t be sent to Xero: ' . $e->getMessage(), 'error');
+                        }
+                    } else {
+                        flash('Approved to pay.');
+                    }
+                    break;
+                case 'xero':
+                    if ($inv['status'] !== 'approved') {
+                        throw new IntegrationException('Approve the invoice before sending it to Xero.');
+                    }
+                    xero_post_bill((int)$inv['id']);
+                    flash(($inv['xero_invoice_id'] ? 'Bill updated in Xero.' : 'Sent to Xero as a bill.'));
                     break;
                 case 'dispute':
                     $note = trim((string)($_POST['notes'] ?? ''));

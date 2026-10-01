@@ -798,6 +798,26 @@ function xero_controller(): void
                     : 'Saved.');
                 break;
 
+            case 'bills_setting':
+                $on = !empty($_POST['push_bills']);
+                $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
+                $newScopes = $on ? xero_bill_scopes($scopes) : $scopes;
+                foreach (['bill_account' => 'xero_bill_account', 'bill_tax_type' => 'xero_bill_tax_type'] as $field => $key) {
+                    $value = trim((string)($_POST[$field] ?? ''));
+                    if ($value !== '' && !preg_match('/^[A-Za-z0-9._ -]{1,50}$/', $value)) {
+                        flash('That doesn\'t look like a Xero account code or tax type: ' . $value, 'error');
+                        redirect(url('xero'));
+                    }
+                    set_setting($key, $value === '' ? null : $value);
+                }
+                set_setting('xero_push_bills', $on ? '1' : null);
+                set_setting('xero_bill_attach', !empty($_POST['bill_attach']) ? '1' : '0');
+                set_setting('xero_bill_status', in_array($_POST['bill_status'] ?? '', ['DRAFT', 'SUBMITTED', 'AUTHORISED'], true) ? $_POST['bill_status'] : 'DRAFT');
+                set_setting('xero_scopes', $newScopes === XERO_DEFAULT_SCOPES ? null : $newScopes);
+                audit('settings', 'Xero: send approved supplier invoices as bills ' . ($on ? 'on' : 'off'));
+                flash($on && $newScopes !== $scopes ? 'Saved. Press Reconnect so Xero can grant the CRM permission to create bills and attach files.' : 'Saved.');
+                break;
+
             case 'suppliers_setting':
                 set_setting('xero_import_suppliers', !empty($_POST['import_suppliers']) ? '1' : null);
                 audit('settings', 'Xero: bring in suppliers on each sync ' . (setting('xero_import_suppliers') ? 'on' : 'off'));
