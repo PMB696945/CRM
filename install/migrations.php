@@ -655,4 +655,20 @@ return [
                 'Broadband and connectivity. Availability checks and orders are under Broadband orders.')");
         }
     },
+    14 => function (): void {
+        // A fuller record of how a quote was accepted, for the acceptance PDF.
+        foreach ([
+            'response_email'       => 'VARCHAR(190) NULL AFTER response_name',
+            'response_user_agent'  => 'VARCHAR(255) NULL AFTER response_ip',
+            'response_method'      => "VARCHAR(10) NULL AFTER response_user_agent",
+            'response_recorded_by' => 'INT UNSIGNED NULL AFTER response_method',
+            'response_statement'   => 'VARCHAR(500) NULL AFTER response_recorded_by',
+            'response_fingerprint' => 'CHAR(64) NULL AFTER response_statement',
+            'confirmation_sent_at' => 'DATETIME NULL AFTER response_fingerprint',
+        ] as $col => $def) {
+            if (!column_exists('quotes', $col)) {
+                db()->exec("ALTER TABLE quotes ADD COLUMN $col $def");
+            }
+        }
+    },
 ];

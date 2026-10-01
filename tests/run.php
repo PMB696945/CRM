@@ -1598,6 +1598,51 @@ test('quotes can be emailed with library documents and customer files attached',
     ok((bool)preg_grep('#multipart/alternative#', $headers));
 });
 
+test('accepting a quote emails the customer a confirmation with a PDF and the acceptance record', function () use (&$docIds) {
+    $acct = $docIds['acct'];
+    db_exec('INSERT INTO quotes (account_id, title, created_by) VALUES (?, ?, 1)', [$acct, 'Phones (with "quotes") & £ signs']);
+    $qid = (int)db()->lastInsertId();
+    db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
+    quote_save_lines($qid, [['product_id' => null, 'service_type' => 'voip', 'description' => 'Hosted seat – unlimited (UK)', 'quantity' => 3, 'monthly_price' => 12.5, 'setup_fee' => 20, 'term_months' => 1]]);
+    quote_send(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'boss@files.example', 'Bea Boss');
+    $before = count(sent_mails());
+    quote_accept(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'Bea Boss', '203.0.113.9', false, 'Bea@Files.example', 'Mozilla/5.0 (iPhone) Safari');
+    usleep(300000);
+    $q = db_one('SELECT * FROM quotes WHERE id = ?', [$qid]);
+    eq(['online', '203.0.113.9', 'Mozilla/5.0 (iPhone) Safari', 'bea@files.example'], [$q['response_method'], $q['response_ip'], $q['response_user_agent'], $q['response_email']]);
+    eq(64, strlen((string)$q['response_fingerprint']));
+    ok(str_contains((string)$q['response_statement'], 'on behalf of Files & Co Ltd'));
+    ok($q['confirmation_sent_at'] !== null);
+    $mails = array_slice(sent_mails(), $before);
+    $conf = array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: bea@files.example')));
+    eq(1, count($conf), 'confirmation sent to whoever accepted');
+    ok(str_contains($conf[0], 'filename="Quote ' . $q['reference'] . ' accepted.pdf"') && str_contains($conf[0], 'application/pdf'));
+    ok(str_contains(mail_body($conf[0]), 'confirms your acceptance'));
+    // The PDF.
+    $pdf = quote_pdf($q);
+    ok(str_starts_with($pdf, '%PDF-1.4') && str_ends_with(rtrim($pdf), '%%EOF'));
+    foreach (['Accepted by', 'Bea Boss', '203.0.113.9', 'Mozilla/5.0 \(iPhone\) Safari', 'Hosted seat ' . "\x96" . ' unlimited \(UK\)', "\xA337.50", '30 days', $q['response_fingerprint']] as $needle) {
+        ok(str_contains($pdf, $needle), "PDF contains $needle");
+    }
+    preg_match('/startxref\n(\d+)/', $pdf, $m);
+    ok(str_starts_with(substr($pdf, (int)$m[1]), 'xref'), 'cross-reference table where it says');
+    // Filed against the customer, once.
+    eq(1, (int)db_value('SELECT COUNT(*) FROM documents WHERE account_id = ? AND file_name = ?', [$acct, "Quote {$q['reference']} accepted.pdf"]));
+    quote_send_confirmation($q);
+    eq(1, (int)db_value('SELECT COUNT(*) FROM documents WHERE account_id = ? AND file_name = ?', [$acct, "Quote {$q['reference']} accepted.pdf"]), 'resending replaces the filed copy');
+    // Recorded by staff, without the email.
+    db_exec('INSERT INTO quotes (account_id, title, created_by, status) VALUES (?, ?, 1, ?)', [$acct, 'Verbal yes', 'sent']);
+    $q2 = (int)db()->lastInsertId();
+    db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $q2), $q2]);
+    $before = count(sent_mails());
+    quote_accept(db_one('SELECT * FROM quotes WHERE id = ?', [$q2]), 'Bea Boss', '', true, 'bea@files.example', '', false);
+    usleep(200000);
+    $q2row = db_one('SELECT * FROM quotes WHERE id = ?', [$q2]);
+    eq(['staff', null, null, 1], [$q2row['response_method'], $q2row['response_ip'], $q2row['confirmation_sent_at'], (int)$q2row['response_recorded_by']]);
+    eq(0, count(array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'Confirmation: quote'))), 'no confirmation when unticked');
+    ok(str_contains(quote_pdf($q2row), 'on the customer\'s behalf'));
+});
+
 test('supplier prices: the preferred supplier sets the product cost, per the product billing cycle', function () {
     as_role('super_admin');
     $supplier = create('suppliers', ['name' => 'Kit Distribution Ltd', 'category' => 'hardware', 'active' => '1', 'email' => 'orders@kit.example']);

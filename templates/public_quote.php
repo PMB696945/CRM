@@ -21,7 +21,9 @@
 
   <?php if ($done === 'accepted' || $quote['status'] === 'accepted'): ?>
     <div class="flash flash-success">✔ Thank you<?= $quote['response_name'] ? ', ' . h(explode(' ', $quote['response_name'])[0]) : '' ?>. You accepted this quote on <?= h(fmt_date($quote['responded_at'])) ?>.
-      <?= signable_configured() ? 'Your contract will arrive by email shortly for you to sign online.' : 'We\'ll be in touch shortly with your contract.' ?></div>
+      <?= signable_configured() ? 'Your contract will arrive by email shortly for you to sign online.' : 'We\'ll be in touch shortly with your contract.' ?>
+      <?= $quote['confirmation_sent_at'] ? 'We\'ve emailed a confirmation to ' . h($quote['response_email'] ?: $quote['recipient_email']) . '.' : '' ?>
+      <a href="?t=<?= h(rawurlencode($token)) ?>&amp;pdf=1">Download a copy (PDF)</a></div>
   <?php elseif ($done === 'declined' || $quote['status'] === 'declined'): ?>
     <div class="flash flash-error">You declined this quote. Thank you for letting us know. If anything changes, just get in touch.</div>
   <?php elseif ($quote['status'] === 'expired'): ?>
@@ -61,7 +63,7 @@
       <label>Your full name<input name="name" required autocomplete="name" value="<?= h($quote['recipient_name']) ?>"></label>
       <label>Your email<input type="email" name="email" required autocomplete="email" value="<?= h($quote['recipient_email']) ?>"></label>
       <?php if (signable_configured()): ?><p class="help -mt-2">We'll send the contract here for you to sign online.</p><?php endif; ?>
-      <label class="check flex-row! items-start gap-2 font-normal!"><input type="checkbox" name="agree" value="1" required class="mt-0.5"> I accept this quote on behalf of <?= h($account['name']) ?><?= signable_configured() ? ' and understand a contract will be sent for signature' : '' ?>.</label>
+      <label class="check flex-row! items-start gap-2 font-normal!"><input type="checkbox" name="agree" value="1" required class="mt-0.5"> <?= h(quote_acceptance_statement($account)) ?></label>
       <button class="btn btn-primary btn-block py-3">Accept quote</button>
     </form>
     <form method="post" class="card stack" action="quote.php?t=<?= h(rawurlencode($token)) ?>" data-confirm="Decline this quote?">

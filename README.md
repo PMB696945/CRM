@@ -229,6 +229,9 @@ Staff can also **Record acceptance** for quotes agreed by phone, **Revise** a se
 
 Generated contracts and templates are stored in `storage/`, which the web can't access. **Include this folder in your backups.**
 
+
+**When a quote is accepted** the customer is emailed a confirmation with a PDF of the quote attached. The PDF ends with an acceptance record: who accepted, their email, the date and time, their IP address and browser, the statement they ticked, and a SHA-256 fingerprint of the quote's lines and terms. A copy is filed in the customer's Files. If a member of staff records the acceptance instead, they choose whether the confirmation is sent, and the record says it was recorded by them. Any quote can be downloaded as a PDF from its page, and **Resend confirmation** sends it again.
+
 ## Products in Xero
 
 Products & tariffs can be created in Xero as **items**, so they can be picked on invoices.

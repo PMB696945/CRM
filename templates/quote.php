@@ -14,6 +14,10 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
       <?php if ($quote['valid_until']): ?> · valid until <?= h(fmt_date($quote['valid_until'])) ?><?php endif; ?></p>
   </div>
   <div class="actions">
+    <a class="btn btn-ghost" href="<?= h($act('pdf')) ?>" target="_blank" rel="noopener">PDF</a>
+    <?php if ($status === 'accepted' && can('sales.edit')): ?>
+      <form method="post" action="<?= h($act('confirmation')) ?>" class="inline" data-confirm="Email the acceptance confirmation and quote PDF to <?= h($quote['response_email'] ?: $quote['recipient_email'] ?: 'the customer') ?>?"><?= csrf_field() ?><button class="btn"><?= $quote['confirmation_sent_at'] ? 'Resend confirmation' : 'Send confirmation' ?></button></form>
+    <?php endif; ?>
     <?php if ($status === 'draft'): ?>
       <a class="btn" href="<?= h($act('edit')) ?>">Edit</a>
     <?php elseif (in_array($status, ['sent', 'expired', 'declined'], true)): ?>
@@ -123,6 +127,7 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
         <?= csrf_field() ?>
         <label>Accepted by<input name="accepted_by" value="<?= h($quote['recipient_name']) ?>" placeholder="Their name"></label>
         <label>Their email<input type="email" name="accepted_email" value="<?= h($quote['recipient_email']) ?>" placeholder="Contract is sent here to sign"></label>
+        <label class="check"><input type="checkbox" name="send_confirmation" value="1" checked> Email them a confirmation with the quote PDF</label>
         <button class="btn">✔ Record acceptance</button>
       </form>
       <form method="post" action="<?= h($act('decline')) ?>" class="stack mt-4">

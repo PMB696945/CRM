@@ -37,7 +37,7 @@ if ($quote) {
             } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $error = 'Please enter a valid email address' . (signable_configured() ? ' – we\'ll send the contract there for you to sign.' : '.');
             } else {
-                quote_accept($quote, mb_substr($name, 0, 150), $ip, false, $email);
+                quote_accept($quote, mb_substr($name, 0, 150), $ip, false, $email, (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
                 $done = 'accepted';
             }
         } elseif (($_POST['response'] ?? '') === 'decline') {
@@ -48,6 +48,15 @@ if ($quote) {
     }
 }
 
+// The customer can download the quote (with their acceptance record, once accepted).
+if ($quote && query('pdf') === '1' && !is_post()) {
+    $pdf = quote_pdf($quote);
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="Quote ' . $quote['reference'] . '.pdf"');
+    header('Content-Length: ' . strlen($pdf));
+    echo $pdf;
+    exit;
+}
 if (!$quote) {
     http_response_code(404);
 }

@@ -19,6 +19,15 @@ function quotes_controller(): void
         $quote = quote_expire_if_due($quote);
     }
     $back = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : url('quotes');
+    if ($action === 'pdf' && $quote) {
+        $pdf = quote_pdf($quote);
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="Quote ' . $quote['reference'] . '.pdf"');
+        header('Content-Length: ' . strlen($pdf));
+        header('X-Content-Type-Options: nosniff');
+        echo $pdf;
+        exit;
+    }
     if ($action !== 'view' && !can('sales.edit')) {
         forbidden();
     }
@@ -110,8 +119,18 @@ function quotes_controller(): void
                 }
                 $name = trim((string)($_POST['accepted_by'] ?? '')) ?: ($quote['recipient_name'] ?: 'Customer');
                 $email = trim((string)($_POST['accepted_email'] ?? '')) ?: $quote['recipient_email'];
-                $contract = quote_accept($quote, $name, 'recorded by ' . current_user()['name'], true, $email);
-                flash('Quote marked as accepted.' . ($contract ? " Contract {$contract['reference']} " . ($contract['status'] === 'sent' ? 'sent for signature.' : 'created as a draft.') : ''));
+                $confirm = !empty($_POST['send_confirmation']);
+                $contract = quote_accept($quote, $name, '', true, $email, '', $confirm);
+                $sent = (string)db_value('SELECT confirmation_sent_at FROM quotes WHERE id = ?', [$quote['id']]);
+                flash('Quote marked as accepted.' . ($confirm && $sent ? " Confirmation with the quote PDF emailed to $email." : '')
+                    . ($contract ? " Contract {$contract['reference']} " . ($contract['status'] === 'sent' ? 'sent for signature.' : 'created as a draft.') : ''));
+                break;
+            case 'confirmation':
+                if ($quote['status'] !== 'accepted') {
+                    throw new IntegrationException('Only accepted quotes have a confirmation to send.');
+                }
+                $to = quote_send_confirmation($quote);
+                flash($to ? "Confirmation with the quote PDF emailed to $to." : 'There\'s no email address for whoever accepted it, so nothing was sent. The PDF is in the customer\'s files.', $to ? 'success' : 'error');
                 break;
             case 'decline':
                 quote_decline($quote, trim((string)($_POST['reason'] ?? '')), 'recorded by ' . current_user()['name']);

@@ -36,6 +36,7 @@ require_once __DIR__ . '/xero.php';
 require_once __DIR__ . '/gocardless.php';
 require_once __DIR__ . '/mailer.php';
 require_once __DIR__ . '/docx.php';
+require_once __DIR__ . '/pdf.php';
 require_once __DIR__ . '/quotes.php';
 require_once __DIR__ . '/contracts.php';
 require_once __DIR__ . '/approvals.php';
