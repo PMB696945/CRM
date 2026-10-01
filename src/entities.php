@@ -103,6 +103,7 @@ const REF_LABELS = [
     'suppliers'     => 'name',
     'supplier_products' => 'description',
     'purchase_orders'   => 'reference',
+    'customer_orders'   => 'reference',
 ];
 
 const SUPPLIER_CATEGORIES = ['network' => 'Network / connectivity', 'hardware' => 'Hardware', 'software' => 'Software & licences',
@@ -503,6 +504,33 @@ function entities(): array
             'search'  => ['supplier_sku', 'description'],
             'filters' => ['supplier_id', 'product_id', 'preferred', 'active'],
             'default_sort' => ['description', 'asc'],
+        ],
+
+        'customer_orders' => [
+            'label' => 'Order', 'plural' => 'Orders', 'icon' => '📦', 'perm' => 'onboarding.edit', 'no_new' => true,
+            'fields' => [
+                'reference'     => ['label' => 'Order', 'type' => 'text', 'readonly' => true],
+                'account_id'    => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'readonly' => true],
+                'title'         => ['label' => 'Title', 'type' => 'text', 'readonly' => true],
+                'status'        => ['label' => 'Step', 'type' => 'select', 'options' => ORDER_STATUSES, 'readonly' => true],
+                'assigned_to'   => ['label' => 'Being handled by', 'type' => 'ref', 'ref' => 'users', 'readonly' => true],
+                'quote_id'      => ['label' => 'Quote', 'type' => 'ref', 'ref' => 'quotes', 'readonly' => true],
+                'contact_name'  => ['label' => 'Customer contact', 'type' => 'text', 'readonly' => true],
+                'contact_email' => ['label' => 'Contact email', 'type' => 'email', 'readonly' => true],
+                'monthly_total' => ['label' => 'Monthly', 'type' => 'money', 'readonly' => true],
+                'setup_total'   => ['label' => 'One-off', 'type' => 'money', 'readonly' => true],
+                'created_at'    => ['label' => 'Accepted', 'type' => 'datetime', 'readonly' => true],
+                'completed_at'  => ['label' => 'Completed', 'type' => 'datetime', 'readonly' => true],
+            ],
+            'list'    => ['reference', 'account_id', 'title', 'status', 'assigned_to', 'monthly_total', 'created_at'],
+            'search'  => ['reference', 'title', 'contact_name', 'contact_email'],
+            'filters' => ['status', 'assigned_to', 'account_id'],
+            'presets' => [
+                'waiting' => ['label' => 'Waiting to be picked up', 'sql' => "t.assigned_to IS NULL AND t.status NOT IN ('completed','cancelled')"],
+                'mine'    => ['label' => 'Mine', 'sql' => 't.assigned_to = ' . (int)(current_user()['id'] ?? 0) . " AND t.status NOT IN ('completed','cancelled')"],
+                'open'    => ['label' => 'In progress', 'sql' => "t.status NOT IN ('completed','cancelled')"],
+            ],
+            'default_sort' => ['created_at', 'desc'],
         ],
 
         'purchase_orders' => [

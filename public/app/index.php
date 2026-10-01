@@ -93,6 +93,7 @@ match (true) {
     $page === 'queue'     => queue_controller(),
     $page === 'ticket_groups' => ticket_groups_controller(),
     $page === 'documents' => documents_controller(),
+    $page === 'customer_orders' => customer_orders_controller(),
     $page === 'error_log' => error_log_controller(),
     $page === 'purchase_orders' => purchase_orders_controller(),
     $page === 'price_import' => price_import_controller(),

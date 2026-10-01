@@ -282,6 +282,9 @@ function contract_sync(array $contract): array
     db_exec('UPDATE contracts SET status = ?, signed_at = IF(? = \'signed\', NOW(), signed_at), signed_file = COALESCE(?, signed_file) WHERE id = ?',
         [$new, $new, $signedFile, $contract['id']]);
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} " . ($new === 'signed' ? "signed by {$contract['signer_name']}" : $new));
+    if ($new === 'signed' && $contract['quote_id'] && ($order = db_one('SELECT id FROM customer_orders WHERE quote_id = ?', [$contract['quote_id']]))) {
+        order_add_event((int)$order['id'], null, null, "Contract {$contract['reference']} signed by {$contract['signer_name']}");
+    }
     if ($new === 'signed' && $contract['quote_id']) {
         $quote = db_one('SELECT * FROM quotes WHERE id = ?', [$contract['quote_id']]);
         if ($quote) {

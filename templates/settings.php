@@ -44,6 +44,20 @@
   </section>
 
   <section class="card form-grid">
+    <h2 class="wide">Orders</h2>
+    <p class="wide muted">When a quote is accepted an order is created and the team below is alerted. As they move it through the steps, the customer is emailed with the message for that step (which can be changed each time).</p>
+    <div class="field"><label for="s_og">Onboarding team</label>
+      <select id="s_og" name="order_group_id"><option value="">Nobody (no alerts)</option>
+        <?php foreach (ticket_groups() as $g): ?><option value="<?= (int)$g['id'] ?>" <?= (string)setting('order_group_id') === (string)$g['id'] ? 'selected' : '' ?>><?= h($g['name']) ?></option><?php endforeach; ?>
+      </select>
+      <div class="help">Add people to it under <a href="<?= h(url('ticket_groups')) ?>">Ticket groups</a>. New orders go to its shared email if it has one, otherwise to each member.</div></div>
+    <?php foreach (['processing', 'confirmed', 'completed', 'cancelled'] as $st): ?>
+      <div class="field wide"><label for="s_om_<?= $st ?>">Message to the customer: <?= h(order_status_label($st)) ?></label>
+        <textarea id="s_om_<?= $st ?>" name="order_message_<?= $st ?>" rows="2"><?= h(order_default_message($st)) ?></textarea></div>
+    <?php endforeach; ?>
+  </section>
+
+  <section class="card form-grid">
     <h2 class="wide">Marketing &amp; service alerts</h2>
     <div class="field"><label for="s_mt">Marketing topics</label><textarea id="s_mt" name="marketing_topics" rows="4" placeholder="Newsletter&#10;Product news &amp; offers&#10;Events &amp; webinars"><?= $v('marketing_topics') ?></textarea>
       <div class="help">One per line. Contacts can choose which of these they want.</div></div>

@@ -12,6 +12,7 @@ $nav = [
     ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []) + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
+        'customer_orders' => ['inbox', 'Orders'],
         'contracts'     => ['signature', 'Contracts'],
         'pipeline'      => ['pipeline', 'Pipeline'],
         'opportunities' => ['pound', 'Opportunities'],
@@ -69,7 +70,7 @@ $flash = flash();
         <h3 class="menu-group-title"><?= h($group) ?></h3>
         <div class="menu">
           <?php foreach ($items as $key => [$ico, $label]): ?>
-            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?></a>
+            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?><?php if ($key === 'customer_orders' && can('onboarding.edit') && ($waiting = orders_waiting_count())): ?><span class="menu-count" title="Waiting to be picked up"><?= $waiting ?></span><?php endif; ?></a>
           <?php endforeach; ?>
         </div>
       <?php endforeach; ?>

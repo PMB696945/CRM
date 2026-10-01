@@ -162,6 +162,12 @@ function quote_accept(array $quote, string $name, string $ip, bool $byStaff = fa
         db_exec("UPDATE opportunities SET stage = 'won', probability = 100 WHERE id = ?", [$quote['opportunity_id']]);
     }
     quote_notify_staff($quote, "Quote {$quote['reference']} accepted", "$name accepted quote {$quote['reference']} – " . $quote['title'] . '.');
+    try {
+        order_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$quote['id']]));
+    } catch (Throwable $e) {
+        error_log('Order after quote acceptance failed: ' . $e->getMessage());
+        log_activity((int)$quote['account_id'], 'task', "Order for quote {$quote['reference']} wasn't created", $e->getMessage());
+    }
     if ($confirm) {
         try {
             quote_send_confirmation(db_one('SELECT * FROM quotes WHERE id = ?', [$quote['id']]));
@@ -401,6 +407,9 @@ function quote_send_confirmation(array $quote): ?string
             . '<tr><td style="padding:6px 0;color:#667085">One-off charges</td><td style="padding:6px 0;text-align:right;font-weight:bold">' . h(money($totals['setup'])) . ' + VAT</td></tr>'
             . '<tr><td style="padding:6px 0;color:#667085">Minimum term</td><td style="padding:6px 0;text-align:right">' . h(term_label($totals['term'])) . '</td></tr></table>'
             . '<p>A copy of the quote with the record of your acceptance is attached for your files.</p>'
+            . (($order = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$quote['id']]))
+                ? '<p>Your order reference is <b>' . h($order['reference']) . '</b>. We\'ll email you as it progresses, and you can follow it at any time:</p>' . email_button(order_tracking_url($order), 'Track your order')
+                : '')
             . (signable_configured() && setting('signable_auto_send', '1') === '1' ? '<p>Your contract will arrive in a separate email for you to sign online.</p>' : '<p>We\'ll be in touch shortly about the next steps.</p>')
             . '<p style="color:#667085;font-size:13px">If you didn\'t accept this quote, or anything looks wrong, please reply to this email straight away.</p>';
         send_mail($to, $name, 'Confirmation: quote ' . $quote['reference'] . ' accepted', email_layout('Thank you, your quote is accepted', $body), null, [],

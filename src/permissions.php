@@ -45,6 +45,7 @@ const PERMISSIONS = [
         'tickets.all'   => 'See tickets in every group (not just their own)',
         'tickets.alerts' => 'Get alerts about tickets nobody has picked up',
         'sales.edit'    => 'Quotes, contracts and opportunities',
+        'onboarding.edit' => 'Work through customer orders and update customers on their progress',
         'records.delete' => 'Delete contacts, services, tickets and other records',
         'export'        => 'Export lists to CSV',
     ],
@@ -71,20 +72,20 @@ const PERMISSIONS = [
 ];
 
 const DEFAULT_ROLE_PERMISSIONS = [
-    'admin'     => ['documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.alerts', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'customers.delete', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
+    'admin'     => ['onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.alerts', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'customers.delete', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
                     'records.delete', 'export', 'finance.view', 'products.edit', 'costs.view', 'costs.edit', 'marketing.send', 'settings.manage', 'users.manage'],
-    'manager'   => ['documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
+    'manager'   => ['onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
                     'records.delete', 'export', 'finance.view', 'costs.view', 'costs.edit', 'marketing.send'],
-    'staff'     => ['suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'finance.view', 'costs.view'],
+    'staff'     => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'finance.view', 'costs.view'],
     'sales'     => ['orders.check', 'customers.edit', 'sales.edit', 'tickets.edit', 'costs.view'],
-    'support'   => ['suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit'],
+    'support'   => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit'],
     'finance'   => ['suppliers.view', 'suppliers.edit', 'purchasing.edit', 'customers.edit', 'finance.view', 'costs.view', 'costs.edit', 'export'],
     'read_only' => [],
 ];
 
 /** Permissions added after the Roles page existed: roles saved before then get the defaults for these. */
 const PERMISSIONS_ADDED_LATER = ['costs.view', 'costs.edit', 'orders.check', 'orders.place', 'tickets.all', 'tickets.alerts',
-    'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit'];
+    'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'onboarding.edit'];
 
 /** Built-in roles plus any custom roles created on the Roles page: [key => label]. */
 function roles(): array

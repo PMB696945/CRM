@@ -81,7 +81,8 @@ function quotes_controller(): void
             $library = library_documents();
             $customerFiles = account_documents((int)$account['id']);
             $picked = array_map('intval', array_column(quote_documents((int)$quote['id']), 'id'));
-            page('quote', compact('quote', 'account', 'lines', 'contracts', 'recipients', 'library', 'customerFiles', 'picked'), $quote['reference'] . ' ' . $quote['title']);
+            $order = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$quote['id']]);
+            page('quote', compact('order', 'quote', 'account', 'lines', 'contracts', 'recipients', 'library', 'customerFiles', 'picked'), $quote['reference'] . ' ' . $quote['title']);
             return;
     }
 
@@ -414,7 +415,8 @@ function settings_controller(): void
     $keys = ['company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
         'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https',
-        'marketing_topics', 'campaign_batch_size'];
+        'marketing_topics', 'campaign_batch_size',
+        'order_group_id', 'order_message_processing', 'order_message_confirmed', 'order_message_completed', 'order_message_cancelled'];
     $before = array_combine($keys, array_map(fn($k) => (string)setting($k), $keys));
     if (is_post()) {
         verify_csrf();
@@ -439,6 +441,12 @@ function settings_controller(): void
             if ($key === 'require_2fa' && $value === '1' && !current_user()['totp_enabled']) {
                 $value = '0'; // set it up yourself first
                 flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
+            }
+            if ($key === 'order_group_id' && !($value !== '' && ctype_digit($value) && db_value('SELECT 1 FROM ticket_groups WHERE id = ?', [$value]))) {
+                $value = '';
+            }
+            if (str_starts_with($key, 'order_message_') && $value === ORDER_DEFAULT_MESSAGES[substr($key, 14)]) {
+                $value = ''; // unchanged from the default
             }
             if ($key === 'campaign_batch_size') {
                 $value = ctype_digit($value) ? (string)max(5, min(500, (int)$value)) : '';

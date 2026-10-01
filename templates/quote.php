@@ -15,6 +15,8 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
   </div>
   <div class="actions">
     <a class="btn btn-ghost" href="<?= h($act('pdf')) ?>" target="_blank" rel="noopener">PDF</a>
+    <?php if ($order): ?><a class="btn" href="<?= h(url('customer_orders', ['action' => 'view', 'id' => $order['id']])) ?>">Order <?= h($order['reference']) ?> · <?= h(order_status_label($order['status'])) ?></a>
+    <?php elseif ($status === 'accepted' && can('onboarding.edit')): ?><form method="post" action="<?= h(url('customer_orders', ['action' => 'create', 'quote_id' => $quote['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn">Create order</button></form><?php endif; ?>
     <?php if ($status === 'accepted' && can('sales.edit')): ?>
       <form method="post" action="<?= h($act('confirmation')) ?>" class="inline" data-confirm="Email the acceptance confirmation and quote PDF to <?= h($quote['response_email'] ?: $quote['recipient_email'] ?: 'the customer') ?>?"><?= csrf_field() ?><button class="btn"><?= $quote['confirmation_sent_at'] ? 'Resend confirmation' : 'Send confirmation' ?></button></form>
     <?php endif; ?>

@@ -420,7 +420,7 @@ function entity_controller(string $name): void
 
         case 'new':
         case 'edit':
-            if (!$canWrite || ($name === 'products' && $action === 'new' && !can('products.edit'))) {
+            if (!$canWrite || !empty($entity['no_new']) || ($name === 'products' && $action === 'new' && !can('products.edit'))) {
                 forbidden();
             }
             $existing = null;
@@ -647,7 +647,8 @@ function account_view(array $entity, array $account): void
     }
 
     $files = account_documents($id);
-    page('account', compact('files', 'entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
+    $orders = list_rows('customer_orders', ['filters' => ['account_id' => $id], 'per_page' => 10, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
+    page('account', compact('orders', 'files', 'entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
         'sites', 'mainContact', 'billingContact', 'pendingRequest', 'history', 'giacomOrders', 'giacomChecks'), $account['name']);
 }
 

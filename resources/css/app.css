@@ -533,3 +533,13 @@
   .grid-side { display: block !important; }
   .card { box-shadow: none !important; break-inside: avoid; }
 }
+
+@layer components {
+  .order-steps { @apply m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4; }
+  .order-steps li { @apply flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-theme-sm text-gray-500 dark:border-gray-800 dark:text-gray-400; }
+  .order-steps li span { @apply flex size-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-theme-xs font-semibold text-gray-500 dark:bg-white/5; }
+  .order-steps li.done { @apply border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-500; }
+  .order-steps li.done span { @apply bg-success-500 text-white; }
+  .order-steps li.current { @apply border-brand-500 bg-brand-50 font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400; }
+  .order-steps li.current span { @apply bg-brand-500 text-white; }
+}

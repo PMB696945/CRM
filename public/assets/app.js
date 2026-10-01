@@ -258,3 +258,16 @@ document.querySelectorAll('.po-form').forEach((form) => {
   });
   total();
 });
+
+// Order step form: show the default customer message for the chosen step.
+document.querySelectorAll('[data-order-step]').forEach((form) => {
+  const select = form.querySelector('[data-step-select]');
+  const message = form.querySelector('[data-step-message]');
+  let last = message.value;
+  select.addEventListener('change', () => {
+    const msg = select.selectedOptions[0].dataset.message || '';
+    // Only replace the text if it hasn't been edited.
+    if (message.value === last) message.value = msg;
+    last = msg;
+  });
+});

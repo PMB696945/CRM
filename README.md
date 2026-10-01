@@ -290,6 +290,14 @@ Emails go out in batches (50 by default; see Settings → Marketing) while the p
 
 **Service alerts through Mailchimp:** Mailchimp's rules don't allow service messages to be sent as marketing campaigns. Its paid **Transactional** add-on (formerly Mandrill) is designed for them. To use it for all email the CRM sends, choose *Mailchimp Transactional* under Settings → Email and paste its API key.
 
+## Orders and onboarding
+
+Accepting a quote (online or recorded by staff) creates an **order** (ORD-000001…) and emails the **onboarding team**: the *Onboarding* group under Admin → Ticket groups (change which group in Settings → Orders). Add the people who process orders to that group; if it has a shared email address, alerts go there instead.
+
+Orders waiting to be picked up are counted next to **Orders** in the menu. Whoever picks one up moves it through the steps: **Quotation accepted → Order processing → Order confirmed → Order completed** (or Cancelled). At each step the customer is emailed a progress update with a message (a default for each step is set in Settings → Orders and can be changed each time), unless you untick it. Internal notes stay private. Customers can follow their order on a tracking page linked from every update and from the acceptance confirmation.
+
+The order page links to everything needed to fulfil it: the contract, broadband checks and orders (Giacom), purchase orders and services. Signing the contract is noted on the order's timeline. Quotes accepted before orders existed have a **Create order** button.
+
 ## Documents
 
 **Documents** (under Sales) is a library of spec sheets, brochures and the like, in folders. People whose role can "Upload and organise documents" (admins and managers by default) add folders and upload files; everyone can view and download them. When you email a quote, tick any library documents (or the customer's own files) to attach them; up to 15 MB in total.

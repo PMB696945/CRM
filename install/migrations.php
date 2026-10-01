@@ -671,4 +671,53 @@ return [
             }
         }
     },
+    15 => function (): void {
+        // Customer orders: created when a quote is accepted, worked through by the onboarding team.
+        db()->exec("CREATE TABLE IF NOT EXISTS customer_orders (
+            id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            reference     VARCHAR(20) NULL UNIQUE,
+            quote_id      INT UNSIGNED NULL UNIQUE,
+            account_id    INT UNSIGNED NOT NULL,
+            title         VARCHAR(200) NOT NULL,
+            status        VARCHAR(20) NOT NULL DEFAULT 'accepted',
+            assigned_to   INT UNSIGNED NULL,
+            contact_name  VARCHAR(150) NULL,
+            contact_email VARCHAR(190) NULL,
+            token         CHAR(48) NULL UNIQUE,
+            monthly_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+            setup_total   DECIMAL(12,2) NOT NULL DEFAULT 0,
+            notes         TEXT NULL,
+            picked_up_at  DATETIME NULL,
+            confirmed_at  DATETIME NULL,
+            completed_at  DATETIME NULL,
+            created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_co_status (status, assigned_to),
+            CONSTRAINT fk_co_quote FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE SET NULL,
+            CONSTRAINT fk_co_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            CONSTRAINT fk_co_user FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS customer_order_events (
+            id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            order_id          INT UNSIGNED NOT NULL,
+            status            VARCHAR(20) NULL COMMENT 'The step reached, or NULL for a note',
+            message           TEXT NULL COMMENT 'What the customer was told',
+            note              TEXT NULL COMMENT 'Internal only',
+            emailed_to        VARCHAR(190) NULL,
+            user_id           INT UNSIGNED NULL,
+            created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_coe_order (order_id, id),
+            CONSTRAINT fk_coe_order FOREIGN KEY (order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
+            CONSTRAINT fk_coe_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        // The onboarding team is a group like Sales or Faults: add people to it under Admin -> Ticket groups.
+        $group = db_value("SELECT id FROM ticket_groups WHERE name = 'Onboarding'");
+        if (!$group) {
+            db_exec("INSERT INTO ticket_groups (name, description) VALUES ('Onboarding', 'Works through new orders from accepted quotes')");
+            $group = db()->lastInsertId();
+        }
+        if (!db_value("SELECT 1 FROM settings WHERE name = 'order_group_id'")) {
+            db_exec("INSERT INTO settings (name, value) VALUES ('order_group_id', ?)", [(string)$group]);
+        }
+    },
 ];

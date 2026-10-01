@@ -146,6 +146,13 @@ $canEdit = can('customers.edit');
     </section>
     <?php endif; ?>
 
+    <?php if ($orders): ?>
+    <section class="card">
+      <div class="card-head"><h2>Orders</h2></div>
+      <?php render('_table', ['entity' => entity('customer_orders'), 'name' => 'customer_orders', 'rows' => $orders, 'columns' => ['reference', 'title', 'status', 'assigned_to', 'monthly_total', 'created_at']]); ?>
+    </section>
+    <?php endif; ?>
+
     <section class="card">
       <div class="card-head"><h2>Quotes</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('quotes'), 'name' => 'quotes', 'rows' => $quotes, 'columns' => ['reference', 'title', 'status', '_monthly', 'valid_until', 'sent_at']]); ?>

@@ -904,7 +904,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
     eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));
@@ -1641,6 +1641,73 @@ test('accepting a quote emails the customer a confirmation with a PDF and the ac
     eq(['staff', null, null, 1], [$q2row['response_method'], $q2row['response_ip'], $q2row['confirmation_sent_at'], (int)$q2row['response_recorded_by']]);
     eq(0, count(array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'Confirmation: quote'))), 'no confirmation when unticked');
     ok(str_contains(quote_pdf($q2row), 'on the customer\'s behalf'));
+});
+
+test('accepted quotes become orders: onboarding team alerted, customer updated at each step', function () use (&$docIds) {
+    as_role('super_admin');
+    $acct = $docIds['acct'];
+    $team = (int)db_value("SELECT id FROM ticket_groups WHERE name = 'Onboarding'");
+    ok($team > 0, 'Onboarding team created');
+    eq((string)$team, (string)setting('order_group_id'));
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Olive Onboard', 'olive@netcomm.example', 'x', 'staff')");
+    $olive = (int)db()->lastInsertId();
+    db_exec('INSERT INTO ticket_group_members (group_id, user_id) VALUES (?, ?)', [$team, $olive]);
+
+    db_exec('INSERT INTO quotes (account_id, title, created_by, status, recipient_name, recipient_email) VALUES (?, ?, 1, ?, ?, ?)', [$acct, 'New office lines', 'sent', 'Bea Boss', 'bea@files.example']);
+    $qid = (int)db()->lastInsertId();
+    db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
+    quote_save_lines($qid, [['product_id' => null, 'service_type' => 'broadband', 'description' => 'FTTP 900', 'quantity' => 1, 'monthly_price' => 60, 'setup_fee' => 99, 'term_months' => 36]]);
+    $before = count(sent_mails());
+    quote_accept(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'Bea Boss', '198.51.100.7', false, 'bea@files.example', 'Firefox');
+    usleep(300000);
+    $order = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$qid]);
+    ok($order !== null, 'order created');
+    eq([sprintf('ORD-%06d', $order['id']), 'accepted', null, 'bea@files.example', 60.0, 99.0],
+        [$order['reference'], $order['status'], $order['assigned_to'], $order['contact_email'], (float)$order['monthly_total'], (float)$order['setup_total']]);
+    eq($order['id'], order_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]))['id'], 'only one order per quote');
+    $mails = array_slice(sent_mails(), $before);
+    $teamMail = array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: olive@netcomm.example')));
+    eq(1, count($teamMail), 'onboarding team alerted');
+    ok(str_contains(mail_body($teamMail[0]), $order['reference']));
+    $conf = array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: bea@files.example')));
+    ok(str_contains(mail_body($conf[0]), 'Track your order') && str_contains(mail_body($conf[0]), $order['reference']), 'confirmation includes the order tracking link');
+    ok(orders_waiting_count() >= 1);
+
+    // Picked up once only.
+    ok(order_pick_up($order, $olive));
+    ok(!order_pick_up(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]), 1), 'second pick-up refused');
+    $order = db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]);
+    eq($olive, (int)$order['assigned_to']);
+
+    // Steps, each emailed to the customer.
+    eq('processing', order_next_step('accepted'));
+    foreach (['processing' => 'Order processing', 'confirmed' => 'Order confirmed', 'completed' => 'Order completed'] as $step => $label) {
+        $before = count(sent_mails());
+        $to = order_set_status(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]), $step, order_default_message($step) . " ($step)", true, "internal $step");
+        usleep(250000);
+        eq('bea@files.example', $to);
+        $m = array_slice(sent_mails(), $before);
+        eq(1, count($m));
+        ok(str_contains($m[0], 'Subject: =?UTF-8?B?') || str_contains($m[0], "Subject: Your order {$order['reference']}: $label"));
+        $body = mail_body($m[0]);
+        ok(str_contains($body, "($step)") && str_contains($body, 'Track your order') && !str_contains($body, "internal $step"), "$step email has the message but not the internal note");
+    }
+    $order = db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]);
+    eq('completed', $order['status']);
+    ok($order['confirmed_at'] !== null && $order['completed_at'] !== null);
+    try { order_set_status($order, 'processing', '', false); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'completed')); }
+    $public = order_events((int)$order['id'], true);
+    eq(['accepted', 'processing', 'confirmed', 'completed'], array_column($public, 'status'), 'customer sees the steps');
+    eq(5, count(order_events((int)$order['id'])), 'staff also see the pick-up');
+    // Without notifying the customer.
+    db_exec("UPDATE customer_orders SET status = 'processing', completed_at = NULL WHERE id = ?", [$order['id']]);
+    $before = count(sent_mails());
+    eq(null, order_set_status(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]), 'cancelled', 'Changed our mind', false));
+    usleep(200000);
+    eq($before, count(sent_mails()), 'no email when not asked');
+    ok(!order_is_open(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']])));
+    db_exec('DELETE FROM ticket_group_members WHERE user_id = ?', [$olive]);
+    db_exec('UPDATE users SET active = 0 WHERE id = ?', [$olive]);
 });
 
 test('supplier prices: the preferred supplier sets the product cost, per the product billing cycle', function () {
