@@ -210,7 +210,15 @@ When a supplier invoice is approved to pay (with **Send approved supplier invoic
 - **File:** the uploaded invoice (PDF or photo) is attached.
 - **Lines:** come from the purchase order when the amounts agree, otherwise from the lines read off the invoice.
 - **Nominal codes:** each line is coded with the first of: the product's purchases nominal code; the supplier's **Default nominal code** (on the supplier); the default under Admin → Xero.
-- **VAT:** uses the tax type set there (e.g. INPUT2).
+- **VAT, line by line**, so one invoice can mix rates. Each line uses the first of:
+  1. the product's **VAT on purchases**, unless the invoice prints a different rate for that line;
+  2. the rate printed on that line of the invoice (20%, 5%, 0%, exempt or reverse charge);
+  3. the supplier's **Default VAT**;
+  4. your reverse charge rate, if the invoice says the reverse charge applies;
+  5. the standard 20% rate.
+
+  Under Admin → Xero → Supplier bills you choose which Xero tax type is used for each printed rate, including **Reverse charge**. If Xero's VAT total for the bill differs from the invoice's, the invoice page says so.
+- **VAT when you sell:** products also have **VAT on sales**, which is sent to Xero with the item.
 
 **Load nominal codes from Xero** brings in your chart of accounts and VAT rates, so codes can be picked from a list and are checked.
 

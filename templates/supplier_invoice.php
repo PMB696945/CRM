@@ -31,7 +31,8 @@ $isImage = str_starts_with((string)$inv['mime'], 'image/');
   </div>
 </div>
 
-<?php if ($inv['xero_error']): ?><div class="flash flash-error">Xero: <?= h($inv['xero_error']) ?></div><?php endif; ?>
+<?php if ($inv['xero_error']): ?><div class="flash <?= $inv['xero_invoice_id'] ? 'flash-warning' : 'flash-error' ?>">Xero: <?= h($inv['xero_error']) ?></div><?php endif; ?>
+<?php if ($inv['reverse_charge']): ?><div class="flash flash-info">This invoice is under the <b>reverse charge</b>: you account for the VAT. Its bill in Xero uses your reverse charge tax rate.</div><?php endif; ?>
 <?php if ($inv['xero_invoice_id'] && !$inv['xero_error']): ?><div class="flash flash-info">In Xero as a bill since <?= h(fmt_datetime($inv['xero_posted_at'])) ?><?= $inv['xero_attached'] ? ', with the invoice attached' : '' ?>.</div><?php endif; ?>
 <?php if ($problems && $inv['status'] !== 'approved'): ?>
   <div class="flash flash-warning"><b>Check this invoice:</b><ul class="mt-1"><?php foreach ($problems as $p): ?><li><?= h($p) ?></li><?php endforeach; ?></ul></div>
@@ -63,8 +64,9 @@ $isImage = str_starts_with((string)$inv['mime'], 'image/');
       <div class="grid gap-6 lg:grid-cols-2">
         <div><h3 class="subhead">On the invoice</h3>
           <?php if ($lines): ?><table class="table small"><tbody><?php foreach ($lines as $l): ?>
-            <tr><td><?= h((string)($l['description'] ?? '')) ?></td><td class="num"><?= isset($l['quantity']) ? h((string)$l['quantity']) . ' ×' : '' ?></td><td class="num"><?= isset($l['net_amount']) && $l['net_amount'] !== null ? h(money($l['net_amount'])) : '' ?></td></tr>
-          <?php endforeach; ?></tbody></table><?php else: ?><p class="muted small">Line details are read by Claude only.</p><?php endif; ?></div>
+            <tr><td><?= h((string)($l['description'] ?? '')) ?></td><td class="num"><?= isset($l['quantity']) ? h((string)$l['quantity']) . ' ×' : '' ?></td><td class="num"><?= isset($l['net_amount']) && $l['net_amount'] !== null ? h(money($l['net_amount'])) : '' ?></td>
+              <td class="num muted"><?= match ($rate = $l['vat_rate'] ?? null) { null => '', 'RC' => 'Reverse charge', 'exempt' => 'Exempt', default => h($rate) . '% VAT' } ?></td></tr>
+          <?php endforeach; ?></tbody></table><?php else: ?><p class="muted small">No lines could be read from the invoice.</p><?php endif; ?></div>
         <div><h3 class="subhead">On the purchase order</h3>
           <?php if ($poLines): ?><table class="table small"><tbody><?php foreach ($poLines as $l): ?>
             <tr><td><?= h($l['description']) ?></td><td class="num"><?= (int)$l['quantity'] ?> ×</td><td class="num"><?= h(money($l['quantity'] * $l['unit_cost'])) ?></td></tr>

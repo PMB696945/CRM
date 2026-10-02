@@ -129,8 +129,18 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
       <label>Bills arrive in Xero as
         <select name="bill_status"><?php foreach (['DRAFT' => 'Draft', 'SUBMITTED' => 'Awaiting approval', 'AUTHORISED' => 'Awaiting payment'] as $k => $l): ?><option value="<?= $k ?>" <?= (setting('xero_bill_status') ?: 'DRAFT') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
       <label>Purchases account code<input name="bill_account" value="<?= h(setting('xero_bill_account')) ?>" placeholder="<?= h(setting('xero_item_purchase_account') ?: '310') ?>" list="xero_purchase_codes" autocomplete="off"></label>
-      <label>Tax rate (Xero tax type)<input name="bill_tax_type" value="<?= h(setting('xero_bill_tax_type')) ?>" placeholder="INPUT2 (20% VAT on expenses)" list="xero_tax_types" autocomplete="off"></label>
+      <label>20% VAT (standard rate)<input name="bill_tax_type" value="<?= h(setting('xero_bill_tax_type')) ?>" placeholder="INPUT2 (20% VAT on expenses)" list="xero_tax_types" autocomplete="off"></label>
     </div>
+    <?php $rateMap = xero_bill_rate_map(); ?>
+    <h3>VAT rates on bills</h3>
+    <p class="help">Each line gets its own VAT: the product's <i>VAT on purchases</i>, else the rate printed on that line of the invoice, else the supplier's <i>Default VAT</i>, else the 20% rate above. These are the Xero tax types used for the rates printed on invoices:</p>
+    <div class="form-grid">
+      <label>5% (reduced rate)<input name="rate_5" value="<?= h($rateMap['5']) ?>" list="xero_tax_types" autocomplete="off"></label>
+      <label>0% (zero rated)<input name="rate_0" value="<?= h($rateMap['0']) ?>" list="xero_tax_types" autocomplete="off"></label>
+      <label>Exempt<input name="rate_exempt" value="<?= h($rateMap['exempt']) ?>" list="xero_tax_types" autocomplete="off"></label>
+      <label>Reverse charge<input name="rate_rc" value="<?= h($rateMap['RC']) ?>" list="xero_tax_types" autocomplete="off" placeholder="Pick your reverse charge rate"></label>
+    </div>
+    <p class="help">Reverse charge: when an invoice or line says the reverse charge applies (e.g. wholesale telecoms, or services from abroad), this tax type is used, so you account for the VAT. Pick the matching rate from your Xero VAT rates: Load nominal codes from Xero fills the lists.</p>
     <p class="help">Each line is coded with, in order: the product's purchases nominal code, the supplier's default nominal code (on the supplier), or the code above. Bills go to the supplier's linked Xero contact, or Xero matches (or adds) one by name. This needs permission to create invoices and attachments: after switching it on, press <b>Reconnect</b> and approve.</p>
     <button class="btn">Save</button>
   </form>

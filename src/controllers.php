@@ -850,6 +850,16 @@ function xero_controller(): void
                     }
                     set_setting($key, $value === '' ? null : $value);
                 }
+                $map = [];
+                foreach (['5' => 'rate_5', '0' => 'rate_0', 'exempt' => 'rate_exempt', 'RC' => 'rate_rc'] as $rate => $field) {
+                    $value = strtoupper(trim((string)($_POST[$field] ?? '')));
+                    if ($problem = xero_code_problem($value, 'tax')) {
+                        flash($problem . ' Nothing was saved.', 'error');
+                        redirect(url('xero'));
+                    }
+                    $map[$rate] = $value;
+                }
+                set_setting('xero_bill_rate_map', json_encode($map));
                 set_setting('xero_push_bills', $on ? '1' : null);
                 set_setting('xero_bill_attach', !empty($_POST['bill_attach']) ? '1' : '0');
                 set_setting('xero_bill_status', in_array($_POST['bill_status'] ?? '', ['DRAFT', 'SUBMITTED', 'AUTHORISED'], true) ? $_POST['bill_status'] : 'DRAFT');

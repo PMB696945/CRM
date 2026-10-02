@@ -816,4 +816,17 @@ return [
             db()->exec('ALTER TABLE suppliers ADD COLUMN purchase_account_code VARCHAR(20) NULL AFTER payment_terms');
         }
     },
+    20 => function (): void {
+        // VAT per product and supplier (including reverse charge), and reverse-charge invoices.
+        foreach ([
+            ['products', 'sales_tax_type', 'VARCHAR(50) NULL AFTER sales_account_code'],
+            ['products', 'purchase_tax_type', 'VARCHAR(50) NULL AFTER purchase_account_code'],
+            ['suppliers', 'purchase_tax_type', 'VARCHAR(50) NULL AFTER purchase_account_code'],
+            ['supplier_invoices', 'reverse_charge', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER currency'],
+        ] as [$table, $col, $def]) {
+            if (!column_exists($table, $col)) {
+                db()->exec("ALTER TABLE $table ADD COLUMN $col $def");
+            }
+        }
+    },
 ];

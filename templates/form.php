@@ -70,7 +70,7 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
             <input id="<?= h($id) ?>" type="number" step="1" name="<?= h($field) ?>" value="<?= h($value) ?>" <?= isset($def['min']) ? 'min="' . (int)$def['min'] . '"' : '' ?> <?= isset($def['max']) ? 'max="' . (int)$def['max'] . '"' : '' ?> <?= !empty($def['required']) ? 'required' : '' ?>>
           <?php break;
           default: ?>
-            <?php $options = !empty($def['datalist']) ? nominal_codes($def['datalist']) : []; ?>
+            <?php $options = empty($def['datalist']) ? [] : ($def['datalist'] === 'tax' ? xero_tax_rates() : nominal_codes($def['datalist'])); ?>
             <input id="<?= h($id) ?>" type="<?= h(in_array($def['type'], ['email', 'tel', 'date'], true) ? $def['type'] : 'text') ?>" name="<?= h($field) ?>" value="<?= h($value) ?>" <?= !empty($def['required']) ? 'required' : '' ?><?= $options ? ' list="' . h($id) . '_list" autocomplete="off"' : '' ?>>
             <?php if ($options): ?><datalist id="<?= h($id) ?>_list"><?php foreach ($options as $code => $label): ?><option value="<?= h($code) ?>"><?= h($label) ?></option><?php endforeach; ?></datalist><?php endif; ?>
         <?php endswitch; ?>

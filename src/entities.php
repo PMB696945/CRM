@@ -273,8 +273,12 @@ function entities(): array
                 'sales_account_code'    => ['label' => 'Sales nominal code', 'type' => 'text', 'section' => 'Accounts', 'datalist' => 'sales',
                     'section_help' => 'Where sales and costs of this product are posted in your accounts (and in Xero).',
                     'default' => setting('xero_item_sales_account'), 'help' => 'e.g. 200 Sales'],
+                'sales_tax_type'    => ['label' => 'VAT on sales', 'type' => 'text', 'datalist' => 'tax',
+                    'help' => 'Xero tax type when you sell it, e.g. OUTPUT2 (20%), ZERORATEDOUTPUT, or a reverse charge rate. Blank: the default under Admin → Xero'],
                 'purchase_account_code' => ['label' => 'Purchases nominal code', 'type' => 'text', 'datalist' => 'purchases',
                     'default' => setting('xero_item_purchase_account'), 'help' => 'e.g. 310 Cost of goods sold'],
+                'purchase_tax_type' => ['label' => 'VAT on purchases', 'type' => 'text', 'datalist' => 'tax',
+                    'help' => 'Xero tax type when you buy it in, e.g. INPUT2 (20%), ZERORATEDINPUT, or a reverse charge rate. Blank: whatever rate the supplier\'s invoice shows'],
                 'xero_synced_at'    => ['label' => 'Sent to Xero', 'type' => 'datetime', 'readonly' => true, 'if' => 'xero_connected'],
                 'xero_sync_error'   => ['label' => 'Xero problem', 'type' => 'text', 'readonly' => true, 'if' => 'xero_connected'],
             ],
@@ -481,6 +485,8 @@ function entities(): array
                 'payment_terms'  => ['label' => 'Payment terms', 'type' => 'text', 'section' => 'Terms & notes', 'help' => 'e.g. 30 days from invoice, Direct Debit'],
                 'purchase_account_code' => ['label' => 'Default nominal code', 'type' => 'text', 'datalist' => 'purchases',
                     'help' => 'For their bills in Xero, on lines that aren\'t one of your products (e.g. 320 for connectivity, 429 for general expenses)'],
+                'purchase_tax_type' => ['label' => 'Default VAT', 'type' => 'text', 'datalist' => 'tax',
+                    'help' => 'Xero tax type for their bills when a line has no rate of its own, e.g. a reverse charge rate for an overseas or wholesale telecoms supplier'],
                 'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
                 'account_id'     => ['label' => 'Customer / dealer record', 'type' => 'ref', 'ref' => 'accounts', 'section' => 'Links',
                     'help' => 'When they are also a customer or dealer: one company record, with this as its Supplier tab. The name, address and phone are shared.'],
@@ -977,6 +983,13 @@ function validate_rules(string $name, array $data, ?int $id): array
         foreach (['sales_account_code', 'purchase_account_code'] as $f) {
             if (!empty($data[$f]) && !isset($codes[$data[$f]])) {
                 $errors[$f] = 'There\'s no active account with code "' . $data[$f] . '" in your Xero chart of accounts.';
+            }
+        }
+    }
+    if (in_array($name, ['products', 'suppliers'], true)) {
+        foreach (['sales_tax_type', 'purchase_tax_type'] as $f) {
+            if (!empty($data[$f]) && ($problem = xero_code_problem((string)$data[$f], 'tax'))) {
+                $errors[$f] = $problem;
             }
         }
     }

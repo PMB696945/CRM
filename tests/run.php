@@ -416,6 +416,40 @@ test('bill lines are nominal coded: product, then supplier default, then the bil
     eq(['630', '320'], array_column($bill['LineItems'], 'AccountCode'));
 });
 
+test('bills carry each line\'s own VAT: product rates, rates read off the invoice, reverse charge', function () {
+    eq(['20', '5', '0', '0', 'RC', 'RC', 'exempt', '17.5', null, '20', null], array_map('invoice_vat_rate', ['20%', 'VAT 5%', '0.00%', 'Zero', 'Reverse charge', 'R/C', 'Exempt', '17.5%', 'Router', '20', '2.00']));
+    ok(invoice_is_reverse_charge('Customer to account for VAT to HMRC'), 'domestic reverse charge wording');
+    ok(!invoice_is_reverse_charge('VAT @ 20%'), 'ordinary invoice');
+
+    $sid = create('suppliers', ['name' => 'Mixed VAT Wholesale']);
+    $pid = create('products', ['sku' => 'VAT-T1', 'name' => 'Training course', 'category' => array_key_first(SERVICE_TYPES), 'monthly_price' => '100',
+        'term_months' => '12', 'purchase_tax_type' => 'EXEMPTEXPENSES']);
+    create('supplier_products', ['supplier_id' => $sid, 'product_id' => $pid, 'description' => 'Training course', 'cost_price' => '50', 'billing_frequency' => 'monthly']);
+    $mk = function (array $lines, int $reverse = 0) use ($sid) {
+        db_exec("INSERT INTO supplier_invoices (supplier_id, status, invoice_number, net, vat, total, reverse_charge, line_items, file_name, stored_name, size) VALUES (?, 'approved', 'MV', ?, 0, 0, ?, ?, 'x.pdf', 'x.pdf', 1)",
+            [$sid, array_sum(array_column($lines, 'net_amount')), $reverse, json_encode($lines)]);
+        return db_one('SELECT * FROM supplier_invoices WHERE id = ?', [(int)db()->lastInsertId()]);
+    };
+    $line = fn($d, $n, $r) => ['description' => $d, 'quantity' => 1, 'net_amount' => $n, 'vat_rate' => $r];
+
+    // Standard, zero-rated and the product's own (exempt) rate on one bill.
+    $bill = xero_bill_payload($mk([$line('Handsets', 100, '20'), $line('Postage stamps', 10, '0'), $line('Training course', 50, null)]));
+    eq(['INPUT2', 'ZERORATEDINPUT', 'EXEMPTEXPENSES'], array_column($bill['LineItems'], 'TaxType'));
+
+    // A reverse charge line needs its tax type chosen first.
+    $rc = $mk([$line('Wholesale minutes', 200, 'RC'), $line('Handsets', 100, '20')]);
+    try { xero_bill_payload($rc); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'reverse charge'), $e->getMessage()); }
+    set_setting('xero_bill_rate_map', json_encode(['RC' => 'DRCHARGE20']));
+    eq(['DRCHARGE20', 'INPUT2'], array_column(xero_bill_payload($rc)['LineItems'], 'TaxType'));
+    eq('RRINPUT', xero_bill_rate_map()['5'], 'other rates keep their defaults');
+
+    // A whole invoice under the reverse charge, with no rates per line; and a supplier's default VAT.
+    eq(['DRCHARGE20'], array_column(xero_bill_payload($mk([$line('Data services', 300, null)], 1))['LineItems'], 'TaxType'));
+    db_exec("UPDATE suppliers SET purchase_tax_type = 'ZERORATEDINPUT' WHERE id = ?", [$sid]);
+    eq(['ZERORATEDINPUT', 'INPUT2'], array_column(xero_bill_payload($mk([$line('Overseas licence', 40, null), $line('Handsets', 100, '20')]))['LineItems'], 'TaxType'));
+    set_setting('xero_bill_rate_map', null);
+});
+
 test('approved supplier invoices go to Xero as bills, with the uploaded invoice attached', function () {
     as_role('super_admin');
     $sup = (int)db_value("SELECT id FROM suppliers WHERE name = 'Supplier 1'");
@@ -2135,8 +2169,8 @@ test('invoice reader: tables, unlabelled dates and totals laid out in columns', 
     $rows = pdf_extract_rows($pdf->output());
     $f = invoice_read_builtin($rows, pdf_rows_text($rows));
     eq(['DUK-12076093', '2026-09-29', 249.99, 50.0, 299.99], [$f['invoice_number'], $f['invoice_date'], $f['net_total'], $f['vat_total'], $f['gross_total']]);
-    eq([['description' => 'Draytek Vigor V167 Modem', 'quantity' => 3.0, 'unit_price' => 81.0, 'net_amount' => 243.0],
-        ['description' => 'Shipping - Next Working Day', 'quantity' => 1.0, 'unit_price' => 6.99, 'net_amount' => 6.99]], $f['lines']);
+    eq([['description' => 'Draytek Vigor V167 Modem', 'quantity' => 3.0, 'unit_price' => 81.0, 'net_amount' => 243.0, 'vat_rate' => null],
+        ['description' => 'Shipping - Next Working Day', 'quantity' => 1.0, 'unit_price' => 6.99, 'net_amount' => 6.99, 'vat_rate' => null]], $f['lines']);
 
     // Headed boxes: values under their labels; "Unit Price" is a price, and a table amount is never a PO number.
     $pdf = new SimplePdf();
@@ -2153,7 +2187,7 @@ test('invoice reader: tables, unlabelled dates and totals laid out in columns', 
     $f = invoice_read_builtin($rows, pdf_rows_text($rows));
     eq(['INV-004512', '2026-10-02', '2026-11-01', ['PO-000003'], 475.0, 95.0, 570.0],
         [$f['invoice_number'], $f['invoice_date'], $f['due_date'], $f['purchase_order_numbers'], $f['net_total'], $f['vat_total'], $f['gross_total']]);
-    eq([['description' => 'Yealink T54W desk phone', 'quantity' => 5.0, 'unit_price' => 95.0, 'net_amount' => 475.0]], $f['lines']);
+    eq([['description' => 'Yealink T54W desk phone', 'quantity' => 5.0, 'unit_price' => 95.0, 'net_amount' => 475.0, 'vat_rate' => '20']], $f['lines']);
 });
 
 test('supplier invoices are read and matched to their purchase order, with warnings when they differ', function () {

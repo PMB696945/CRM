@@ -632,22 +632,75 @@ function xero_bill_url(string $invoiceId): string
     return 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' . rawurlencode($invoiceId);
 }
 
+/** Xero tax types used on bills for each VAT rate printed on a supplier invoice (UK defaults; changeable under Admin → Xero). */
+const XERO_BILL_RATE_DEFAULTS = ['20' => 'INPUT2', '5' => 'RRINPUT', '0' => 'ZERORATEDINPUT', 'exempt' => 'EXEMPTEXPENSES', 'RC' => ''];
+
+function xero_bill_rate_map(): array
+{
+    $saved = json_decode((string)setting('xero_bill_rate_map', ''), true) ?: [];
+    $map = array_replace(XERO_BILL_RATE_DEFAULTS, array_intersect_key($saved, XERO_BILL_RATE_DEFAULTS));
+    $map['20'] = (string)(setting('xero_bill_tax_type') ?: $map['20']);
+    return $map;
+}
+
+/** The VAT % of a Xero tax type, if the rates have been loaded. */
+function xero_tax_type_rate(string $type): ?float
+{
+    $values = json_decode((string)setting('xero_tax_rate_values', '[]'), true) ?: [];
+    return isset($values[strtoupper($type)]) ? (float)$values[strtoupper($type)] : null;
+}
+
 /**
- * The purchases nominal code of our product an invoice line is for: the supplier's price list entry
+ * The Xero tax type for one bill line. In order: the product's purchase VAT (unless the invoice shows a
+ * different rate for the line), the rate printed on the line, the supplier's default VAT, the reverse
+ * charge if the invoice says it applies, then the bills default.
+ */
+function xero_bill_line_tax(?string $productType, ?string $lineRate, ?string $supplierType, bool $reverse): string
+{
+    $map = xero_bill_rate_map();
+    $fromRate = function (string $rate) use ($map): string {
+        $type = $map[$rate] ?? '';
+        if ($type === '' && $rate === 'RC') {
+            throw new IntegrationException('This invoice is under the reverse charge. Choose the Xero tax type to use for reverse charge bills under Admin → Xero → Supplier bills first.');
+        }
+        if ($type === '') {
+            throw new IntegrationException("The invoice has a line at $rate% VAT, and there's no Xero tax type for that rate. Set the product's VAT on purchases or the supplier's Default VAT, or for 5%, 0% and exempt, set them under Admin → Xero → Supplier bills.");
+        }
+        return $type;
+    };
+    if ($productType) {
+        // The product's own rate wins, unless the invoice prints a different rate for this line.
+        $productRate = xero_tax_type_rate($productType);
+        $differs = $lineRate !== null && ($lineRate === 'RC' || $lineRate === 'exempt' || ($productRate !== null && abs($productRate - (float)$lineRate) > 0.001));
+        if (!$differs) {
+            return strtoupper($productType);
+        }
+    }
+    if ($lineRate !== null) {
+        return strtoupper($fromRate($lineRate));
+    }
+    if ($supplierType) {
+        return strtoupper($supplierType);
+    }
+    return strtoupper($reverse ? $fromRate('RC') : $map['20']);
+}
+
+/**
+ * Our product an invoice line is for (its purchases nominal code and VAT): the supplier's price list entry
  * whose code or description appears in the line (longest first, so "Router two" beats "Router").
  */
-function bill_line_product_code(int $supplierId, string $description): ?string
+function bill_line_product(int $supplierId, string $description): ?array
 {
     static $cache = [];
-    $cache[$supplierId] ??= db_all('SELECT sp.supplier_sku, sp.description, p.purchase_account_code FROM supplier_products sp JOIN products p ON p.id = sp.product_id
-        WHERE sp.supplier_id = ? AND p.purchase_account_code IS NOT NULL AND p.purchase_account_code <> \'\'', [$supplierId]);
+    $cache[$supplierId] ??= db_all('SELECT sp.supplier_sku, sp.description, p.purchase_account_code, p.purchase_tax_type FROM supplier_products sp JOIN products p ON p.id = sp.product_id
+        WHERE sp.supplier_id = ?', [$supplierId]);
     $text = mb_strtolower($description);
     $best = null;
     foreach ($cache[$supplierId] as $sp) {
         foreach ([$sp['supplier_sku'], $sp['description']] as $needle) {
             $needle = mb_strtolower(trim((string)$needle));
             if (mb_strlen($needle) >= 3 && preg_match('/(?<![\p{L}\p{N}])' . preg_quote($needle, '/') . '(?![\p{L}\p{N}])/u', $text) && mb_strlen($needle) > ($best[0] ?? 0)) {
-                $best = [mb_strlen($needle), $sp['purchase_account_code']];
+                $best = [mb_strlen($needle), $sp];
             }
         }
     }
@@ -665,7 +718,9 @@ function xero_bill_payload(array $inv): array
     $xc = $supplier['xero_contact_id'] ? db_value('SELECT contact_id FROM xero_contacts WHERE id = ?', [$supplier['xero_contact_id']]) : null;
     // Nominal codes: the product's, else the supplier's default, else the bills default.
     $account = (string)($supplier['purchase_account_code'] ?: (setting('xero_bill_account') ?: (setting('xero_item_purchase_account') ?: '310')));
-    $tax = (string)(setting('xero_bill_tax_type') ?: 'INPUT2');
+    $reverse = !empty($inv['reverse_charge']);
+    $supplierTax = $supplier['purchase_tax_type'] ?? null;
+    $tax = xero_bill_line_tax(null, null, $supplierTax, $reverse); // for lines that aren't products
     $net = $inv['net'] !== null ? (float)$inv['net'] : null;
     $tolerance = invoice_tolerance();
     $lines = [];
@@ -674,10 +729,27 @@ function xero_bill_payload(array $inv): array
     // Lines: the purchase order's (when the invoice agrees with it), else what was read from the invoice, else one line.
     $poLines = $po ? po_lines((int)$po['id']) : [];
     if ($poLines && $net !== null && abs($net - po_total($poLines)) <= $tolerance) {
+        // VAT rates printed on the invoice, by line description, to check against the products'.
+        $readRates = [];
+        foreach (json_decode((string)$inv['line_items'], true) ?: [] as $rl) {
+            if (($rl['vat_rate'] ?? null) !== null) {
+                $readRates[] = [mb_strtolower((string)($rl['description'] ?? '')), (string)$rl['vat_rate']];
+            }
+        }
+        $distinct = array_unique(array_column($readRates, 1));
         foreach ($poLines as $l) {
-            $code = $l['supplier_product_id'] ? db_value('SELECT p.purchase_account_code FROM supplier_products sp JOIN products p ON p.id = sp.product_id WHERE sp.id = ?', [$l['supplier_product_id']]) : null;
+            $p = $l['supplier_product_id'] ? db_one('SELECT p.purchase_account_code, p.purchase_tax_type FROM supplier_products sp JOIN products p ON p.id = sp.product_id WHERE sp.id = ?', [$l['supplier_product_id']]) : null;
+            // The invoice line's rate: the one whose description mentions this line, or the only rate on the invoice.
+            $rate = count($distinct) === 1 ? reset($distinct) : null;
+            foreach ($readRates as [$d, $r]) {
+                if ($d !== '' && (str_contains($d, mb_strtolower($l['description'])) || ($l['sku'] && str_contains($d, mb_strtolower($l['sku']))))) {
+                    $rate = $r;
+                    break;
+                }
+            }
             $lines[] = ['Description' => trim(($l['sku'] ? $l['sku'] . ' ' : '') . $l['description']), 'Quantity' => (float)$l['quantity'],
-                'UnitAmount' => (float)$l['unit_cost'], 'AccountCode' => $code ?: $account, 'TaxType' => $tax];
+                'UnitAmount' => (float)$l['unit_cost'], 'AccountCode' => ($p['purchase_account_code'] ?? null) ?: $account,
+                'TaxType' => xero_bill_line_tax($p['purchase_tax_type'] ?? null, $rate, $supplierTax, $reverse)];
         }
         // Pennies the supplier rounded differently.
         $diff = round($net - po_total($poLines), 2);
@@ -690,8 +762,10 @@ function xero_bill_payload(array $inv): array
         if ($read && $net !== null && abs($sum - $net) <= 0.05) {
             foreach ($read as $l) {
                 $qty = (float)($l['quantity'] ?? 0) ?: 1;
+                $p = bill_line_product((int)$supplier['id'], (string)$l['description']);
                 $lines[] = ['Description' => mb_substr((string)$l['description'], 0, 4000) ?: 'Item', 'Quantity' => $qty,
-                    'UnitAmount' => round((float)$l['net_amount'] / $qty, 4), 'AccountCode' => bill_line_product_code((int)$supplier['id'], (string)$l['description']) ?: $account, 'TaxType' => $tax];
+                    'UnitAmount' => round((float)$l['net_amount'] / $qty, 4), 'AccountCode' => ($p['purchase_account_code'] ?? null) ?: $account,
+                    'TaxType' => xero_bill_line_tax($p['purchase_tax_type'] ?? null, $l['vat_rate'] ?? null, $supplierTax, $reverse)];
             }
         } elseif ($net !== null) {
             $lines[] = ['Description' => 'Invoice ' . ($inv['invoice_number'] ?: '') . ($po ? " ({$po['reference']})" : ''), 'Quantity' => 1, 'UnitAmount' => $net, 'AccountCode' => $account, 'TaxType' => $tax];
@@ -742,6 +816,12 @@ function xero_post_bill(int $id): string
             throw new XeroException('Xero said: ' . implode(' ', array_column($out['ValidationErrors'] ?? [['Message' => 'no bill was created']], 'Message')));
         }
         $xid = $out['InvoiceID'];
+        // Xero works the VAT out from each line's tax type: flag it if that disagrees with the invoice.
+        $vatNote = null;
+        if (isset($out['TotalTax']) && $inv['vat'] !== null && abs((float)$out['TotalTax'] - (float)$inv['vat']) > 0.05) {
+            $vatNote = 'Sent, but Xero worked out VAT of ' . money((float)$out['TotalTax']) . ' where the invoice shows ' . money((float)$inv['vat'])
+                . '. Check the VAT rates on the bill in Xero (and on the products), or change it in Xero.';
+        }
         $attached = (int)$inv['xero_attached'];
         if (setting('xero_bill_attach', '1') === '1' && !$attached && is_file($path = invoice_path($inv))) {
             $name = preg_replace('/[^\w.\- ]+/', '_', $inv['file_name']) ?: 'invoice.pdf';
@@ -749,7 +829,7 @@ function xero_post_bill(int $id): string
                 (string)file_get_contents($path), (string)$inv['mime']);
             $attached = 1;
         }
-        db_exec('UPDATE supplier_invoices SET xero_invoice_id = ?, xero_posted_at = NOW(), xero_error = NULL, xero_attached = ? WHERE id = ?', [$xid, $attached, $id]);
+        db_exec('UPDATE supplier_invoices SET xero_invoice_id = ?, xero_posted_at = NOW(), xero_error = ?, xero_attached = ? WHERE id = ?', [$xid, $vatNote, $attached, $id]);
         audit('xero_bill', 'Supplier invoice ' . ($inv['invoice_number'] ?: '#' . $id) . ($inv['xero_invoice_id'] ? ' updated in' : ' sent to') . ' Xero as a bill'
             . ($attached && !$inv['xero_attached'] ? ' with the invoice attached' : ''), 'supplier_invoices', $id);
         return $xid;
@@ -779,8 +859,8 @@ function xero_item_payload(array $p): array
     if ($a = ($p['sales_account_code'] ?? null) ?: setting('xero_item_sales_account')) {
         $sales['AccountCode'] = $a;
     }
-    if ($t = setting('xero_item_tax_type')) {
-        $sales['TaxType'] = $t;
+    if ($t = ($p['sales_tax_type'] ?? null) ?: setting('xero_item_tax_type')) {
+        $sales['TaxType'] = strtoupper($t);
     }
     $item = [
         'Code'        => (string)$p['sku'],
@@ -793,6 +873,9 @@ function xero_item_payload(array $p): array
         $purchase = ['UnitPrice' => (float)$p['cost_price']];
         if ($a = ($p['purchase_account_code'] ?? null) ?: setting('xero_item_purchase_account')) {
             $purchase['AccountCode'] = $a;
+        }
+        if ($t = $p['purchase_tax_type'] ?? null) {
+            $purchase['TaxType'] = strtoupper($t);
         }
         $item['IsPurchased'] = true;
         $item['PurchaseDescription'] = mb_substr($description, 0, 4000);
@@ -884,13 +967,15 @@ function xero_fetch_accounts(): int
     set_setting('xero_accounts', json_encode($accounts));
     // VAT rates too, so tax types can be picked rather than typed.
     try {
-        $rates = [];
+        $rates = $values = [];
         foreach (xero_api('GET', xero_urls()['api'] . '/TaxRates', ['where' => 'Status=="ACTIVE"'])['TaxRates'] ?? [] as $t) {
             if (($t['TaxType'] ?? '') !== '') {
                 $rates[$t['TaxType']] = trim(($t['Name'] ?? $t['TaxType']) . (isset($t['EffectiveRate']) ? ' (' . rtrim(rtrim(number_format((float)$t['EffectiveRate'], 2), '0'), '.') . '%)' : ''));
+                $values[$t['TaxType']] = isset($t['EffectiveRate']) ? (float)$t['EffectiveRate'] : null;
             }
         }
         set_setting('xero_tax_rates', json_encode($rates));
+        set_setting('xero_tax_rate_values', json_encode($values));
     } catch (IntegrationException) {
         // Account codes are the main thing; tax types can still be typed.
     }

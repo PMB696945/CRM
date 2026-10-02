@@ -210,15 +210,10 @@ function invoice_read_layout(array $rows): array
         if ($head === null || $r < $head || ($totalsFrom !== null && $r >= $totalsFrom)) {
             continue;
         }
-        $line = ['description' => '', 'quantity' => null, 'unit_price' => null, 'net_amount' => null];
+        $line = ['description' => '', 'quantity' => null, 'unit_price' => null, 'net_amount' => null, 'vat_rate' => null];
         $desc = [];
         foreach ($row as $c) {
-            $isNum = (bool)preg_match('/^\s*(?:£|GBP|\$|€)?\s*-?[\d,]*\.?\d+\s*%?\s*$/', $c['text']);
-            if (!$isNum) {
-                $desc[] = $c['text'];
-                continue;
-            }
-            // The header column this number sits under (right-aligned numbers end near their header's right edge).
+            // The header column this cell sits under (right-aligned numbers end near their header's right edge).
             $best = null;
             foreach ($cols as $col) {
                 $dist = min(abs(($c['x'] + $c['x2']) / 2 - $col['mid']), abs($c['x2'] - $col['x2']), abs($c['x'] - $col['x']));
@@ -227,6 +222,15 @@ function invoice_read_layout(array $rows): array
                 }
             }
             $role = $best[1] ?? 'text';
+            if ($role === 'vat' && ($rate = invoice_vat_rate($c['text'])) !== null) {
+                $line['vat_rate'] = $rate;
+                continue;
+            }
+            $isNum = (bool)preg_match('/^\s*(?:£|GBP|\$|€)?\s*-?[\d,]*\.?\d+\s*%?\s*$/', $c['text']);
+            if (!$isNum) {
+                $desc[] = $c['text'];
+                continue;
+            }
             if (in_array($role, ['quantity', 'unit_price', 'net_amount'], true) && !str_contains($c['text'], '%')) {
                 $line[$role] = $role === 'quantity' ? (float)preg_replace('/[^\d.\-]/', '', $c['text']) : invoice_amount($c['text']);
             }
@@ -244,7 +248,7 @@ function invoice_read_layout(array $rows): array
         foreach ($rows as $r => $row) {
             $text = implode('   ', array_column($row, 'text'));
             if (($totalsFrom === null || $r < $totalsFrom) && preg_match('/^(.+?)\s+(\d+(?:\.\d+)?)\s*(?:x|×|@)\s*' . INVOICE_MONEY_RE . '\s+' . INVOICE_MONEY_RE . '\s*$/u', $text, $m)) {
-                $f['lines'][] = ['description' => trim($m[1]), 'quantity' => (float)$m[2], 'unit_price' => invoice_amount($m[3]), 'net_amount' => invoice_amount($m[4])];
+                $f['lines'][] = ['description' => trim($m[1]), 'quantity' => (float)$m[2], 'unit_price' => invoice_amount($m[3]), 'net_amount' => invoice_amount($m[4]), 'vat_rate' => null];
             }
         }
     }
@@ -259,6 +263,38 @@ function invoice_read_layout(array $rows): array
         $f['vat_total'] = round($f['gross_total'] - $f['net_total'], 2);
     }
     return array_filter($f, fn($v) => $v !== null && $v !== []);
+}
+
+/**
+ * A VAT rate as printed on an invoice line: "20" / "5" / "0" (percent), "RC" for reverse charge,
+ * "exempt", or null if the text isn't a rate.
+ */
+function invoice_vat_rate(?string $text): ?string
+{
+    $t = strtolower(trim((string)$text));
+    if ($t === '') {
+        return null;
+    }
+    if (preg_match('/reverse|^r\/?c$|^drc$|domestic\s*reverse/', $t)) {
+        return 'RC';
+    }
+    if (preg_match('/exempt|^ex$|^e$/', $t)) {
+        return 'exempt';
+    }
+    if (preg_match('/^(?:zero|nil|z|no\s*vat|n\/?a|outside\s*scope|o\/?s)$/', $t)) {
+        return '0';
+    }
+    // "20%", or a bare whole number under a VAT column ("20.00" there is more likely an amount than a rate).
+    if (preg_match('/^(?:vat\s*)?(\d{1,2}(?:\.\d+)?)\s*%$/', $t, $m) || preg_match('/^(\d{1,2})$/', $t, $m)) {
+        return rtrim(rtrim(number_format((float)$m[1], 2, '.', ''), '0'), '.');
+    }
+    return null;
+}
+
+/** Whether an invoice says VAT is under the reverse charge (the customer accounts for it). */
+function invoice_is_reverse_charge(string $text): bool
+{
+    return (bool)preg_match('/reverse[\s-]*charge|customer\s+to\s+(?:account|pay)\s+(?:for\s+)?(?:the\s+)?vat|vat\s+act\s+1994\s+section\s+55a/i', $text);
 }
 
 /** The built-in reader: layout first, then plain-text patterns for anything it missed. */
@@ -374,8 +410,9 @@ function invoice_schema(): array
             'net_total' => $num, 'vat_total' => $num, 'gross_total' => $num,
             'lines' => ['type' => 'array', 'items' => [
                 'type' => 'object', 'additionalProperties' => false,
-                'required' => ['description', 'quantity', 'unit_price', 'net_amount'],
-                'properties' => ['description' => $str, 'quantity' => $num, 'unit_price' => $num, 'net_amount' => $num],
+                'required' => ['description', 'quantity', 'unit_price', 'net_amount', 'vat_rate'],
+                'properties' => ['description' => $str, 'quantity' => $num, 'unit_price' => $num, 'net_amount' => $num,
+                    'vat_rate' => ['type' => 'string', 'description' => 'The VAT rate for this line as a percentage number ("20", "5", "0"), "RC" for reverse charge, "exempt", or empty if not shown']],
             ]],
         ],
     ];
@@ -451,7 +488,7 @@ function invoice_read_claude(string $path, string $mime): array
         . "- purchase_order_numbers: every purchase order or order reference printed on it. Our purchase order numbers look like PO-000123; include them exactly as printed.\n"
         . "- Totals are for the whole invoice: net_total excluding VAT, vat_total, and gross_total including VAT. Use null for anything not shown.\n"
         . "- Dates as YYYY-MM-DD (UK invoices write the day first). Use an empty string for anything not shown.\n"
-        . "- lines: each charge on the invoice.";
+        . "- lines: each charge on the invoice, net of VAT, with its VAT rate if the invoice shows one per line. If the invoice says the reverse charge applies, use \"RC\".";
     $body = [
         'model' => (string)(setting('invoice_model') ?: INVOICE_DEFAULT_MODEL),
         'max_tokens' => 16000,
@@ -511,6 +548,14 @@ function invoice_read(array $inv): array
         }
     }
     $pos = array_values(array_filter(array_map('trim', (array)($fields['purchase_order_numbers'] ?? []))));
+    $lines = array_values(array_filter((array)($fields['lines'] ?? []), 'is_array'));
+    foreach ($lines as &$l) {
+        $l['vat_rate'] = invoice_vat_rate(is_scalar($l['vat_rate'] ?? null) ? (string)$l['vat_rate'] : null);
+    }
+    unset($l);
+    $reverse = invoice_is_reverse_charge($text) || ($lines && !array_filter($lines, fn($l) => $l['vat_rate'] !== 'RC'));
+    db_exec('UPDATE supplier_invoices SET reverse_charge = ? WHERE id = ?', [$reverse ? 1 : 0, $inv['id']]);
+    $fields['lines'] = $lines;
     db_exec('UPDATE supplier_invoices SET invoice_number = ?, invoice_date = ?, due_date = ?, po_reference = ?, supplier_name = ?, net = ?, vat = ?, total = ?,
         currency = ?, line_items = ?, reader = ?, read_error = ?, raw_text = ? WHERE id = ?', [
         mb_substr(trim((string)($fields['invoice_number'] ?? '')), 0, 80) ?: null,
