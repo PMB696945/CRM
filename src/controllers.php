@@ -811,7 +811,7 @@ function xero_controller(): void
             case 'accounts':
                 try {
                     $n = xero_fetch_accounts();
-                    flash("Loaded $n account codes from Xero. They're offered when you set a product's nominal codes.");
+                    flash("Loaded $n account codes" . (($t = count(xero_tax_rates())) ? " and $t VAT rates" : '') . " from Xero. They're offered in lists wherever you set nominal codes.");
                 } catch (IntegrationException $e) {
                     flash('Couldn\'t load account codes: ' . $e->getMessage(), 'error');
                 }
@@ -823,8 +823,8 @@ function xero_controller(): void
                 $newScopes = $on ? xero_item_scopes($scopes) : $scopes;
                 foreach (['xero_item_sales_account' => 'sales_account', 'xero_item_purchase_account' => 'purchase_account', 'xero_item_tax_type' => 'tax_type'] as $key => $field) {
                     $value = trim((string)($_POST[$field] ?? ''));
-                    if ($value !== '' && !preg_match('/^[A-Za-z0-9._ -]{1,50}$/', $value)) {
-                        flash('That doesn\'t look like a Xero account code or tax type: ' . $value, 'error');
+                    if ($problem = xero_code_problem($value, $field === 'tax_type' ? 'tax' : 'account')) {
+                        flash($problem . ' Nothing was saved.', 'error');
                         redirect(url('xero'));
                     }
                     set_setting($key, $value === '' ? null : $value);
@@ -844,8 +844,8 @@ function xero_controller(): void
                 $newScopes = $on ? xero_bill_scopes($scopes) : $scopes;
                 foreach (['bill_account' => 'xero_bill_account', 'bill_tax_type' => 'xero_bill_tax_type'] as $field => $key) {
                     $value = trim((string)($_POST[$field] ?? ''));
-                    if ($value !== '' && !preg_match('/^[A-Za-z0-9._ -]{1,50}$/', $value)) {
-                        flash('That doesn\'t look like a Xero account code or tax type: ' . $value, 'error');
+                    if ($problem = xero_code_problem($value, $field === 'bill_tax_type' ? 'tax' : 'account')) {
+                        flash($problem . ' Nothing was saved.', 'error');
                         redirect(url('xero'));
                     }
                     set_setting($key, $value === '' ? null : $value);

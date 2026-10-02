@@ -202,6 +202,20 @@ npm run watch:css    # or rebuild automatically while you edit
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
 
+## Supplier invoices to Xero
+
+When a supplier invoice is approved to pay (with **Send approved supplier invoices to Xero as bills** on, under Admin → Xero), it goes to Xero as a bill:
+- **Supplier and details:** the bill goes to the supplier's Xero contact, with their invoice number, dates, and our PO number as the Reference.
+- **Status:** it arrives as a draft, awaiting approval, or awaiting payment, as you choose.
+- **File:** the uploaded invoice (PDF or photo) is attached.
+- **Lines:** come from the purchase order when the amounts agree, otherwise from the lines read off the invoice.
+- **Nominal codes:** each line is coded with the first of: the product's purchases nominal code; the supplier's **Default nominal code** (on the supplier); the default under Admin → Xero.
+- **VAT:** uses the tax type set there (e.g. INPUT2).
+
+**Load nominal codes from Xero** brings in your chart of accounts and VAT rates, so codes can be picked from a list and are checked.
+
+If you switch on something that needs a new Xero permission, Admin → Xero shows **Press Reconnect to finish** until you've reconnected and approved it.
+
 ## Products and purchase orders
 
 **Products** has its own menu section: **Products & tariffs** (what you sell) and **Supplier prices** (what each supplier charges you).

@@ -810,4 +810,10 @@ return [
             }
         }
     },
+    19 => function (): void {
+        // A supplier's default nominal code for their bills in Xero.
+        if (!column_exists('suppliers', 'purchase_account_code')) {
+            db()->exec('ALTER TABLE suppliers ADD COLUMN purchase_account_code VARCHAR(20) NULL AFTER payment_terms');
+        }
+    },
 ];

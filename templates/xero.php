@@ -56,8 +56,14 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
             <button class="btn btn-sm">Switch</button>
           </form>
         <?php endif; ?>
+        <?php if ($pending = xero_scopes_pending()): ?>
+          <div class="flash flash-warning" role="status"><b>Press Reconnect to finish.</b> The CRM now asks Xero for more permissions (<?= h(implode(', ', $pending)) ?>), but this connection was approved before that.
+            Reconnect, approve the permissions Xero lists, and choose the same organisation.</div>
+        <?php elseif (setting('xero_granted_scopes')): ?>
+          <p class="help">Permissions approved in Xero: <?= h(implode(', ', array_diff(explode(' ', (string)setting('xero_granted_scopes')), ['openid', 'profile', 'email']))) ?></p>
+        <?php endif; ?>
         <div class="actions" style="margin-top:.75rem">
-          <a class="btn btn-sm" href="<?= h(url('xero', ['action' => 'connect', 'token' => csrf_token()])) ?>">Reconnect</a>
+          <a class="btn btn-sm <?= xero_scopes_pending() ? 'btn-primary' : '' ?>" href="<?= h(url('xero', ['action' => 'connect', 'token' => csrf_token()])) ?>">Reconnect</a>
           <form method="post" action="<?= h(url('xero', ['action' => 'disconnect'])) ?>" class="inline" data-confirm="Disconnect from Xero?"><?= csrf_field() ?><button class="btn btn-sm btn-danger">Disconnect</button></form>
         </div>
       <?php elseif ($configured): ?>
@@ -96,17 +102,17 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <?php if (setting('xero_push_items') === '1' && !xero_can_write_items()): ?><p class="text-warning">Xero hasn't been given permission to create items. Press <b>Reconnect</b> above.</p><?php endif; ?>
     <p class="help">Each product has its own sales and purchases nominal codes (on the product form). The codes below are the defaults for new products and for any product without its own.</p>
     <div class="form-grid">
-      <label>Sales account code<input name="sales_account" value="<?= h(setting('xero_item_sales_account')) ?>" placeholder="e.g. 200"></label>
-      <label>Purchases account code<input name="purchase_account" value="<?= h(setting('xero_item_purchase_account')) ?>" placeholder="e.g. 310"></label>
-      <label>Tax rate (Xero tax type)<input name="tax_type" value="<?= h(setting('xero_item_tax_type')) ?>" placeholder="e.g. OUTPUT2 (20% VAT on income)"></label>
+      <label>Sales account code<input name="sales_account" value="<?= h(setting('xero_item_sales_account')) ?>" placeholder="e.g. 200" list="xero_sales_codes" autocomplete="off"></label>
+      <label>Purchases account code<input name="purchase_account" value="<?= h(setting('xero_item_purchase_account')) ?>" placeholder="e.g. 310" list="xero_purchase_codes" autocomplete="off"></label>
+      <label>Tax rate (Xero tax type)<input name="tax_type" value="<?= h(setting('xero_item_tax_type')) ?>" placeholder="e.g. OUTPUT2 (20% VAT on income)" list="xero_tax_types" autocomplete="off"></label>
     </div>
     <p class="help">Optional. They're used as the item's default account and VAT rate. The codes are on your Chart of accounts in Xero. This needs permission to manage items (the <code>accounting.settings</code> scope): after switching it on, press <b>Reconnect</b> and approve it.</p>
     <button class="btn">Save</button>
   </form>
-  <?php if (xero_can_write_items()): ?>
+  <?php if (xero_connected()): ?>
     <form method="post" action="<?= h(url('xero', ['action' => 'accounts'])) ?>" class="inline" style="margin-top:1rem"><?= csrf_field() ?>
       <button class="btn btn-sm">Load nominal codes from Xero</button>
-      <span class="help"><?= ($n = count(nominal_codes())) ? "$n codes loaded. Product forms offer them and check codes against them." : 'Loads your chart of accounts so product forms can offer and check the codes.' ?></span>
+      <span class="help"><?= ($n = count(nominal_codes())) ? "$n codes loaded. Product forms offer them and check codes against them." : 'Loads your chart of accounts and VAT rates, so the codes can be picked from a list and are checked.' ?></span>
     </form>
   <?php endif; ?>
 </section>
@@ -122,10 +128,10 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <div class="form-grid">
       <label>Bills arrive in Xero as
         <select name="bill_status"><?php foreach (['DRAFT' => 'Draft', 'SUBMITTED' => 'Awaiting approval', 'AUTHORISED' => 'Awaiting payment'] as $k => $l): ?><option value="<?= $k ?>" <?= (setting('xero_bill_status') ?: 'DRAFT') === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
-      <label>Purchases account code<input name="bill_account" value="<?= h(setting('xero_bill_account')) ?>" placeholder="<?= h(setting('xero_item_purchase_account') ?: '310') ?>"></label>
-      <label>Tax rate (Xero tax type)<input name="bill_tax_type" value="<?= h(setting('xero_bill_tax_type')) ?>" placeholder="INPUT2 (20% VAT on expenses)"></label>
+      <label>Purchases account code<input name="bill_account" value="<?= h(setting('xero_bill_account')) ?>" placeholder="<?= h(setting('xero_item_purchase_account') ?: '310') ?>" list="xero_purchase_codes" autocomplete="off"></label>
+      <label>Tax rate (Xero tax type)<input name="bill_tax_type" value="<?= h(setting('xero_bill_tax_type')) ?>" placeholder="INPUT2 (20% VAT on expenses)" list="xero_tax_types" autocomplete="off"></label>
     </div>
-    <p class="help">Lines for products use the product's purchases nominal code; the code above is used otherwise. Bills go to the supplier's linked Xero contact, or Xero matches (or adds) one by name. This needs permission to create invoices and attachments: after switching it on, press <b>Reconnect</b> and approve.</p>
+    <p class="help">Each line is coded with, in order: the product's purchases nominal code, the supplier's default nominal code (on the supplier), or the code above. Bills go to the supplier's linked Xero contact, or Xero matches (or adds) one by name. This needs permission to create invoices and attachments: after switching it on, press <b>Reconnect</b> and approve.</p>
     <button class="btn">Save</button>
   </form>
 </section>
@@ -167,3 +173,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
   </ul>
 </section>
 <?php endif; ?>
+
+<?php foreach (['xero_sales_codes' => nominal_codes('sales'), 'xero_purchase_codes' => nominal_codes('purchases'), 'xero_tax_types' => xero_tax_rates()] as $listId => $options): if (!$options) continue; ?>
+<datalist id="<?= $listId ?>"><?php foreach ($options as $code => $label): ?><option value="<?= h((string)$code) ?>"><?= h($label) ?></option><?php endforeach; ?></datalist>
+<?php endforeach; ?>

@@ -102,10 +102,51 @@ function xero_token_request(array $params): array
 function xero_store_tokens(array $tokens): void
 {
     set_setting('xero_access_token', $tokens['access_token']);
+    $granted = xero_token_scopes((string)$tokens['access_token'])
+        ?? (is_string($tokens['scope'] ?? null) ? preg_split('/\s+/', trim($tokens['scope'])) : null);
+    if ($granted !== null) {
+        set_setting('xero_granted_scopes', implode(' ', $granted));
+    }
     set_setting('xero_expires_at', (string)(time() + (int)($tokens['expires_in'] ?? 1800)));
     if (!empty($tokens['refresh_token'])) {
         set_setting('xero_refresh_token', $tokens['refresh_token']);
     }
+}
+
+/** The scopes Xero actually granted, from the access token (a JWT with a "scope" claim). Null if unreadable. */
+function xero_token_scopes(string $token): ?array
+{
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) {
+        return null;
+    }
+    $claims = json_decode((string)base64_decode(strtr($parts[1], '-_', '+/') . str_repeat('=', (4 - strlen($parts[1]) % 4) % 4)), true);
+    $scope = $claims['scope'] ?? null;
+    if (is_string($scope)) {
+        $scope = preg_split('/\s+/', trim($scope));
+    }
+    return is_array($scope) ? array_values(array_filter(array_map('strval', $scope))) : null;
+}
+
+/** Scopes the CRM can use: those asked for that Xero also granted (when known from the token). */
+function xero_scopes_in_effect(): string
+{
+    $asked = (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES);
+    $granted = setting('xero_granted_scopes');
+    if ($granted === null || $granted === '') {
+        return $asked;
+    }
+    return implode(' ', array_intersect(preg_split('/\s+/', trim($asked)), preg_split('/\s+/', trim($granted))));
+}
+
+/** Scopes asked for that the current connection hasn't been granted (press Reconnect to approve them). */
+function xero_scopes_pending(): array
+{
+    $granted = setting('xero_granted_scopes');
+    if (!xero_connected() || $granted === null || $granted === '') {
+        return [];
+    }
+    return array_values(array_diff(preg_split('/\s+/', trim((string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES))), preg_split('/\s+/', trim($granted))));
 }
 
 function xero_exchange_code(string $code, string $redirectUri): void
@@ -174,8 +215,12 @@ function xero_api(string $method, string $url, array $query = [], bool $withTena
         if ($validation) {
             $detail = implode(' ', array_unique(array_filter($validation)));
         }
-        if ($status === 403) {
-            $detail .= ' — check the app has the scopes: ' . (setting('xero_scopes') ?: XERO_DEFAULT_SCOPES);
+        if ($status === 401 || $status === 403) {
+            $pending = xero_scopes_pending();
+            $detail .= $pending
+                ? ' — Xero hasn\'t approved ' . implode(', ', $pending) . ' for this connection yet. Under Admin → Xero press Reconnect and approve it.'
+                : ' — the connection isn\'t allowed to do this. Under Admin → Xero press Reconnect and approve every permission'
+                    . ' (the Xero user who approves needs the Adviser or Standard role with access to settings).';
         }
         throw new XeroException("Xero API error ($status): $detail");
     }
@@ -218,7 +263,7 @@ function xero_disconnect(): void
             // Revocation is best-effort; the local tokens are removed regardless.
         }
     }
-    foreach (['xero_access_token', 'xero_refresh_token', 'xero_expires_at', 'xero_tenant_id', 'xero_tenant_name', 'xero_tenants'] as $key) {
+    foreach (['xero_access_token', 'xero_refresh_token', 'xero_expires_at', 'xero_tenant_id', 'xero_tenant_name', 'xero_tenants', 'xero_granted_scopes'] as $key) {
         set_setting($key, null);
     }
 }
@@ -518,7 +563,7 @@ function xero_write_scopes(string $scopes): string
 /** Whether the saved scopes allow updating contacts in Xero. */
 function xero_can_write_contacts(): bool
 {
-    return (bool)preg_match('/(^|\s)accounting\.contacts(\s|$)/', (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES));
+    return (bool)preg_match('/(^|\s)accounting\.contacts(\s|$)/', xero_scopes_in_effect());
 }
 
 function xero_push_enabled(): bool
@@ -572,7 +617,7 @@ function xero_bill_scopes(string $scopes): string
 
 function xero_can_write_bills(): bool
 {
-    $s = (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES);
+    $s = xero_scopes_in_effect();
     return (bool)preg_match('/(^|\s)accounting\.(invoices|transactions)(\s|$)/', $s) && (bool)preg_match('/(^|\s)accounting\.attachments(\s|$)/', $s);
 }
 
@@ -587,6 +632,28 @@ function xero_bill_url(string $invoiceId): string
     return 'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=' . rawurlencode($invoiceId);
 }
 
+/**
+ * The purchases nominal code of our product an invoice line is for: the supplier's price list entry
+ * whose code or description appears in the line (longest first, so "Router two" beats "Router").
+ */
+function bill_line_product_code(int $supplierId, string $description): ?string
+{
+    static $cache = [];
+    $cache[$supplierId] ??= db_all('SELECT sp.supplier_sku, sp.description, p.purchase_account_code FROM supplier_products sp JOIN products p ON p.id = sp.product_id
+        WHERE sp.supplier_id = ? AND p.purchase_account_code IS NOT NULL AND p.purchase_account_code <> \'\'', [$supplierId]);
+    $text = mb_strtolower($description);
+    $best = null;
+    foreach ($cache[$supplierId] as $sp) {
+        foreach ([$sp['supplier_sku'], $sp['description']] as $needle) {
+            $needle = mb_strtolower(trim((string)$needle));
+            if (mb_strlen($needle) >= 3 && preg_match('/(?<![\p{L}\p{N}])' . preg_quote($needle, '/') . '(?![\p{L}\p{N}])/u', $text) && mb_strlen($needle) > ($best[0] ?? 0)) {
+                $best = [mb_strlen($needle), $sp['purchase_account_code']];
+            }
+        }
+    }
+    return $best[1] ?? null;
+}
+
 /** The bill for a supplier invoice, in Xero's format. */
 function xero_bill_payload(array $inv): array
 {
@@ -596,7 +663,8 @@ function xero_bill_payload(array $inv): array
     }
     $po = $inv['po_id'] ? db_one('SELECT * FROM purchase_orders WHERE id = ?', [$inv['po_id']]) : null;
     $xc = $supplier['xero_contact_id'] ? db_value('SELECT contact_id FROM xero_contacts WHERE id = ?', [$supplier['xero_contact_id']]) : null;
-    $account = (string)(setting('xero_bill_account') ?: (setting('xero_item_purchase_account') ?: '310'));
+    // Nominal codes: the product's, else the supplier's default, else the bills default.
+    $account = (string)($supplier['purchase_account_code'] ?: (setting('xero_bill_account') ?: (setting('xero_item_purchase_account') ?: '310')));
     $tax = (string)(setting('xero_bill_tax_type') ?: 'INPUT2');
     $net = $inv['net'] !== null ? (float)$inv['net'] : null;
     $tolerance = invoice_tolerance();
@@ -623,7 +691,7 @@ function xero_bill_payload(array $inv): array
             foreach ($read as $l) {
                 $qty = (float)($l['quantity'] ?? 0) ?: 1;
                 $lines[] = ['Description' => mb_substr((string)$l['description'], 0, 4000) ?: 'Item', 'Quantity' => $qty,
-                    'UnitAmount' => round((float)$l['net_amount'] / $qty, 4), 'AccountCode' => $account, 'TaxType' => $tax];
+                    'UnitAmount' => round((float)$l['net_amount'] / $qty, 4), 'AccountCode' => bill_line_product_code((int)$supplier['id'], (string)$l['description']) ?: $account, 'TaxType' => $tax];
             }
         } elseif ($net !== null) {
             $lines[] = ['Description' => 'Invoice ' . ($inv['invoice_number'] ?: '') . ($po ? " ({$po['reference']})" : ''), 'Quantity' => 1, 'UnitAmount' => $net, 'AccountCode' => $account, 'TaxType' => $tax];
@@ -699,7 +767,7 @@ function xero_item_scopes(string $scopes): string
 
 function xero_can_write_items(): bool
 {
-    return (bool)preg_match('/(^|\s)accounting\.settings(\s|$)/', (string)(setting('xero_scopes') ?: XERO_DEFAULT_SCOPES));
+    return (bool)preg_match('/(^|\s)accounting\.settings(\s|$)/', xero_scopes_in_effect());
 }
 
 /** Xero item for a product: Code = SKU, sale price, and cost price as the purchase price. */
@@ -814,7 +882,55 @@ function xero_fetch_accounts(): int
         }
     }
     set_setting('xero_accounts', json_encode($accounts));
+    // VAT rates too, so tax types can be picked rather than typed.
+    try {
+        $rates = [];
+        foreach (xero_api('GET', xero_urls()['api'] . '/TaxRates', ['where' => 'Status=="ACTIVE"'])['TaxRates'] ?? [] as $t) {
+            if (($t['TaxType'] ?? '') !== '') {
+                $rates[$t['TaxType']] = trim(($t['Name'] ?? $t['TaxType']) . (isset($t['EffectiveRate']) ? ' (' . rtrim(rtrim(number_format((float)$t['EffectiveRate'], 2), '0'), '.') . '%)' : ''));
+            }
+        }
+        set_setting('xero_tax_rates', json_encode($rates));
+    } catch (IntegrationException) {
+        // Account codes are the main thing; tax types can still be typed.
+    }
     return count($accounts);
+}
+
+/** Cached Xero VAT rates: [tax type => "name (rate%)"]. */
+function xero_tax_rates(): array
+{
+    return json_decode((string)setting('xero_tax_rates', '[]'), true) ?: [];
+}
+
+/**
+ * Check a nominal code or tax type typed into a Xero setting. Returns a problem, or null if fine.
+ * Account codes are up to 10 characters (letters, numbers and symbols such as / or -).
+ */
+function xero_code_problem(string $value, string $kind): ?string
+{
+    if ($value === '') {
+        return null;
+    }
+    if ($kind === 'tax') {
+        $rates = xero_tax_rates();
+        if (!preg_match('/^[A-Za-z0-9_]{1,50}$/', $value)) {
+            return "\"$value\" isn't a Xero tax type. Tax types are short codes such as INPUT2 (20% VAT on expenses) or OUTPUT2 (20% VAT on income)"
+                . ($rates ? ': pick one from the list.' : '.');
+        }
+        if ($rates && !isset($rates[$value]) && !isset(array_change_key_case($rates, CASE_UPPER)[strtoupper($value)])) {
+            return "Xero has no active tax type \"$value\". Pick one from the list.";
+        }
+        return null;
+    }
+    if (mb_strlen($value) > 10 || preg_match('/[\x00-\x1F<>"]/', $value)) {
+        return "\"$value\" isn't a Xero account code: codes are up to 10 characters, as shown in Xero's Chart of accounts (e.g. 310).";
+    }
+    $codes = nominal_codes();
+    if ($codes && !isset($codes[$value])) {
+        return "Xero has no active account with the code \"$value\". Pick one from the list, or press Load nominal codes from Xero if you've just added it.";
+    }
+    return null;
 }
 
 /** Cached Xero account codes: [code => "code – name"], optionally for sales (REVENUE) or purchases (EXPENSE). */

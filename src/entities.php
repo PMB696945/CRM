@@ -479,6 +479,8 @@ function entities(): array
                 'county'         => ['label' => 'County', 'type' => 'text'],
                 'postcode'       => ['label' => 'Postcode', 'type' => 'text'],
                 'payment_terms'  => ['label' => 'Payment terms', 'type' => 'text', 'section' => 'Terms & notes', 'help' => 'e.g. 30 days from invoice, Direct Debit'],
+                'purchase_account_code' => ['label' => 'Default nominal code', 'type' => 'text', 'datalist' => 'purchases',
+                    'help' => 'For their bills in Xero, on lines that aren\'t one of your products (e.g. 320 for connectivity, 429 for general expenses)'],
                 'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
                 'account_id'     => ['label' => 'Customer / dealer record', 'type' => 'ref', 'ref' => 'accounts', 'section' => 'Links',
                     'help' => 'When they are also a customer or dealer: one company record, with this as its Supplier tab. The name, address and phone are shared.'],
@@ -971,7 +973,7 @@ function validate_rules(string $name, array $data, ?int $id): array
             }
         }
     }
-    if ($name === 'products' && ($codes = nominal_codes())) {
+    if (in_array($name, ['products', 'suppliers'], true) && ($codes = nominal_codes())) {
         foreach (['sales_account_code', 'purchase_account_code'] as $f) {
             if (!empty($data[$f]) && !isset($codes[$data[$f]])) {
                 $errors[$f] = 'There\'s no active account with code "' . $data[$f] . '" in your Xero chart of accounts.';

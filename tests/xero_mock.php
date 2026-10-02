@@ -41,7 +41,8 @@ function issue_tokens(array &$state): array
     $refresh = 'refresh-' . bin2hex(random_bytes(6));
     $state['tokens'][$access] = true;
     $state['refresh'][$refresh] = true;
-    return ['access_token' => $access, 'refresh_token' => $refresh, 'expires_in' => 1800, 'token_type' => 'Bearer', 'scope' => 'offline_access accounting.contacts.read accounting.invoices.read'];
+    return ['access_token' => $access, 'refresh_token' => $refresh, 'expires_in' => 1800, 'token_type' => 'Bearer',
+        'scope' => $state['granted'] ?? 'offline_access accounting.contacts.read accounting.invoices.read'];
 }
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -54,6 +55,8 @@ if ($path === '/identity/connect/authorize') {
         http_response_code(400);
         exit('invalid_request');
     }
+    $state['granted'] = $_GET['scope']; // the user approves what was asked for
+    save($state);
     $sep = str_contains($_GET['redirect_uri'], '?') ? '&' : '?';
     header('Location: ' . $_GET['redirect_uri'] . $sep . http_build_query(['code' => 'mock-code', 'state' => $_GET['state'], 'scope' => $_GET['scope']]));
     exit;

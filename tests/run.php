@@ -334,6 +334,14 @@ $cfg['xero_urls'] = [
     'revoke' => "$mockBase/connect/revocation", 'connections' => "$mockBase/connections", 'api' => "$mockBase/api.xro/2.0",
 ];
 function mock_state(): array { global $mockState; return json_decode(file_get_contents($mockState), true); }
+/** Press Reconnect: authorise again with the scopes now asked for, and approve them. */
+function xero_mock_reconnect(): void
+{
+    $redirect = 'https://crm.example.com/crm/xero-callback.php';
+    [, , $headers] = xero_http('GET', xero_authorize_url('state123', $redirect));
+    parse_str(parse_url($headers['location'], PHP_URL_QUERY), $back);
+    xero_exchange_code($back['code'], $redirect);
+}
 
 test('connects with the OAuth code flow', function () use ($mockBase) {
     set_setting('xero_client_id', 'MOCKCLIENTID0000000000000000000A');
@@ -391,6 +399,23 @@ test('suppliers are brought in from Xero: same name linked, others added with de
     eq('0800 000', db_value('SELECT phone FROM suppliers WHERE id = ?', [$s1['id']]));
 });
 
+test('bill lines are nominal coded: product, then supplier default, then the bills default; codes are checked', function () {
+    // Account codes may hold symbols, up to Xero's 10 characters; tax types are short codes.
+    eq(null, xero_code_problem('1/500/5000', 'account'));
+    ok(xero_code_problem('1/500/50000', 'account') !== null, 'longer than Xero allows');
+    eq(null, xero_code_problem('INPUT2', 'tax'));
+    ok(xero_code_problem('1/500/5000', 'tax') !== null, 'not a tax type');
+
+    $sid = create('suppliers', ['name' => 'Coding Test Telecom', 'purchase_account_code' => '320']);
+    $pid = create('products', ['sku' => 'CODE-T1', 'name' => 'Desk phone', 'category' => array_key_first(SERVICE_TYPES), 'monthly_price' => '100',
+        'term_months' => '12', 'purchase_account_code' => '630']);
+    create('supplier_products', ['supplier_id' => $sid, 'product_id' => $pid, 'supplier_sku' => 'YEA-T54W', 'description' => 'Yealink T54W', 'cost_price' => '80', 'billing_frequency' => 'monthly']);
+    db_exec("INSERT INTO supplier_invoices (supplier_id, status, invoice_number, net, vat, total, line_items, file_name, stored_name, size) VALUES (?, 'approved', 'CT-1', 100, 20, 120, ?, 'x.pdf', 'x.pdf', 1)",
+        [$sid, json_encode([['description' => 'YEA-T54W Yealink T54W handset', 'quantity' => 1, 'net_amount' => 80], ['description' => 'Courier', 'quantity' => 1, 'net_amount' => 20]])]);
+    $bill = xero_bill_payload(db_one('SELECT * FROM supplier_invoices WHERE id = ?', [(int)db()->lastInsertId()]));
+    eq(['630', '320'], array_column($bill['LineItems'], 'AccountCode'));
+});
+
 test('approved supplier invoices go to Xero as bills, with the uploaded invoice attached', function () {
     as_role('super_admin');
     $sup = (int)db_value("SELECT id FROM suppliers WHERE name = 'Supplier 1'");
@@ -409,6 +434,7 @@ test('approved supplier invoices go to Xero as bills, with the uploaded invoice 
     ok(!xero_can_write_bills());
     try { xero_post_bill($id); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Reconnect')); }
     set_setting('xero_scopes', xero_bill_scopes(XERO_DEFAULT_SCOPES));
+    xero_mock_reconnect();
     set_setting('xero_push_bills', '1');
     ok(xero_bills_enabled());
 
@@ -477,6 +503,7 @@ test('accounts contact can be sent to Xero once contacts write access is granted
     eq('offline_access accounting.contacts accounting.invoices.read', xero_write_scopes(XERO_DEFAULT_SCOPES));
     eq('offline_access accounting.contacts accounting.transactions.read', xero_write_scopes('offline_access accounting.contacts.read accounting.transactions.read'));
     set_setting('xero_scopes', xero_write_scopes(XERO_DEFAULT_SCOPES));
+    xero_mock_reconnect();
     set_setting('xero_push_contacts', '1');
     ok(xero_push_enabled());
     $id = (int)db_value("SELECT id FROM accounts WHERE name = 'Harbour View Dental'");
@@ -497,6 +524,11 @@ test('products are sent to Xero as items: one, several, validation problems, upd
     eq('offline_access accounting.contacts.read accounting.invoices.read accounting.settings', xero_item_scopes(XERO_DEFAULT_SCOPES));
     eq('offline_access accounting.settings', xero_item_scopes('offline_access accounting.settings.read'));
     set_setting('xero_scopes', xero_item_scopes(XERO_DEFAULT_SCOPES));
+    // Ticked but not reconnected yet: Xero hasn't granted it, so the CRM says so instead of getting a 401.
+    ok(!xero_can_write_items(), 'not usable until Xero grants it');
+    ok(in_array('accounting.settings', xero_scopes_pending(), true), 'listed as waiting for Reconnect');
+    xero_mock_reconnect();
+    eq([], xero_scopes_pending());
     set_setting('xero_item_sales_account', '200');
     set_setting('xero_item_tax_type', 'OUTPUT2');
     $a = create('products', ['sku' => 'T-FTTP-900', 'name' => 'FTTP 900', 'category' => 'broadband', 'monthly_price' => '600', 'cost_price' => '360', 'billing_frequency' => 'yearly', 'term_months' => '12']);
