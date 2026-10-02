@@ -2,6 +2,11 @@
 $rows = $lines ?: [['supplier_product_id' => null, 'sku' => '', 'description' => '', 'quantity' => 1, 'unit_cost' => '']];
 $cancel = $po ? url('purchase_orders', ['action' => 'view', 'id' => $po['id']]) : url('suppliers', ['action' => 'view', 'id' => $supplier['id']]);
 $accountId = $values['account_id'] ?? null;
+$showCost = can('costs.view');
+$catGroups = [];
+foreach ($catalogue as $p) {
+    $catGroups[$p['category']][] = $p;
+}
 ?>
 <div class="page-head"><div><div class="crumbs"><a href="<?= h(url('suppliers', ['action' => 'view', 'id' => $supplier['id']])) ?>"><?= h($supplier['name']) ?></a></div>
   <h1><?= $po ? 'Edit ' . h($po['reference']) : 'New purchase order' ?></h1></div></div>
@@ -25,6 +30,7 @@ $accountId = $values['account_id'] ?? null;
 
   <section class="card">
     <div class="card-head"><h2>Items</h2><button type="button" class="btn btn-sm" data-add-line>+ Add line</button></div>
+    <p class="help">Pick from <?= h($supplier['name']) ?>'s price list or from your products &amp; tariffs. A product they don't have a price for yet is added to their price list when you save, so customer orders for it raise purchase orders with them.</p>
     <?php if (!empty($errors['_lines'])): ?><div class="flash flash-error"><?= h($errors['_lines']) ?></div><?php endif; ?>
     <div class="table-wrap">
       <table class="table lines-table">
@@ -32,10 +38,17 @@ $accountId = $values['account_id'] ?? null;
         <tbody data-lines>
         <?php foreach ($rows as $l): ?>
           <tr>
-            <td><select name="line_supplier_product_id[]" data-po-product aria-label="Product">
-              <option value="">Other</option>
+            <td><?php $picked = !empty($l['supplier_product_id']) ? 'sp:' . $l['supplier_product_id'] : (!empty($l['product_id']) ? 'p:' . $l['product_id'] : ''); ?>
+              <select name="line_item[]" data-po-product aria-label="Product">
+              <option value="">Other (type it in)</option>
+              <?php if ($products): ?><optgroup label="<?= h($supplier['name']) ?>'s price list">
               <?php foreach ($products as $p): ?>
-                <option value="<?= (int)$p['id'] ?>" data-sku="<?= h((string)$p['supplier_sku']) ?>" data-name="<?= h($p['description']) ?>" data-cost="<?= h($p['cost_price']) ?>" <?= (string)$l['supplier_product_id'] === (string)$p['id'] ? 'selected' : '' ?>><?= h($p['description']) ?><?= $p['supplier_sku'] ? ' (' . h($p['supplier_sku']) . ')' : '' ?></option>
+                <option value="sp:<?= (int)$p['id'] ?>" data-sku="<?= h((string)$p['supplier_sku']) ?>" data-name="<?= h($p['description']) ?>" data-cost="<?= h($p['cost_price']) ?>" <?= $picked === 'sp:' . $p['id'] ? 'selected' : '' ?>><?= h($p['description']) ?><?= $p['supplier_sku'] ? ' (' . h($p['supplier_sku']) . ')' : '' ?><?= $p['product_name'] && $p['product_name'] !== $p['description'] ? ' → ' . h($p['product_name']) : '' ?></option>
+              <?php endforeach; ?></optgroup><?php endif; ?>
+              <?php foreach ($catGroups as $cat => $items): ?><optgroup label="Our products: <?= h(SERVICE_TYPES[$cat] ?? humanize((string)$cat)) ?>">
+                <?php foreach ($items as $p): ?>
+                <option value="p:<?= (int)$p['id'] ?>" data-sku="" data-name="<?= h($p['name']) ?>" data-cost="<?= $showCost ? h((string)$p['cost_price']) : '' ?>" <?= $picked === 'p:' . $p['id'] ? 'selected' : '' ?>><?= h($p['name']) ?> (<?= h($p['sku']) ?>)</option>
+                <?php endforeach; ?></optgroup>
               <?php endforeach; ?>
             </select></td>
             <td><input name="line_sku[]" value="<?= h((string)$l['sku']) ?>" class="w-28" aria-label="Code"></td>

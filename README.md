@@ -202,6 +202,13 @@ npm run watch:css    # or rebuild automatically while you edit
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
 
+## Products and purchase orders
+
+**Products** has its own menu section: **Products & tariffs** (what you sell) and **Supplier prices** (what each supplier charges you).
+- **Supplier column:** the Products & tariffs list shows how many suppliers each product has. The **No supplier** list shows products that can't be bought in on a purchase order yet.
+- **Raising a purchase order:** pick items from the supplier's price list or from your own products & tariffs.
+- **Products new to a supplier:** when you pick a product the supplier doesn't have a price for yet, it's added to their price list when you save, linked to the product. Customer orders for that product then raise purchase orders with them. If they're the product's only supplier, their price becomes its cost price.
+
 ## Customers that are also suppliers or dealers
 
 One company has one record with tabs: **Overview**, **Customer**, **Supplier** (when it supplies you) and **Dealer** (when it's a dealer).

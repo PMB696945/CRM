@@ -19,9 +19,11 @@ $nav = [
         'pipeline'      => ['pipeline', 'Pipeline'],
         'opportunities' => ['pound', 'Opportunities'],
         'activities'    => ['clipboard', 'Activities'],
-        'products'      => ['cube', 'Products & tariffs'],
         'documents'     => ['folder', 'Documents'],
     ],
+    'Products' => [
+        'products'      => ['cube', 'Products & tariffs'],
+    ] + (can('suppliers.view') || can('suppliers.edit') ? ['supplier_products' => ['pound', 'Supplier prices']] : []),
     'Support' => [
         'tickets'       => ['ticket', 'Support tickets'],
     ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []),
@@ -31,7 +33,6 @@ if (can('suppliers.view') || can('suppliers.edit') || can('purchasing.edit')) {
         'suppliers'         => ['truck', 'Suppliers'],
         'purchase_orders'   => ['cart', 'Purchase orders'],
         'supplier_invoices' => ['document', 'Supplier invoices'],
-        'supplier_products' => ['pound', 'Supplier prices'],
     ];
 }
 if (can('marketing.send')) {

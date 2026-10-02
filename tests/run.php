@@ -1995,6 +1995,27 @@ test('PDF text: plain fonts, and compressed streams with embedded fonts (ToUnico
     eq("Total due\nRef ABC", pdf_extract_text($raw), 'kerning move not taken as a space; TJ gap is');
 });
 
+test('purchase orders can use our products & tariffs; new ones join the supplier price list', function () {
+    $sid = create('suppliers', ['name' => 'Catalogue Test Supplies']);
+    $pid = create('products', ['sku' => 'CAT-PO-1', 'name' => 'Yealink W73P DECT', 'category' => array_key_first(SERVICE_TYPES), 'billing_frequency' => 'monthly',
+        'monthly_price' => '120', 'cost_price' => '80', 'term_months' => '12']);
+    [$lines, $errors] = po_parse_lines(['line_item' => ["p:$pid", ''], 'line_sku' => ['W73P', ''], 'line_description' => ['Yealink W73P DECT', 'Courier'],
+        'line_quantity' => ['2', '1'], 'line_unit_cost' => ['78.50', '9.99']], $sid);
+    eq([], $errors);
+    eq([null, $pid], [$lines[0]['supplier_product_id'], $lines[0]['product_id']]);
+    $added = po_link_new_products($sid, $lines);
+    eq(['Yealink W73P DECT'], $added);
+    $sp = db_one('SELECT * FROM supplier_products WHERE id = ?', [$lines[0]['supplier_product_id']]);
+    eq([$sid, $pid, 'W73P', 78.5, 1], [(int)$sp['supplier_id'], (int)$sp['product_id'], $sp['supplier_sku'], (float)$sp['cost_price'], (int)$sp['preferred']]);
+    eq(null, $lines[1]['supplier_product_id'], 'free-typed lines stay as they are');
+    // Picking it again uses the price list entry rather than adding another.
+    [$again] = po_parse_lines(['line_item' => ["p:$pid"], 'line_sku' => [''], 'line_description' => ['Yealink W73P DECT'], 'line_quantity' => ['1'], 'line_unit_cost' => ['78.50']], $sid);
+    eq([], po_link_new_products($sid, $again));
+    eq((int)$sp['id'], $again[0]['supplier_product_id']);
+    eq(1, (int)db_value('SELECT COUNT(*) FROM supplier_products WHERE product_id = ?', [$pid]));
+    ok(!array_filter(list_rows('products', ['preset' => 'no_supplier', 'per_page' => 0])['rows'], fn($r) => (int)$r['id'] === $pid), 'no longer listed as without a supplier');
+});
+
 test('one company record: a customer can also be a supplier and a dealer, with shared details', function () {
     $acc = fn($id) => db_one('SELECT * FROM accounts WHERE id = ?', [$id]);
     $sup = fn($id) => db_one('SELECT * FROM suppliers WHERE account_id = ?', [$id]);

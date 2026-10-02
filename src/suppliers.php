@@ -169,14 +169,19 @@ function po_parse_lines(array $post, int $supplierId): array
     for ($i = 0; $i < $n; $i++) {
         $get = fn($k) => trim((string)(((array)($post[$k] ?? []))[$i] ?? ''));
         $desc = $get('line_description');
-        $sp = $get('line_supplier_product_id');
-        if ($desc === '' && $sp === '') {
+        // The item picked: "sp:<id>" from this supplier's price list, "p:<id>" from our products & tariffs.
+        $item = $get('line_item') ?: (ctype_digit($sp = $get('line_supplier_product_id')) ? "sp:$sp" : '');
+        [$kind, $itemId] = array_pad(explode(':', $item, 2), 2, '');
+        $sp = $kind === 'sp' ? $itemId : '';
+        $productId = $kind === 'p' && ctype_digit($itemId) && db_value('SELECT 1 FROM products WHERE id = ?', [$itemId]) ? (int)$itemId : null;
+        if ($desc === '' && $sp === '' && !$productId) {
             continue;
         }
         $row = $i + 1;
         $cost = str_replace([',', '£', ' '], '', $get('line_unit_cost'));
         $line = [
             'supplier_product_id' => ctype_digit($sp) && db_value('SELECT 1 FROM supplier_products WHERE id = ? AND supplier_id = ?', [$sp, $supplierId]) ? (int)$sp : null,
+            'product_id' => $productId,
             'sku' => mb_substr($get('line_sku'), 0, 80) ?: null,
             'description' => mb_substr($desc, 0, 255),
             'quantity' => (int)$get('line_quantity'),
@@ -197,6 +202,37 @@ function po_parse_lines(array $post, int $supplierId): array
         $errors[] = 'Add at least one line to the order.';
     }
     return [$lines, $errors];
+}
+
+/**
+ * Lines for one of our products the supplier has no price for yet: add it to their price list
+ * (linked to the product, so customer orders for it raise purchase orders with them).
+ * Returns the descriptions added.
+ */
+function po_link_new_products(int $supplierId, array &$lines): array
+{
+    $added = [];
+    foreach ($lines as &$l) {
+        if (!empty($l['supplier_product_id']) || empty($l['product_id'])) {
+            continue;
+        }
+        $existing = db_value('SELECT id FROM supplier_products WHERE supplier_id = ? AND product_id = ? ORDER BY active DESC, id LIMIT 1', [$supplierId, $l['product_id']]);
+        if ($existing) {
+            $l['supplier_product_id'] = (int)$existing;
+            continue;
+        }
+        $product = db_one('SELECT * FROM products WHERE id = ?', [$l['product_id']]);
+        $l['supplier_product_id'] = insert_row('supplier_products', [
+            'supplier_id' => $supplierId, 'product_id' => (int)$product['id'], 'supplier_sku' => $l['sku'], 'description' => $l['description'],
+            'cost_price' => $l['unit_cost'], 'billing_frequency' => $product['billing_frequency'] ?: 'monthly', 'active' => 1,
+            // The only supplier of the product becomes its preferred one.
+            'preferred' => db_value('SELECT 1 FROM supplier_products WHERE product_id = ? AND active = 1', [$product['id']]) ? 0 : 1,
+            'price_updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        audit('create', "Supplier price for {$product['name']} added from a purchase order", 'supplier_products', $l['supplier_product_id']);
+        $added[] = $product['name'];
+    }
+    return $added;
 }
 
 function po_save_lines(int $poId, array $lines): void
@@ -324,16 +360,21 @@ function purchase_orders_controller(): void
                         db_exec('UPDATE purchase_orders SET reference = ? WHERE id = ?', [$ref, $poId]);
                         audit('create', "Purchase order $ref raised with {$supplier['name']}", 'purchase_orders', $poId, null, null, $data['account_id'] ? (int)$data['account_id'] : null);
                     }
+                    $added = po_link_new_products($supplierId, $lines);
                     po_save_lines($poId, $lines);
-                    flash('Purchase order saved.');
+                    flash('Purchase order saved.' . ($added ? ' Added to ' . $supplier['name'] . "'s price list: " . implode(', ', $added) . '.' : ''));
                     redirect(url('purchase_orders', ['action' => 'view', 'id' => $poId]));
                 }
             }
             if (empty($values['deliver_to'])) {
                 $values['deliver_to'] = po_default_delivery(!empty($values['account_id']) ? db_one('SELECT * FROM accounts WHERE id = ?', [$values['account_id']]) : null);
             }
-            $products = db_all('SELECT id, supplier_sku, description, cost_price, setup_cost, billing_frequency FROM supplier_products WHERE supplier_id = ? AND active = 1 ORDER BY description', [$supplierId]);
-            page('purchase_order_form', compact('po', 'supplier', 'values', 'lines', 'errors', 'products'), $po ? 'Edit ' . $po['reference'] : 'New purchase order');
+            $products = db_all('SELECT sp.id, sp.supplier_sku, sp.description, sp.cost_price, sp.setup_cost, sp.billing_frequency, p.name AS product_name
+                FROM supplier_products sp LEFT JOIN products p ON p.id = sp.product_id WHERE sp.supplier_id = ? AND sp.active = 1 ORDER BY sp.description', [$supplierId]);
+            // Our products & tariffs this supplier has no price for yet.
+            $catalogue = db_all('SELECT p.id, p.sku, p.name, p.category, p.cost_price FROM products p WHERE p.active = 1
+                AND NOT EXISTS (SELECT 1 FROM supplier_products sp WHERE sp.product_id = p.id AND sp.supplier_id = ? AND sp.active = 1) ORDER BY p.category, p.name', [$supplierId]);
+            page('purchase_order_form', compact('po', 'supplier', 'values', 'lines', 'errors', 'products', 'catalogue'), $po ? 'Edit ' . $po['reference'] : 'New purchase order');
             return;
     }
 

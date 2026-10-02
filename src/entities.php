@@ -278,11 +278,15 @@ function entities(): array
                 'xero_synced_at'    => ['label' => 'Sent to Xero', 'type' => 'datetime', 'readonly' => true, 'if' => 'xero_connected'],
                 'xero_sync_error'   => ['label' => 'Xero problem', 'type' => 'text', 'readonly' => true, 'if' => 'xero_connected'],
             ],
-            'list'    => ['sku', 'name', 'category', 'billing_frequency', 'monthly_price', 'cost_price', '_margin', '_monthly', 'setup_fee', 'active'],
+            'list'    => ['sku', 'name', 'category', 'billing_frequency', 'monthly_price', 'cost_price', '_margin', '_monthly', 'setup_fee', '_suppliers', 'active'],
             'search'  => ['sku', 'name', 'description'],
             'filters' => ['category', 'carrier', 'billing_frequency', 'active'],
             'computed' => [
                 '_monthly' => ['label' => 'Per month', 'type' => 'money', 'sql' => billing_monthly_sql('t.monthly_price', 't.billing_frequency')],
+                '_suppliers' => ['label' => 'Suppliers', 'type' => 'int', 'sql' => '(SELECT COUNT(*) FROM supplier_products sp WHERE sp.product_id = t.id AND sp.active = 1)'],
+            ],
+            'presets' => [
+                'no_supplier' => ['label' => 'No supplier', 'sql' => 't.active = 1 AND NOT EXISTS (SELECT 1 FROM supplier_products sp WHERE sp.product_id = t.id AND sp.active = 1)'],
             ],
             'default_sort' => ['name', 'asc'],
         ],
