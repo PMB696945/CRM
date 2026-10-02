@@ -13,9 +13,31 @@ function install_schema(): void
     migrate();
 }
 
+/**
+ * The migrations file, making sure PHP's opcode cache isn't still serving the copy from
+ * before an update (some hosts only re-check files every few minutes, or never).
+ */
+function migrations_file(): string
+{
+    $file = APP_ROOT . '/install/migrations.php';
+    if (function_exists('opcache_invalidate')) {
+        @opcache_invalidate($file);
+    }
+    return $file;
+}
+
+/** Drop cached copies of the app's PHP files (after an upload), where the host allows it. */
+function opcache_flush_app(): bool
+{
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+    return true;
+}
+
 function latest_schema_version(): int
 {
-    return max(array_keys(require APP_ROOT . '/install/migrations.php'));
+    return max(array_keys(require migrations_file()));
 }
 
 function schema_version(): int
@@ -32,7 +54,7 @@ function migrate(): array
 {
     $applied = [];
     $current = schema_version();
-    foreach (require APP_ROOT . '/install/migrations.php' as $version => $migration) {
+    foreach (require migrations_file() as $version => $migration) {
         if ($version <= $current) {
             continue;
         }

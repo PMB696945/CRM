@@ -70,6 +70,7 @@ if (must_set_up_2fa() && !in_array($page, ['profile', 'logout'], true)) {
     redirect(url('profile'));
 }
 
+try {
 match (true) {
     $page === 'dashboard' => dashboard_controller(),
     $page === 'pipeline'  => pipeline_controller(),
@@ -102,3 +103,18 @@ match (true) {
     entity($page) !== null => entity_controller($page),
     default               => not_found(),
 };
+} catch (PDOException $e) {
+    // A missing table or column means the code is newer than the database (e.g. the update ran
+    // before every file had been uploaded, or a cached old copy was used): update it and try once more.
+    if (in_array($e->getCode(), ['42S02', '42S22'], true) && !isset($_GET['_schema_retry']) && !headers_sent()) {
+        opcache_flush_app();
+        if (migrate() !== []) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            error_log('Database updated after: ' . $e->getMessage());
+            redirect(current_url() . (str_contains(current_url(), '?') ? '&' : '?') . '_schema_retry=1');
+        }
+    }
+    throw $e;
+}
