@@ -4,15 +4,20 @@ $current = query('page', 'dashboard');
 $nav = [
     'Menu' => [
         'dashboard'     => ['dashboard', 'Dashboard'],
+    ],
+    'Customers' => [
         'accounts'      => ['building', 'Customers'],
         'contacts'      => ['user', 'Contacts'],
         'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
+    ],
+    'Support' => [
         'tickets'       => ['ticket', 'Support tickets'],
-    ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []) + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []),
+    ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'customer_orders' => ['inbox', 'Orders'],
+    ] + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []) + [
         'contracts'     => ['signature', 'Contracts'],
         'pipeline'      => ['pipeline', 'Pipeline'],
         'opportunities' => ['pound', 'Opportunities'],
