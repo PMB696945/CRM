@@ -11,9 +11,6 @@ $nav = [
         'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
     ],
-    'Support' => [
-        'tickets'       => ['ticket', 'Support tickets'],
-    ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'customer_orders' => ['inbox', 'Orders'],
@@ -25,6 +22,9 @@ $nav = [
         'products'      => ['cube', 'Products & tariffs'],
         'documents'     => ['folder', 'Documents'],
     ],
+    'Support' => [
+        'tickets'       => ['ticket', 'Support tickets'],
+    ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []),
 ];
 if (can('suppliers.view') || can('suppliers.edit') || can('purchasing.edit')) {
     $nav['Purchasing'] = [
