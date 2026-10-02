@@ -1995,6 +1995,42 @@ test('PDF text: plain fonts, and compressed streams with embedded fonts (ToUnico
     eq("Total due\nRef ABC", pdf_extract_text($raw), 'kerning move not taken as a space; TJ gap is');
 });
 
+test('invoice reader: tables, unlabelled dates and totals laid out in columns', function () {
+    // Laid out like a real distributor invoice: date under the number, "Total Due" above the table, right-aligned columns.
+    $pdf = new SimplePdf();
+    $t = fn($x, $y, $s, $align = 'left') => $pdf->text($x, $y, $s, 10, false, [0, 0, 0], $align);
+    $t(30, 40, 'NetXL Distribution'); $t(560, 40, 'INVOICE #DUK-12076093', 'right');
+    $t(560, 56, '29 September 2026', 'right');
+    $t(410, 120, 'Total Due'); $t(560, 120, '£0.00', 'right');
+    $t(30, 160, 'Description'); $t(343, 160, 'Qty'); $t(433, 160, 'Price'); $t(553, 160, 'Total', 'right');
+    $t(30, 180, 'Draytek Vigor V167 Modem'); $t(343, 180, '3'); $t(433, 180, '£81.00'); $t(553, 180, '£243.00', 'right');
+    $t(30, 196, 'Shipping - Next Working Day'); $t(343, 196, '1'); $t(433, 196, '£6.99'); $t(553, 196, '£6.99', 'right');
+    $t(410, 230, 'Subtotal'); $t(553, 230, '£249.99', 'right');
+    $t(410, 246, 'VAT (20%)'); $t(553, 246, '£50.00', 'right');
+    $t(410, 262, 'Invoice Total'); $t(553, 262, '£299.99', 'right');
+    $rows = pdf_extract_rows($pdf->output());
+    $f = invoice_read_builtin($rows, pdf_rows_text($rows));
+    eq(['DUK-12076093', '2026-09-29', 249.99, 50.0, 299.99], [$f['invoice_number'], $f['invoice_date'], $f['net_total'], $f['vat_total'], $f['gross_total']]);
+    eq([['description' => 'Draytek Vigor V167 Modem', 'quantity' => 3.0, 'unit_price' => 81.0, 'net_amount' => 243.0],
+        ['description' => 'Shipping - Next Working Day', 'quantity' => 1.0, 'unit_price' => 6.99, 'net_amount' => 6.99]], $f['lines']);
+
+    // Headed boxes: values under their labels; "Unit Price" is a price, and a table amount is never a PO number.
+    $pdf = new SimplePdf();
+    $t = fn($x, $y, $s, $align = 'left') => $pdf->text($x, $y, $s, 10, false, [0, 0, 0], $align);
+    $t(30, 100, 'Invoice Number'); $t(160, 100, 'Invoice Date'); $t(260, 100, 'Due Date'); $t(360, 100, 'Reference');
+    $t(30, 114, 'INV-004512'); $t(160, 114, '2 October 2026'); $t(260, 114, '1 November 2026'); $t(360, 114, 'PO-000003');
+    $t(30, 150, 'Description'); $t(326, 150, 'Quantity', 'right'); $t(415, 150, 'Unit Price', 'right'); $t(450, 150, 'VAT', 'right'); $t(565, 150, 'Amount GBP', 'right');
+    $t(30, 166, 'Yealink T54W desk phone'); $t(326, 166, '5.00', 'right'); $t(415, 166, '95.00', 'right'); $t(450, 166, '20%', 'right'); $t(565, 166, '475.00', 'right');
+    $t(440, 200, 'Subtotal'); $t(565, 200, '475.00', 'right');
+    $t(440, 216, 'TOTAL VAT 20%'); $t(565, 216, '95.00', 'right');
+    $t(440, 232, 'TOTAL GBP'); $t(565, 232, '570.00', 'right');
+    $rows = pdf_extract_rows($pdf->output());
+    $f = invoice_read_builtin($rows, pdf_rows_text($rows));
+    eq(['INV-004512', '2026-10-02', '2026-11-01', ['PO-000003'], 475.0, 95.0, 570.0],
+        [$f['invoice_number'], $f['invoice_date'], $f['due_date'], $f['purchase_order_numbers'], $f['net_total'], $f['vat_total'], $f['gross_total']]);
+    eq([['description' => 'Yealink T54W desk phone', 'quantity' => 5.0, 'unit_price' => 95.0, 'net_amount' => 475.0]], $f['lines']);
+});
+
 test('supplier invoices are read and matched to their purchase order, with warnings when they differ', function () {
     ['po' => $po, 'kit' => $kit, 'other' => $other] = $GLOBALS['invoiceTest'];
     $upload = fn(array $lines) => invoice_upload(['name' => 'invoice.pdf', 'tmp_name' => make_test_invoice_pdf($lines), 'error' => UPLOAD_ERR_OK], null, null, false);

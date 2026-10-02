@@ -73,6 +73,208 @@ function invoice_date(?string $s): ?string
     return $ts ? date('Y-m-d', $ts) : null;
 }
 
+const INVOICE_DATE_RE = '(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th)?[\s\-]+[A-Za-z]{3,9}\.?[\s\-,]+\d{2,4}|[A-Za-z]{3,9}\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})';
+const INVOICE_MONEY_RE = '(?:£|GBP|\$|€|EUR|USD)?\s*(-?\d{1,3}(?:,\d{3})*(?:\.\d{2})|-?\d+\.\d{2})(?!\d|%)';
+
+/**
+ * Read an invoice laid out in rows and columns (from pdf_extract_rows): labels
+ * are paired with the value to their right, or below them in the same column.
+ */
+function invoice_read_layout(array $rows): array
+{
+    $f = [];
+    // The value for a label: the rest of its cell, a cell to the right, or a cell below in the same column.
+    $valueFor = function (string $labelRe, string $valueRe) use ($rows): ?string {
+        foreach ($rows as $r => $row) {
+            foreach ($row as $ci => $cell) {
+                if (!preg_match('/^\s*(?:' . $labelRe . ')\s*[:.#]?\s*(.*)$/iu', $cell['text'], $m)) {
+                    continue;
+                }
+                if ($m[1] !== '' && preg_match('/^(?:' . $valueRe . ')/iu', $m[1], $v)) {
+                    return $v[1] ?? $v[0];
+                }
+                for ($k = $ci + 1; $k < count($row); $k++) {
+                    if (preg_match('/^\s*(?:' . $valueRe . ')/iu', $row[$k]['text'], $v)) {
+                        return $v[1] ?? $v[0];
+                    }
+                }
+                for ($d = 1; $d <= 3 && isset($rows[$r + $d]); $d++) {
+                    foreach ($rows[$r + $d] as $below) {
+                        $overlap = min($cell['x2'], $below['x2']) - max($cell['x'], $below['x']);
+                        if (($overlap > 0 || abs($below['x'] - $cell['x']) < $cell['size'] * 2) && preg_match('/^\s*(?:' . $valueRe . ')/iu', $below['text'], $v)) {
+                            return $v[1] ?? $v[0];
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    };
+    $ref = '([A-Z0-9][A-Z0-9\-\/_.]*\d[A-Z0-9\-\/_.]*)(?=\s|$)';
+    $f['invoice_number'] = $valueFor('(?:tax\s+)?(?:invoice|inv)(?:\s*(?:no\.?|number|num|#|ref(?:erence)?|id))?', $ref);
+    $f['invoice_date'] = invoice_date($valueFor('(?:invoice|tax\s*point|issue|document)\s*date|date\s*of\s*(?:issue|invoice)|date|dated', INVOICE_DATE_RE));
+    $f['due_date'] = invoice_date($valueFor('due\s*date|payment\s*due(?:\s*date)?|due\s*(?:by|on)?|pay\s*by', INVOICE_DATE_RE));
+    $po = $valueFor('purchase\s*order(?:\s*(?:no\.?|number|ref))?|p\.?\s?o\.?(?:\s*(?:no\.?|number|ref))?|(?:your|customer|client)\s*(?:order\s*)?ref(?:erence)?(?:\s*no\.?)?|order\s*(?:no\.?|number|ref(?:erence)?)|reference', '(?=[A-Z0-9\-\/_.]*[A-Z])' . $ref);
+    $f['purchase_order_numbers'] = $po ? [$po] : [];
+
+    // The line items table header, like "Description | Qty | Price | Amount".
+    $head = null;
+    foreach ($rows as $r => $row) {
+        $names = strtolower(implode(' | ', array_column($row, 'text')));
+        if (preg_match('/\b(description|details|item|product|service)s?\b/', $names) && preg_match('/\b(qty|quantity|price|rate|amount|total|net|cost)\b/', $names)) {
+            $head = $r;
+            break;
+        }
+    }
+    // No labelled date: the first date above the table (often printed under the invoice number).
+    if (empty($f['invoice_date'])) {
+        foreach ($rows as $r => $row) {
+            if ($head !== null && $r >= $head) {
+                break;
+            }
+            foreach ($row as $cell) {
+                if (!preg_match('/\bdue\b/i', $cell['text']) && preg_match('/' . INVOICE_DATE_RE . '/', $cell['text'], $m) && ($d = invoice_date($m[1]))) {
+                    $f['invoice_date'] = $d;
+                    break 2;
+                }
+            }
+        }
+    }
+
+    // Every amount with the words just before it (same cell, or the cell to its left).
+    $pairs = [];
+    $totalsFrom = null;
+    foreach ($rows as $r => $row) {
+        foreach ($row as $ci => $cell) {
+            if (!preg_match_all('/' . INVOICE_MONEY_RE . '/u', $cell['text'], $mm, PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+            $prevEnd = 0;
+            foreach ($mm[0] as $k => [$whole, $off]) {
+                $label = trim(substr($cell['text'], $prevEnd, $off - $prevEnd));
+                if ($label === '' && $k === 0 && $ci > 0 && !preg_match('/\d/', $row[$ci - 1]['text'] ?? '')) {
+                    $label = $row[$ci - 1]['text'];
+                } elseif (preg_match('/[A-Za-z]/', $label) === 0 && $k === 0 && $ci > 0) {
+                    $label = $row[$ci - 1]['text'] . ' ' . $label;
+                }
+                $prevEnd = $off + strlen($whole);
+                $pairs[] = ['label' => strtolower($label), 'amount' => invoice_amount($mm[1][$k][0]), 'row' => $r];
+            }
+        }
+    }
+    $gross = $net = $vat = [];
+    foreach ($pairs as $p) {
+        $l = $p['label'];
+        if ($l === '' || $p['amount'] === null) {
+            continue;
+        }
+        if (preg_match('/\b(sub\s*-?\s*total|net(?!\s*30)|goods|total\s*(?:ex|excl|excluding|before)\.?\s*vat|nett)\b/', $l)) {
+            $net[] = $p;
+        } elseif (preg_match('/\b(vat|tax)\b/', $l) && !preg_match('/\b(inc|incl|including)\b/', $l)) {
+            $vat[] = $p;
+        } elseif (preg_match('/\b(total|amount\s*(?:due|payable)|balance\s*(?:due|to\s*pay)?|to\s*pay|payable)\b/', $l)) {
+            $gross[] = $p;
+        } else {
+            continue;
+        }
+        if ($head === null || $p['row'] > $head) {
+            $totalsFrom = $totalsFrom === null ? $p['row'] : min($totalsFrom, $p['row']);
+        }
+    }
+    $max = fn(array $ps) => $ps ? max(array_column($ps, 'amount')) : null;
+    $f['gross_total'] = $max($gross);
+    $f['vat_total'] = $vat ? $vat[count($vat) - 1]['amount'] : null;
+    $f['net_total'] = $net ? $net[count($net) - 1]['amount'] : null;
+    if ($f['gross_total'] !== null && $f['net_total'] !== null && $f['net_total'] > $f['gross_total']) {
+        $f['net_total'] = null;
+    }
+
+    // Line items: the rows under a header like "Description | Qty | Price | Amount", up to the totals.
+    $f['lines'] = [];
+    $cols = [];
+    foreach ($rows as $r => $row) {
+        if ($r === $head) {
+            foreach ($row as $c) {
+                $t = strtolower($c['text']);
+                $role = match (true) {
+                    (bool)preg_match('/\b(unit\s*price|price|rate|each|unit\s*cost|cost)\b/', $t) => 'unit_price',
+                    (bool)preg_match('/\b(qty|quantity|units?|no\.?)\b/', $t) => 'quantity',
+                    (bool)preg_match('/\b(vat|tax)\b/', $t) && !preg_match('/amount|total/', $t) => 'vat',
+                    (bool)preg_match('/\b(amount|total|net|line\s*total|value)\b/', $t) => 'net_amount',
+                    default => 'text',
+                };
+                $cols[] = ['role' => $role, 'mid' => ($c['x'] + $c['x2']) / 2, 'x' => $c['x'], 'x2' => $c['x2']];
+            }
+            continue;
+        }
+        if ($head === null || $r < $head || ($totalsFrom !== null && $r >= $totalsFrom)) {
+            continue;
+        }
+        $line = ['description' => '', 'quantity' => null, 'unit_price' => null, 'net_amount' => null];
+        $desc = [];
+        foreach ($row as $c) {
+            $isNum = (bool)preg_match('/^\s*(?:£|GBP|\$|€)?\s*-?[\d,]*\.?\d+\s*%?\s*$/', $c['text']);
+            if (!$isNum) {
+                $desc[] = $c['text'];
+                continue;
+            }
+            // The header column this number sits under (right-aligned numbers end near their header's right edge).
+            $best = null;
+            foreach ($cols as $col) {
+                $dist = min(abs(($c['x'] + $c['x2']) / 2 - $col['mid']), abs($c['x2'] - $col['x2']), abs($c['x'] - $col['x']));
+                if ($best === null || $dist < $best[0]) {
+                    $best = [$dist, $col['role']];
+                }
+            }
+            $role = $best[1] ?? 'text';
+            if (in_array($role, ['quantity', 'unit_price', 'net_amount'], true) && !str_contains($c['text'], '%')) {
+                $line[$role] = $role === 'quantity' ? (float)preg_replace('/[^\d.\-]/', '', $c['text']) : invoice_amount($c['text']);
+            }
+        }
+        $line['description'] = trim(implode(' ', $desc));
+        if ($line['net_amount'] === null && $line['unit_price'] !== null && $line['quantity'] !== null) {
+            $line['net_amount'] = round($line['unit_price'] * $line['quantity'], 2);
+        }
+        if ($line['description'] !== '' && $line['net_amount'] !== null) {
+            $f['lines'][] = $line;
+        }
+    }
+    // No table header: lines written like "Hosted seats   12 x £4.50   £54.00".
+    if (!$f['lines']) {
+        foreach ($rows as $r => $row) {
+            $text = implode('   ', array_column($row, 'text'));
+            if (($totalsFrom === null || $r < $totalsFrom) && preg_match('/^(.+?)\s+(\d+(?:\.\d+)?)\s*(?:x|×|@)\s*' . INVOICE_MONEY_RE . '\s+' . INVOICE_MONEY_RE . '\s*$/u', $text, $m)) {
+                $f['lines'][] = ['description' => trim($m[1]), 'quantity' => (float)$m[2], 'unit_price' => invoice_amount($m[3]), 'net_amount' => invoice_amount($m[4])];
+            }
+        }
+    }
+    if ($f['net_total'] === null && $f['lines'] && ($sum = round(array_sum(array_column($f['lines'], 'net_amount')), 2))
+        && ($f['gross_total'] === null || $sum <= $f['gross_total'])) {
+        $f['net_total'] = $sum;
+    }
+    if ($f['net_total'] === null && $f['gross_total'] !== null && $f['vat_total'] !== null) {
+        $f['net_total'] = round($f['gross_total'] - $f['vat_total'], 2);
+    }
+    if ($f['vat_total'] === null && $f['gross_total'] !== null && $f['net_total'] !== null) {
+        $f['vat_total'] = round($f['gross_total'] - $f['net_total'], 2);
+    }
+    return array_filter($f, fn($v) => $v !== null && $v !== []);
+}
+
+/** The built-in reader: layout first, then plain-text patterns for anything it missed. */
+function invoice_read_builtin(array $rows, string $text): array
+{
+    $layout = $rows ? invoice_read_layout($rows) : [];
+    $plain = invoice_read_text($text);
+    $f = $layout + array_filter($plain, fn($v) => $v !== null && $v !== []);
+    $f['purchase_order_numbers'] = array_values(array_unique(array_merge($plain['purchase_order_numbers'] ?? [], $layout['purchase_order_numbers'] ?? [])));
+    foreach (['supplier_vat_number', 'supplier_email', 'currency'] as $k) {
+        $f[$k] = $plain[$k] ?? null;
+    }
+    $f['lines'] = $layout['lines'] ?? [];
+    return $f;
+}
+
 /** Read an invoice's details from its text with patterns (for PDFs with real text). */
 function invoice_read_text(string $text): array
 {
@@ -259,7 +461,8 @@ function invoice_reader(): string
 function invoice_read(array $inv): array
 {
     $path = invoice_path($inv);
-    $text = $inv['mime'] === 'application/pdf' ? pdf_extract_text((string)file_get_contents($path)) : '';
+    $rows = $inv['mime'] === 'application/pdf' ? pdf_extract_rows((string)file_get_contents($path)) : [];
+    $text = pdf_rows_text($rows);
     $reader = invoice_reader();
     $error = null;
     $fields = [];
@@ -271,12 +474,12 @@ function invoice_read(array $inv): array
                 ? 'This PDF has no text in it (it is probably a scan). Enter the details, or switch on reading with Claude in Settings.'
                 : 'Photos can only be read with Claude (Settings → Supplier invoices). Enter the details by hand for now.';
         } else {
-            $fields = invoice_read_text($text);
+            $fields = invoice_read_builtin($rows, $text);
         }
     } catch (IntegrationException $e) {
         $error = $e->getMessage();
         if (trim($text) !== '') {
-            $fields = invoice_read_text($text); // fall back to the built-in reader
+            $fields = invoice_read_builtin($rows, $text); // fall back to the built-in reader
             $reader = 'builtin';
         }
     }

@@ -8,7 +8,8 @@ declare(strict_types=1);
  * accounting software; scanned (image-only) PDFs have no text to find.
  */
 
-function pdf_extract_text(string $pdf): string
+/** Rows of text cells from a PDF (see pdf_rows). */
+function pdf_extract_rows(string $pdf): array
 {
     // Every object, including ones packed inside object streams.
     $objects = [];
@@ -96,16 +97,73 @@ function pdf_extract_text(string $pdf): string
         }
     }
 
-    $out = [];
+    $rows = [];
     foreach ($streams as $data) {
         if (str_contains($data, 'begincmap') || !preg_match('/\bBT\b/', $data) || !preg_match('/T[Jj]/', $data)) {
             continue;
         }
-        $out[] = pdf_content_text($data, $resourceFonts);
+        array_push($rows, ...pdf_rows(pdf_content_fragments($data, $resourceFonts)));
     }
-    $text = implode("\n", array_filter($out, fn($t) => trim($t) !== ''));
-    $text = preg_replace("/[ \t]+/", ' ', $text);
-    return trim(preg_replace("/\n\s*\n+/", "\n", $text));
+    return $rows;
+}
+
+/** The text of a PDF, a line per visual row, with columns separated by wider gaps. */
+function pdf_extract_text(string $pdf): string
+{
+    return pdf_rows_text(pdf_extract_rows($pdf));
+}
+
+function pdf_rows_text(array $rows): string
+{
+    return trim(implode("\n", array_map(fn($row) => implode('   ', array_column($row, 'text')), $rows)));
+}
+
+/**
+ * Group text fragments into visual rows (top to bottom), each a list of cells
+ * (left to right): ['text', 'x', 'x2', 'y', 'size']. Fragments close together
+ * on a line join into one cell; a wide gap starts a new cell (a new column).
+ */
+function pdf_rows(array $frags): array
+{
+    $frags = array_values(array_filter($frags, fn($f) => trim($f['text']) !== ''));
+    usort($frags, fn($a, $b) => [$b['y'], $a['x']] <=> [$a['y'], $b['x']]);
+    $rows = [];
+    foreach ($frags as $f) {
+        $placed = false;
+        foreach ($rows as &$row) {
+            if (abs($row['y'] - $f['y']) <= max(1.0, min($row['size'], $f['size']) * 0.45)) {
+                $row['frags'][] = $f;
+                $placed = true;
+                break;
+            }
+        }
+        unset($row);
+        if (!$placed) {
+            $rows[] = ['y' => $f['y'], 'size' => $f['size'], 'frags' => [$f]];
+        }
+    }
+    usort($rows, fn($a, $b) => $b['y'] <=> $a['y']);
+    $out = [];
+    foreach ($rows as $row) {
+        usort($row['frags'], fn($a, $b) => $a['x'] <=> $b['x']);
+        $cells = [];
+        foreach ($row['frags'] as $f) {
+            $last = $cells ? count($cells) - 1 : -1;
+            $gap = $last >= 0 ? $f['x'] - $cells[$last]['x2'] : null;
+            if ($gap !== null && $gap < $f['size'] * 0.6) {
+                $cells[$last]['text'] .= ($gap > $f['size'] * 0.12 && !str_ends_with($cells[$last]['text'], ' ') ? ' ' : '') . $f['text'];
+                $cells[$last]['x2'] = max($cells[$last]['x2'], $f['x'] + $f['w']);
+            } else {
+                $cells[] = ['text' => $f['text'], 'x' => $f['x'], 'x2' => $f['x'] + $f['w'], 'y' => $f['y'], 'size' => $f['size']];
+            }
+        }
+        foreach ($cells as &$c) {
+            $c['text'] = trim(preg_replace('/\s+/u', ' ', $c['text']));
+        }
+        unset($c);
+        $out[] = array_values(array_filter($cells, fn($c) => $c['text'] !== ''));
+    }
+    return array_values(array_filter($out));
 }
 
 /** The decoded data of an object's stream, or null. */
@@ -188,46 +246,65 @@ function pdf_parse_cmap(string $cmap): array
     return $map;
 }
 
-/** Text from one content stream, a line per text line. */
-function pdf_content_text(string $data, array $fonts): string
+/** Multiply two PDF matrices [a b c d e f]: $m × $n. */
+function pdf_matrix_mul(array $m, array $n): array
 {
-    $out = '';
+    return [
+        $m[0] * $n[0] + $m[1] * $n[2], $m[0] * $n[1] + $m[1] * $n[3],
+        $m[2] * $n[0] + $m[3] * $n[2], $m[2] * $n[1] + $m[3] * $n[3],
+        $m[4] * $n[0] + $m[5] * $n[2] + $n[4], $m[4] * $n[1] + $m[5] * $n[3] + $n[5],
+    ];
+}
+
+/**
+ * The text drawn by one content stream, as fragments with their position on the
+ * page: ['text', 'x', 'y', 'w', 'size'] in page units (y up). Follows the
+ * graphics state (cm, q/Q) and the text state (Tm, Td, TL, Tc, Tw, Tz).
+ */
+function pdf_content_fragments(string $data, array $fonts): array
+{
+    $frags = [];
     $font = null;
     $size = 10.0;
+    $ctm = [1, 0, 0, 1, 0, 0];
+    $stack = [];
+    $tm = $tlm = [1, 0, 0, 1, 0, 0];
+    $leading = 0.0;
+    $tc = $tw = 0.0;
+    $th = 1.0;
     $len = strlen($data);
     $operands = [];
-    $lineX = 0.0;   // start of the current line (from Tm / Td)
-    $lineY = null;
-    $endX = null;   // where the last text drawn ended
-    $decode = function (string $bytes, float &$advance) use (&$font, &$size): string {
-        $s = '';
+
+    // Draw a string at the current text position and move past it.
+    $show = function (string $bytes) use (&$frags, &$font, &$size, &$tm, &$ctm, &$tc, &$tw, &$th): void {
         $step = $font['_bytes'] ?? 1;
-        $width = 0.0;
+        $text = '';
+        $adv = 0.0;
         for ($i = 0; $i < strlen($bytes); $i += $step) {
             $chunk = substr($bytes, $i, $step);
             $code = strtoupper(bin2hex($chunk));
             $num = hexdec($code);
-            $width += $font ? ($font['_w'][$num] ?? $font['_dw']) : 500;
+            $w = $font ? ($font['_w'][$num] ?? $font['_dw']) : 500;
+            $adv += ($w / 1000 * $size + $tc + ($step === 1 && $num === 32 ? $tw : 0)) * $th;
             if ($font && $font['_map']) {
-                $s .= $font[$code] ?? '';
+                $text .= $font[$code] ?? '';
             } else {
-                $s .= (string)@mb_convert_encoding($step === 1 ? $chunk : chr($num & 0xFF), 'UTF-8', 'Windows-1252');
+                $text .= (string)@mb_convert_encoding($step === 1 ? $chunk : chr($num & 0xFF), 'UTF-8', 'Windows-1252');
             }
         }
-        $advance = $width / 1000 * $size;
-        return $s;
-    };
-    // Text at a new position on the same line: a space if there's a visible gap.
-    $moveTo = function (float $x, float $y) use (&$out, &$lineX, &$lineY, &$endX, &$size): void {
-        if ($lineY !== null && abs($y - $lineY) > $size * 0.3) {
-            $out .= "\n";
-        } elseif ($endX !== null && $x - $endX > $size * 0.15) {
-            $out .= ' ';
+        $m = pdf_matrix_mul($tm, $ctm);
+        $sx = sqrt($m[0] ** 2 + $m[1] ** 2);
+        $sy = sqrt($m[2] ** 2 + $m[3] ** 2);
+        if ($text !== '') {
+            $frags[] = ['text' => $text, 'x' => $m[4], 'y' => $m[5], 'w' => $adv * $sx, 'size' => max(1.0, $size * $sy)];
         }
-        $lineX = $x;
-        $lineY = $y;
-        $endX = $x;
+        $tm = pdf_matrix_mul([1, 0, 0, 1, $adv, 0], $tm);
     };
+    $move = function (float $tx, float $ty) use (&$tm, &$tlm): void {
+        $tlm = pdf_matrix_mul([1, 0, 0, 1, $tx, $ty], $tlm);
+        $tm = $tlm;
+    };
+
     for ($i = 0; $i < $len;) {
         $c = $data[$i];
         if (ctype_space($c)) {
@@ -295,11 +372,10 @@ function pdf_content_text(string $data, array $fonts): string
             $i++;
             continue;
         }
-        if ($c === '<' || $c === '>') { // dictionaries (inline images etc.): skip the brackets
+        if ($c === '<' || $c === '>') { // dictionary brackets
             $i += 2;
             continue;
         }
-        // A number, name or operator.
         preg_match('/\G[^\s()<>\[\]{}\/%]+|\G\/[^\s()<>\[\]{}\/%]*/', $data, $tok, 0, $i);
         $t = $tok[0] ?? $c;
         $i += max(1, strlen($t));
@@ -309,57 +385,79 @@ function pdf_content_text(string $data, array $fonts): string
         }
         $num = fn(int $back) => (float)($operands[count($operands) - $back][1] ?? 0);
         switch ($t) {
+            case 'q':
+                $stack[] = $ctm;
+                break;
+            case 'Q':
+                $ctm = array_pop($stack) ?? [1, 0, 0, 1, 0, 0];
+                break;
+            case 'cm':
+                if (count($operands) >= 6) {
+                    $ctm = pdf_matrix_mul([$num(6), $num(5), $num(4), $num(3), $num(2), $num(1)], $ctm);
+                }
+                break;
+            case 'BT':
+                $tm = $tlm = [1, 0, 0, 1, 0, 0];
+                break;
             case 'Tf':
                 $name = $operands[count($operands) - 2][1] ?? null;
                 $font = is_string($name) ? ($fonts[$name] ?? null) : null;
-                $size = abs($num(1)) ?: 10.0;
+                $size = $num(1) ?: 10.0;
                 break;
             case 'Tm':
-                $moveTo($num(2), $num(1));
+                if (count($operands) >= 6) {
+                    $tm = $tlm = [$num(6), $num(5), $num(4), $num(3), $num(2), $num(1)];
+                }
                 break;
             case 'Td':
+                $move($num(2), $num(1));
+                break;
             case 'TD':
-                $moveTo($lineX + $num(2), ($lineY ?? 0) + $num(1));
+                $leading = -$num(1);
+                $move($num(2), $num(1));
+                break;
+            case 'TL':
+                $leading = $num(1);
+                break;
+            case 'Tc':
+                $tc = $num(1);
+                break;
+            case 'Tw':
+                $tw = $num(1);
+                break;
+            case 'Tz':
+                $th = $num(1) / 100;
                 break;
             case 'T*':
-                $out .= "\n";
-                $endX = null;
+                $move(0, -$leading);
                 break;
             case 'Tj':
             case "'":
             case '"':
                 if ($t !== 'Tj') {
-                    $out .= "\n";
+                    if ($t === '"') {
+                        $tw = $num(3);
+                        $tc = $num(2);
+                    }
+                    $move(0, -$leading);
                 }
                 $last = end($operands);
                 if ($last && $last[0] === 's') {
-                    $adv = 0.0;
-                    $out .= $decode($last[1], $adv);
-                    $endX = ($endX ?? $lineX) + $adv;
+                    $show($last[1]);
                 }
                 break;
             case 'TJ':
                 $last = end($operands);
                 foreach (($last && $last[0] === 'a') ? $last[1] : [] as $part) {
                     if ($part[0] === 's') {
-                        $adv = 0.0;
-                        $out .= $decode($part[1], $adv);
-                        $endX = ($endX ?? $lineX) + $adv;
+                        $show($part[1]);
                     } elseif ($part[0] === 'd') {
-                        if ($part[1] < -200) {
-                            $out .= ' ';
-                        }
-                        $endX = ($endX ?? $lineX) - $part[1] / 1000 * $size;
+                        $tm = pdf_matrix_mul([1, 0, 0, 1, -$part[1] / 1000 * $size * $th, 0], $tm);
                     }
                 }
-                break;
-            case 'ET':
-                $out .= "\n";
-                $endX = null;
-                $lineY = null;
                 break;
         }
         $operands = [];
     }
-    return $out;
+    return $frags;
 }

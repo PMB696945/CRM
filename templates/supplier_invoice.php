@@ -105,5 +105,11 @@ $isImage = str_starts_with((string)$inv['mime'], 'image/');
           <div><button class="btn btn-sm btn-danger">Mark as disputed</button></div></form>
       <?php endif; ?>
     </section>
+    <?php if (trim((string)$inv['raw_text']) !== ''): ?>
+    <section class="card">
+      <details><summary class="small">Text read from the file</summary>
+        <pre class="small mt-2" style="white-space:pre-wrap"><?= h((string)$inv['raw_text']) ?></pre></details>
+    </section>
+    <?php endif; ?>
   </aside>
 </div>
