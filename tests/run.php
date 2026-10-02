@@ -1993,6 +1993,21 @@ test('PDF text: plain fonts, and compressed streams with embedded fonts (ToUnico
         . "4 0 obj << /Type /Page /Resources << /Font << /F1 1 0 R >> >> /Contents 5 0 R >> endobj\n"
         . "5 0 obj << /Length " . strlen($z) . " /Filter /FlateDecode >> stream\n$z\nendstream endobj\n%%EOF";
     eq("Total due\nRef ABC", pdf_extract_text($raw), 'kerning move not taken as a space; TJ gap is');
+
+    // Like Xero's invoices: glyphs listed with width 0, each piece placed separately, and a hyphen drawn
+    // for capitals that maps to a private-use character.
+    $cmap = "/CIDInit /ProcSet findresource begin 1 begincodespacerange <0000> <FFFF> endcodespacerange\n1 beginbfrange\n<0030> <007A> <0030>\nendbfrange\n1 beginbfchar\n<0001> <E088>\nendbfchar\nendcmap";
+    $hex = fn($s) => implode('', array_map(fn($c) => sprintf('%04X', $c === '~' ? 1 : ord($c)), str_split($s)));
+    $content = "BT /F1 10 Tf 1 0 0 1 50 700 Tm <" . $hex('Dat') . "> Tj ET BT /F1 10 Tf 1 0 0 1 64.6 700 Tm <" . $hex('e') . "> Tj ET\n"
+        . "BT /F1 10 Tf 1 0 0 1 50 680 Tm <" . $hex('PO~000123') . "> Tj ET";
+    $z = gzcompress($content);
+    $zc = gzcompress($cmap);
+    $raw = "%PDF-1.7\n1 0 obj << /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /DescendantFonts [2 0 R] /ToUnicode 3 0 R >> endobj\n"
+        . "2 0 obj << /Type /Font /Subtype /CIDFontType2 /W [68 [700] 97 [550 0 0 0 550] 116 [0]] >> endobj\n"
+        . "3 0 obj << /Length " . strlen($zc) . " /Filter /FlateDecode >> stream\n$zc\nendstream endobj\n"
+        . "4 0 obj << /Type /Page /Resources << /Font << /F1 1 0 R >> >> /Contents 5 0 R >> endobj\n"
+        . "5 0 obj << /Length " . strlen($z) . " /Filter /FlateDecode >> stream\n$z\nendstream endobj\n%%EOF";
+    eq("Date\nPO-000123", pdf_extract_text($raw), 'zero widths and private-use hyphens');
 });
 
 test('purchase orders can use our products & tariffs; new ones join the supplier price list', function () {

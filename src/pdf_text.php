@@ -55,7 +55,7 @@ function pdf_extract_rows(string $pdf): array
             }
             if (preg_match('#/W\s*(\[(?:[^\[\]]|\[[^\]]*\])*\]|\d+\s+\d+\s+R)#', $desc, $w)) {
                 $list = $resolve($w[1]);
-                preg_match_all('/\[[^\]]*\]|-?[\d.]+/', trim($list, '[] '), $tok);
+                preg_match_all('/\[[^\]]*\]|-?[\d.]+/', preg_replace('/^\s*\[|\]\s*$/', '', $list), $tok);
                 $t = $tok[0];
                 for ($i = 0; $i < count($t);) {
                     if (isset($t[$i + 1]) && $t[$i + 1][0] === '[') {
@@ -78,6 +78,14 @@ function pdf_extract_rows(string $pdf): array
             preg_match_all('/-?[\d.]+/', $resolve($wd[1]), $ws);
             foreach ($ws[0] as $k => $wv) {
                 $info['_w'][(int)$fc[1] + $k] = (float)$wv;
+            }
+        }
+        // Some generators write 0 for glyphs they use (Xero's invoices do): those get the font's average width.
+        $real = array_filter($info['_w'], fn($w) => $w > 0);
+        $avg = $real ? array_sum($real) / count($real) : $info['_dw'];
+        foreach ($info['_w'] as $c => $w) {
+            if ($w <= 0) {
+                $info['_w'][$c] = $avg;
             }
         }
         $fontInfo[$num] = $info;
@@ -158,6 +166,9 @@ function pdf_rows(array $frags): array
             }
         }
         foreach ($cells as &$c) {
+            // Private-use characters are alternate glyphs with no standard meaning: between letters or
+            // digits it's almost always a hyphen drawn for capitals ("PO-000123"); elsewhere drop it.
+            $c['text'] = preg_replace(['/(?<=[\p{L}\p{N}])\p{Co}+(?=[\p{L}\p{N}])/u', '/\p{Co}/u'], ['-', ''], $c['text']);
             $c['text'] = trim(preg_replace('/\s+/u', ' ', $c['text']));
         }
         unset($c);

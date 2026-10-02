@@ -275,6 +275,27 @@ function invoice_read_builtin(array $rows, string $text): array
     return $f;
 }
 
+/** Our own email domains (company, sending address, staff), so they're not taken for the supplier's. */
+function invoice_our_domains(): array
+{
+    static $domains = null;
+    if ($domains === null) {
+        $domains = [];
+        try {
+            $emails = array_merge([setting('company_email'), setting('mail_from_email'), setting('mail_reply_to')], array_column(db_all('SELECT email FROM users'), 'email'));
+            foreach ($emails as $e) {
+                if ($e && str_contains($e, '@')) {
+                    $domains[] = strtolower(substr(strrchr($e, '@'), 1));
+                }
+            }
+        } catch (Throwable) {
+        }
+        // Webmail domains are shared by many companies, so they never count as ours.
+        $domains = array_values(array_diff(array_unique($domains), ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'hotmail.co.uk', 'live.com', 'yahoo.com', 'yahoo.co.uk', 'icloud.com', 'btinternet.com', 'aol.com']));
+    }
+    return $domains;
+}
+
 /** Read an invoice's details from its text with patterns (for PDFs with real text). */
 function invoice_read_text(string $text): array
 {
@@ -319,8 +340,14 @@ function invoice_read_text(string $text): array
     if (preg_match('/\bVAT\s*(?:reg(?:istration)?\.?\s*)?(?:no\.?|number)?\s*[:.]?\s*((?:GB)?\s?\d{3}\s?\d{4}\s?\d{2}(?:\s?\d{3})?)/i', $text, $m)) {
         $f['supplier_vat_number'] = preg_replace('/\s+/', '', strtoupper($m[1]));
     }
-    if (preg_match('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $text, $m)) {
-        $f['supplier_email'] = strtolower($m[0]);
+    // The supplier's email: the first one that isn't ours (invoices also print who they're billed to).
+    preg_match_all('/[A-Z0-9._%+\-]+@([A-Z0-9.\-]+\.[A-Z]{2,})/i', $text, $m);
+    $ours = invoice_our_domains();
+    foreach ($m[0] as $k => $email) {
+        if (!in_array(strtolower($m[1][$k]), $ours, true)) {
+            $f['supplier_email'] = strtolower($email);
+            break;
+        }
     }
     $f['currency'] = preg_match('/€|\bEUR\b/', $text) ? 'EUR' : (preg_match('/\$|\bUSD\b/', $text) && !str_contains($text, '£') ? 'USD' : 'GBP');
     $f['lines'] = [];
