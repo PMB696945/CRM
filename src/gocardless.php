@@ -248,6 +248,43 @@ function gc_auto_link(): int
     return count($pairs);
 }
 
+/**
+ * GoCardless customers not linked to any CRM customer, best first: likely
+ * matches for $account (same email or name), then active mandates.
+ */
+function gc_unlinked_customers(?array $account = null): array
+{
+    $rows = db_all('SELECT * FROM gocardless_customers WHERE id NOT IN (SELECT gocardless_customer_id FROM accounts WHERE gocardless_customer_id IS NOT NULL) ORDER BY name');
+    $emails = [];
+    $name = '';
+    if ($account) {
+        $emails = array_filter(array_merge([email_match_key($account['email'])],
+            array_map('email_match_key', array_column(db_all('SELECT email FROM contacts WHERE account_id = ? AND email IS NOT NULL', [$account['id']]), 'email'))));
+        $name = company_match_key($account['name']);
+    }
+    foreach ($rows as &$r) {
+        $r['likely'] = $account && ((($k = email_match_key($r['email'])) !== '' && in_array($k, $emails, true)) || ($name !== '' && company_match_key($r['name']) === $name));
+    }
+    unset($r);
+    usort($rows, fn($a, $b) => [$b['likely'], gc_mandate_state($b['mandate_status']) === 'active', $a['name']] <=> [$a['likely'], gc_mandate_state($a['mandate_status']) === 'active', $b['name']]);
+    return $rows;
+}
+
+/** Link a CRM customer to a GoCardless customer by hand. */
+function gc_link_account(int $accountId, int $gcId): array
+{
+    $gc = db_one('SELECT * FROM gocardless_customers WHERE id = ?', [$gcId]);
+    if (!$gc) {
+        throw new GoCardlessException('Choose a GoCardless customer.');
+    }
+    if ($other = db_one('SELECT id, name FROM accounts WHERE gocardless_customer_id = ? AND id <> ?', [$gcId, $accountId])) {
+        throw new GoCardlessException("That GoCardless customer is already linked to {$other['name']}.");
+    }
+    db_exec('UPDATE accounts SET gocardless_customer_id = ? WHERE id = ?', [$gcId, $accountId]);
+    audit('update', "Linked to GoCardless customer {$gc['name']}" . ($gc['email'] ? " ({$gc['email']})" : ''), 'accounts', $accountId);
+    return $gc;
+}
+
 /** Full sync of customers and mandates. Returns a summary. */
 function gc_sync(): array
 {

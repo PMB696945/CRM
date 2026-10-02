@@ -47,6 +47,21 @@ $here = url('accounts', ['action' => 'view', 'id' => $id]);
     </form>
   <?php endif; ?>
 
+  <?php if (!$gc && can('customers.edit') && ($candidates = array_values(array_filter(gc_unlinked_customers($account), fn($c) => $c['likely'] || $c['mandate_status'])))): ?>
+    <form method="post" action="<?= h(url('gocardless', ['action' => 'attach', 'id' => $id])) ?>" class="stack mt-4">
+      <?= csrf_field() ?>
+      <label>Already set up in GoCardless? Link them:
+        <select name="gocardless_customer_id" required>
+          <option value="">Choose the GoCardless customer…</option>
+          <?php foreach ($candidates as $c): ?>
+            <option value="<?= (int)$c['id'] ?>"><?= $c['likely'] ? '★ ' : '' ?><?= h($c['name']) ?><?= $c['email'] ? ' · ' . h($c['email']) : '' ?> · <?= h($c['mandate_status'] ? gc_mandate_label($c['mandate_status']) : 'no mandate') ?></option>
+          <?php endforeach; ?>
+        </select></label>
+      <p class="help"><?= array_filter(array_column($candidates, 'likely')) ? '★ = same email or name as this customer. ' : '' ?>The CRM links automatically when the GoCardless customer's email matches this customer's (or one of their contacts') email, or the company name matches exactly.</p>
+      <div><button class="btn btn-sm">Link</button></div>
+    </form>
+  <?php endif; ?>
+
   <div class="dd-foot">
     <form method="post" action="<?= h(url('gocardless', ['action' => 'check', 'id' => $id])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm btn-ghost">↻ Check now</button></form>
     <span class="muted">

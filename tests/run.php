@@ -627,6 +627,25 @@ test('syncs customers and mandates with paging, 429 retry and auto-linking', fun
     ok(count(array_filter(gc_mock_state()['calls'], fn($c) => str_starts_with($c, 'GET /mandates'))) >= 2, '429 retried');
 });
 
+test('customers that do not match can be linked by hand; likely matches listed first', function () use (&$gcIds) {
+    $acct = create('accounts', ['name' => 'Bright Smile Dental', 'type' => 'business', 'status' => 'active']);
+    // A GoCardless customer set up under a personal email and a different name.
+    db_exec("INSERT INTO gocardless_customers (customer_id, name, email, mandate_status) VALUES ('CUX1', 'Dr Priya Shah', 'priya.shah@gmail.example', 'active')");
+    $gcId = (int)db()->lastInsertId();
+    eq(0, gc_auto_link(), 'no automatic match');
+    $list = gc_unlinked_customers(db_one('SELECT * FROM accounts WHERE id = ?', [$acct]));
+    ok(in_array('CUX1', array_column($list, 'customer_id'), true));
+    ok(!in_array((int)db_value('SELECT gocardless_customer_id FROM accounts WHERE id = ?', [$gcIds['harbour']]), array_map('intval', array_column($list, 'id')), true), 'already-linked customers left out');
+    // Adding her email to a contact makes it a likely match (and auto-links on the next sync).
+    create('contacts', ['account_id' => $acct, 'name' => 'Priya Shah', 'email' => 'Priya.Shah@gmail.example']);
+    $list = gc_unlinked_customers(db_one('SELECT * FROM accounts WHERE id = ?', [$acct]));
+    eq(['CUX1', true], [$list[0]['customer_id'], $list[0]['likely']]);
+    gc_link_account($acct, $gcId);
+    eq($gcId, (int)db_value('SELECT gocardless_customer_id FROM accounts WHERE id = ?', [$acct]));
+    try { gc_link_account($gcIds['north'], $gcId); throw new Exception('expected'); } catch (GoCardlessException $e) { ok(str_contains($e->getMessage(), 'already linked to Bright Smile Dental')); }
+    db_exec('DELETE FROM accounts WHERE id = ?', [$acct]);
+});
+
 test('No Direct Debit filter and list column', function () use (&$gcIds) {
     $rows = list_rows('accounts', ['preset' => 'no_dd', 'per_page' => 0])['rows'];
     $ids = array_map('intval', array_column($rows, 'id'));

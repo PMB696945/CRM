@@ -913,7 +913,7 @@ function gocardless_controller(): void
     $accountId = query_int('id');
 
     // Actions any signed-in user can take from a customer's page.
-    if (in_array($action, ['link', 'check', 'sync'], true)) {
+    if (in_array($action, ['link', 'check', 'sync', 'attach'], true)) {
         if (!is_post()) {
             redirect(url('gocardless'));
         }
@@ -930,13 +930,23 @@ function gocardless_controller(): void
                 if (!$account) {
                     not_found();
                 }
-                if ($action === 'link') {
+                if ($action === 'attach') {
+                    require_permission('customers.edit');
+                    $gc = gc_link_account($accountId, (int)($_POST['gocardless_customer_id'] ?? 0));
+                    flash("Linked to {$gc['name']} in GoCardless" . ($gc['mandate_status'] ? ' (' . strtolower(gc_mandate_label($gc['mandate_status'])) . ')' : '') . '.');
+                } elseif ($action === 'link') {
                     gc_create_setup_link($account);
                     audit('dd_link', 'Direct Debit setup link created', 'accounts', $accountId);
                     flash('Direct Debit setup link created. Copy it or email it to the customer; it expires in 7 days.');
-                } else {
+                } elseif ($account['gocardless_customer_id']) {
                     gc_refresh_account($accountId);
                     flash('Direct Debit status refreshed from GoCardless.');
+                } else {
+                    // Not linked yet: fetch GoCardless's latest customers and try to match them.
+                    gc_sync();
+                    $linked = db_one('SELECT g.* FROM accounts a JOIN gocardless_customers g ON g.id = a.gocardless_customer_id WHERE a.id = ?', [$accountId]);
+                    flash($linked ? "Found and linked {$linked['name']} in GoCardless."
+                        : 'Checked GoCardless, but couldn\'t match this customer automatically. If they have a mandate, choose them from the list on the Direct Debit card.', $linked ? 'success' : 'error');
                 }
             }
         } catch (IntegrationException | PDOException $e) {
@@ -986,6 +996,7 @@ function gocardless_controller(): void
     }
 
     page('gocardless', [
+        'unlinkedMandates' => array_values(array_filter(gc_configured() ? gc_unlinked_customers() : [], fn($c) => in_array(gc_mandate_state($c['mandate_status']), ['active', 'pending'], true))),
         'stats' => [
             'customers' => (int)db_value('SELECT COUNT(*) FROM gocardless_customers'),
             'active'    => (int)db_value("SELECT COUNT(*) FROM gocardless_customers WHERE mandate_status = 'active'"),

@@ -53,12 +53,29 @@ $lastError = setting('gocardless_last_sync_error');
       <dt>Linked CRM customers</dt><dd><?= number_format($stats['linked']) ?></dd>
       <dt>Open setup links</dt><dd><?= number_format($stats['open_links']) ?></dd>
     </dl>
-    <p class="help">Customers are linked automatically when they complete a setup link from the CRM. Existing GoCardless customers are matched on sync by email (account or any contact) or company name, only when the match is unambiguous. You can also choose one by editing the customer.</p>
+    <p class="help">Customers are linked automatically when they complete a setup link from the CRM. Existing GoCardless customers are matched on sync by email (account or any contact) or company name, only when the match is unambiguous. Anything that doesn't match is listed below, and can be linked from the customer's Direct Debit card.</p>
     <p class="help">To keep statuses current, add a cron job (cPanel → <i>Cron Jobs</i>), e.g. hourly. It syncs Xero and GoCardless:</p>
     <div class="copy-row"><input readonly value="php <?= h(APP_ROOT) ?>/cron/sync.php" data-select-all aria-label="Cron command"></div>
     <p class="help">Each customer page also has a <b>Check now</b> button for an instant update.</p>
   </section>
 </div>
+
+<?php if ($configured && $unlinkedMandates): ?>
+<section class="card">
+  <div class="card-head"><h2>Mandates not linked to a CRM customer <span class="count"><?= count($unlinkedMandates) ?></span></h2></div>
+  <p class="muted small">These GoCardless customers have a mandate but didn't match a CRM customer automatically: their email isn't on the customer or any of their contacts, and the name differs (or more than one customer matches). Open the customer in the CRM and choose them on the Direct Debit card, or add their email to one of the customer's contacts and sync again.</p>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>GoCardless customer</th><th>Email</th><th>Mandate</th><th>Possible CRM customer</th></tr></thead>
+    <tbody><?php foreach ($unlinkedMandates as $c):
+        $guess = db_all("SELECT id, name FROM accounts WHERE gocardless_customer_id IS NULL AND (LOWER(email) = LOWER(?) OR id IN (SELECT account_id FROM contacts WHERE LOWER(email) = LOWER(?)) OR name LIKE ?) LIMIT 3",
+            [(string)$c['email'], (string)$c['email'], '%' . str_replace(['%', '_'], ['\\%', '\\_'], mb_substr((string)$c['name'], 0, 12)) . '%']); ?>
+      <tr><td><a href="<?= h(gc_customer_url($c['customer_id'])) ?>" target="_blank" rel="noopener"><?= h($c['name']) ?> ↗</a></td><td class="small"><?= h((string)$c['email']) ?></td>
+        <td><?= gc_mandate_badge($c['mandate_status']) ?></td>
+        <td class="small"><?php foreach ($guess as $g): ?><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $g['id']])) ?>"><?= h($g['name']) ?></a><br><?php endforeach; ?><?= $guess ? '' : '<span class="muted">—</span>' ?></td></tr>
+    <?php endforeach; ?></tbody>
+  </table></div>
+</section>
+<?php endif; ?>
 
 <?php if ($configured): ?>
 <p><a href="<?= h(url('accounts', ['preset' => 'no_dd'])) ?>">View active customers without Direct Debit →</a></p>
