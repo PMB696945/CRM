@@ -479,6 +479,11 @@ function xero_import_suppliers(): array
                 $out['linked']++;
             } else {
                 $cols = ['name' => mb_substr($c['name'], 0, 150), 'xero_contact_id' => (int)$c['id']] + $fields;
+                // Already a customer in the CRM (same Xero contact): one company record.
+                $account = db_value('SELECT a.id FROM accounts a WHERE a.xero_contact_id = ? AND NOT EXISTS (SELECT 1 FROM suppliers s WHERE s.account_id = a.id)', [$c['id']]);
+                if ($account) {
+                    $cols['account_id'] = (int)$account;
+                }
                 db_exec('INSERT INTO suppliers (' . implode(', ', array_keys($cols)) . ') VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')', array_values($cols));
                 $id = (int)db()->lastInsertId();
                 audit('create', "Supplier {$c['name']} added from Xero", 'suppliers', $id);

@@ -787,4 +787,27 @@ return [
             }
         }
     },
+    18 => function (): void {
+        // One company record: a customer or dealer can also be a supplier (the supplier record is linked to it).
+        if (!column_exists('suppliers', 'account_id')) {
+            db()->exec('ALTER TABLE suppliers ADD COLUMN account_id INT UNSIGNED NULL AFTER id, ADD UNIQUE KEY uq_suppliers_account (account_id)');
+        }
+        if (!constraint_exists('suppliers', 'fk_suppliers_account')) {
+            db()->exec('ALTER TABLE suppliers ADD CONSTRAINT fk_suppliers_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL');
+        }
+        // Link suppliers that already exist as a customer, where the name or Xero contact matches just one.
+        $accounts = [];
+        foreach (db_all('SELECT id, name, xero_contact_id FROM accounts') as $a) {
+            $accounts['n:' . company_match_key($a['name'])][] = (int)$a['id'];
+            if ($a['xero_contact_id']) {
+                $accounts['x:' . $a['xero_contact_id']][] = (int)$a['id'];
+            }
+        }
+        foreach (db_all('SELECT id, name, xero_contact_id FROM suppliers WHERE account_id IS NULL') as $s) {
+            $match = ($s['xero_contact_id'] ? $accounts['x:' . $s['xero_contact_id']] ?? [] : []) ?: ($accounts['n:' . company_match_key($s['name'])] ?? []);
+            if (count($match) === 1 && !db_value('SELECT 1 FROM suppliers WHERE account_id = ?', [$match[0]])) {
+                db_exec('UPDATE suppliers SET account_id = ? WHERE id = ?', [$match[0], $s['id']]);
+            }
+        }
+    },
 ];

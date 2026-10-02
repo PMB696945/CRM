@@ -9,11 +9,12 @@ $prefs = function (array $c): string {
     return $on ? implode(', ', array_keys($on)) : 'No marketing';
 };
 $canEdit = can('customers.edit');
+$tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + ($t === 'overview' ? [] : ['tab' => $t]));
 ?>
 <div class="page-head">
   <div>
     <div class="crumbs"><a href="<?= h(url('accounts')) ?>">Customers</a> · <?= h($account['account_number']) ?></div>
-    <h1><?= h($account['name']) ?> <?= badge($account['status']) ?> <?= badge($account['type']) ?><?= $account['is_dealer'] ? ' <span class="badge badge-dealer">Dealer</span>' : '' ?></h1>
+    <h1><?= h($account['name']) ?> <?= badge($account['status']) ?> <?= badge($account['type']) ?><?= $account['is_dealer'] ? ' <span class="badge badge-dealer">Dealer</span>' : '' ?><?= $supplier ? ' <span class="badge">Supplier</span>' : '' ?></h1>
     <?php if ($account['parent_id']): ?>
       <p class="dealer-line">
         <?= $account['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referred by dealer' ?>
@@ -62,6 +63,11 @@ $canEdit = can('customers.edit');
   <div class="flash flash-info" role="status">Closed on <?= h(fmt_date($account['closed_at'])) ?><?= $account['closed_reason'] ? ': ' . h($account['closed_reason']) : '' ?></div>
 <?php endif; ?>
 
+<nav class="tabs">
+  <?php foreach ($tabs as $k => $label): ?><a href="<?= h($tabUrl($k)) ?>" class="<?= $tab === $k ? 'active' : '' ?>"><?= h($label) ?></a><?php endforeach; ?>
+</nav>
+
+<?php if ($tab === 'overview' || $tab === 'customer'): ?>
 <div class="kpis kpis-sm">
   <div class="kpi"><span class="kpi-label">MRR</span><span class="kpi-value"><?= h(money($mrr)) ?></span></div>
   <div class="kpi"><span class="kpi-label">Active services</span><span class="kpi-value"><?= (int)$activeCount ?></span></div>
@@ -90,87 +96,25 @@ $canEdit = can('customers.edit');
     <?php endif; ?>
   <?php endif; ?>
 </div>
+<?php endif; ?>
 
+<?php if ($tab === 'overview'): ?>
 <div class="grid-side">
   <div>
-    <?php if ($account['is_dealer']):
-        $groupMrr = array_sum(array_map(fn($c) => (float)$c['_mrr'], $children));
-        $commission = $account['dealer_commission_pct'] !== null ? $groupMrr * (float)$account['dealer_commission_pct'] / 100 : null; ?>
     <section class="card">
-      <div class="card-head"><h2>Dealer's customers <span class="count"><?= count($children) ?></span></h2>
-        <?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a><?php endif; ?></div>
-      <p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
-        <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p>
-      <?php if ($children): ?>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>Customer</th><th>Status</th><th>Relationship</th><th>MSA</th><th class="num">MRR</th></tr></thead>
-          <tbody>
-          <?php foreach ($children as $c): ?>
-            <tr>
-              <td><a class="row-link" href="<?= h(url('accounts', ['action' => 'view', 'id' => $c['id']])) ?>"><?= h($c['name']) ?></a> <span class="muted"><?= h($c['account_number']) ?></span></td>
-              <td><?= badge($c['status']) ?></td>
-              <td><?= $c['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referral' ?></td>
-              <td><?= $c['msa_covered'] ? '✔' : '<span class="muted">—</span>' ?></td>
-              <td class="num"><?= h(money($c['_mrr'])) ?></td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table></div>
-      <?php endif; ?>
-    </section>
-    <?php endif; ?>
-
-    <section class="card">
-      <div class="card-head"><h2>Services &amp; lines</h2><?php if (can('services.edit')): ?><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a><?php endif; ?></div>
-      <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => $sites ? ['identifier', 'service_type', 'site_id', 'carrier', 'status', 'monthly_price', 'contract_end_date'] : ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
-    </section>
-
-    <?php if (can('orders.check') && (giacom_configured() || $giacomOrders)): ?>
-    <section class="card">
-      <div class="card-head"><h2>Broadband orders <span class="muted small">Giacom</span></h2>
-        <?php if (giacom_configured()): ?><a class="btn btn-sm" href="<?= h(url('giacom', ['action' => 'check', 'account_id' => $id])) ?>">Check broadband</a><?php endif; ?></div>
-      <?php if ($giacomOrders): ?>
-        <div class="table-wrap"><table class="table table-compact">
-          <thead><tr><th>Order</th><th>Product</th><th>Address</th><th>Required by</th><th>Status</th></tr></thead>
-          <tbody><?php foreach ($giacomOrders as $o): ?>
-            <tr><td><a href="<?= h(url('giacom', ['action' => 'view', 'id' => $o['id']])) ?>"><?= h($o['giacom_order_id']) ?></a></td><td><?= h($o['product_name']) ?></td>
-              <td class="small"><?= h($o['address_label']) ?></td><td><?= h(fmt_date($o['crd'])) ?></td>
-              <td><span class="badge <?= $o['completed_at'] ? 'badge-active' : (giacom_is_cancelled((string)$o['status']) ? 'badge-failed' : 'badge-pending') ?>"><?= h($o['status'] ?: 'Placed') ?></span></td></tr>
-          <?php endforeach; ?></tbody>
-        </table></div>
-      <?php endif; ?>
-      <?php if ($giacomChecks): ?>
-        <p class="small muted" style="margin-top:.75rem">Recent checks:
-          <?php foreach ($giacomChecks as $i => $c): ?><?= $i ? ' · ' : '' ?><a href="<?= h(url('giacom', ['action' => 'result', 'id' => $c['id']])) ?>"><?= h(mb_strimwidth((string)$c['address_label'], 0, 40, '…')) ?></a> (<?= h(fmt_date($c['created_at'])) ?>)<?php endforeach; ?></p>
-      <?php elseif (!$giacomOrders): ?><p class="muted">Check what broadband is available at the head office or any site, and order it from here.</p><?php endif; ?>
-    </section>
-    <?php endif; ?>
-
-    <?php if ($orders): ?>
-    <section class="card">
-      <div class="card-head"><h2>Orders</h2></div>
-      <?php render('_table', ['entity' => entity('customer_orders'), 'name' => 'customer_orders', 'rows' => $orders, 'columns' => ['reference', 'title', 'status', 'assigned_to', 'monthly_total', 'created_at']]); ?>
-    </section>
-    <?php endif; ?>
-
-    <section class="card">
-      <div class="card-head"><h2>Quotes</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a><?php endif; ?></div>
-      <?php render('_table', ['entity' => entity('quotes'), 'name' => 'quotes', 'rows' => $quotes, 'columns' => ['reference', 'title', 'status', '_monthly', 'valid_until', 'sent_at']]); ?>
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>Contracts</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('contracts', ['action' => 'new', 'account_id' => $id])) ?>">+ New contract<?= $account['is_dealer'] ? ' / MSA' : '' ?></a><?php endif; ?></div>
-      <?php render('_table', ['entity' => entity('contracts'), 'name' => 'contracts', 'rows' => $contracts, 'columns' => ['reference', 'title', 'kind', 'status', 'sent_at', 'signed_at']]); ?>
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>Support tickets</h2><?php if (can('tickets.edit')): ?><a class="btn btn-sm" href="<?= h($new('tickets')) ?>">+ Raise ticket</a><?php endif; ?></div>
-      <?php render('_table', ['entity' => entity('tickets'), 'name' => 'tickets', 'rows' => $tickets, 'columns' => ['reference', 'subject', 'category', 'priority', 'status', 'sla_due_at']]); ?>
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>Opportunities</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h($new('opportunities')) ?>">+ Add opportunity</a><?php endif; ?></div>
-      <?php render('_table', ['entity' => entity('opportunities'), 'name' => 'opportunities', 'rows' => $opps, 'columns' => ['title', 'opp_type', 'stage', 'monthly_value', '_tcv', 'expected_close']]); ?>
+      <div class="card-head"><h2>What they are to us</h2></div>
+      <ul class="contact-list">
+        <li><a href="<?= h($tabUrl('customer')) ?>"><strong>Customer</strong></a> <?= badge($account['status']) ?>
+          <div class="small muted"><?= (int)$activeCount ?> live service<?= $activeCount === 1 ? '' : 's' ?> · <?= h(money($mrr)) ?>/mo · <?= (int)$openTickets ?> open ticket<?= $openTickets === 1 ? '' : 's' ?></div></li>
+        <li><?php if ($supplier): ?><?= isset($tabs['supplier']) ? '<a href="' . h($tabUrl('supplier')) . '"><strong>Supplier</strong></a>' : '<strong>Supplier</strong>' ?>
+            <?= $supplier['active'] ? '' : badge('disabled') ?><div class="small muted"><?= h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') ?><?= $supplier['account_number'] ? ' · our account ' . h($supplier['account_number']) : '' ?></div>
+          <?php else: ?><strong class="muted">Not a supplier</strong>
+            <?php if ($canEdit && can('suppliers.edit')): ?><div class="small">Tick “also a supplier” when you <a href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">edit the customer</a> to add a Supplier tab.</div><?php endif; ?>
+          <?php endif; ?></li>
+        <li><?php if ($account['is_dealer']): ?><a href="<?= h($tabUrl('dealer')) ?>"><strong>Dealer</strong></a>
+            <div class="small muted"><?= count($children) ?> customer<?= count($children) === 1 ? '' : 's' ?> under them<?= $account['dealer_commission_pct'] !== null ? ' · ' . h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) . '% commission' : '' ?></div>
+          <?php else: ?><strong class="muted">Not a dealer</strong><?php endif; ?></li>
+      </ul>
     </section>
 
     <section class="card">
@@ -222,7 +166,6 @@ $canEdit = can('customers.edit');
   </div>
 
   <aside>
-    <?php if ($dd !== null) render('_direct_debit', ['account' => $account, 'dd' => $dd]); ?>
     <section class="card">
       <div class="card-head"><h2>Head office</h2><?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a><?php endif; ?></div>
       <?php if ($fmtAddress($account)): ?><p class="address"><?= nl2br(h(implode("\n", array_filter([$account['address'], $account['address2'], $account['city'], $account['county'], $account['postcode']])))) ?></p><?php else: ?><p class="muted">No address yet.</p><?php endif; ?>
@@ -318,3 +261,120 @@ $canEdit = can('customers.edit');
     </section>
   </aside>
 </div>
+
+<?php elseif ($tab === 'customer'): ?>
+<div class="grid-side">
+  <div>
+    <section class="card">
+      <div class="card-head"><h2>Services &amp; lines</h2><?php if (can('services.edit')): ?><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a><?php endif; ?></div>
+      <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => $sites ? ['identifier', 'service_type', 'site_id', 'carrier', 'status', 'monthly_price', 'contract_end_date'] : ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
+    </section>
+
+    <?php if (can('orders.check') && (giacom_configured() || $giacomOrders)): ?>
+    <section class="card">
+      <div class="card-head"><h2>Broadband orders <span class="muted small">Giacom</span></h2>
+        <?php if (giacom_configured()): ?><a class="btn btn-sm" href="<?= h(url('giacom', ['action' => 'check', 'account_id' => $id])) ?>">Check broadband</a><?php endif; ?></div>
+      <?php if ($giacomOrders): ?>
+        <div class="table-wrap"><table class="table table-compact">
+          <thead><tr><th>Order</th><th>Product</th><th>Address</th><th>Required by</th><th>Status</th></tr></thead>
+          <tbody><?php foreach ($giacomOrders as $o): ?>
+            <tr><td><a href="<?= h(url('giacom', ['action' => 'view', 'id' => $o['id']])) ?>"><?= h($o['giacom_order_id']) ?></a></td><td><?= h($o['product_name']) ?></td>
+              <td class="small"><?= h($o['address_label']) ?></td><td><?= h(fmt_date($o['crd'])) ?></td>
+              <td><span class="badge <?= $o['completed_at'] ? 'badge-active' : (giacom_is_cancelled((string)$o['status']) ? 'badge-failed' : 'badge-pending') ?>"><?= h($o['status'] ?: 'Placed') ?></span></td></tr>
+          <?php endforeach; ?></tbody>
+        </table></div>
+      <?php endif; ?>
+      <?php if ($giacomChecks): ?>
+        <p class="small muted" style="margin-top:.75rem">Recent checks:
+          <?php foreach ($giacomChecks as $i => $c): ?><?= $i ? ' · ' : '' ?><a href="<?= h(url('giacom', ['action' => 'result', 'id' => $c['id']])) ?>"><?= h(mb_strimwidth((string)$c['address_label'], 0, 40, '…')) ?></a> (<?= h(fmt_date($c['created_at'])) ?>)<?php endforeach; ?></p>
+      <?php elseif (!$giacomOrders): ?><p class="muted">Check what broadband is available at the head office or any site, and order it from here.</p><?php endif; ?>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($orders): ?>
+    <section class="card">
+      <div class="card-head"><h2>Orders</h2></div>
+      <?php render('_table', ['entity' => entity('customer_orders'), 'name' => 'customer_orders', 'rows' => $orders, 'columns' => ['reference', 'title', 'status', 'assigned_to', 'monthly_total', 'created_at']]); ?>
+    </section>
+    <?php endif; ?>
+
+    <section class="card">
+      <div class="card-head"><h2>Quotes</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a><?php endif; ?></div>
+      <?php render('_table', ['entity' => entity('quotes'), 'name' => 'quotes', 'rows' => $quotes, 'columns' => ['reference', 'title', 'status', '_monthly', 'valid_until', 'sent_at']]); ?>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Contracts</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h(url('contracts', ['action' => 'new', 'account_id' => $id])) ?>">+ New contract<?= $account['is_dealer'] ? ' / MSA' : '' ?></a><?php endif; ?></div>
+      <?php render('_table', ['entity' => entity('contracts'), 'name' => 'contracts', 'rows' => $contracts, 'columns' => ['reference', 'title', 'kind', 'status', 'sent_at', 'signed_at']]); ?>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Support tickets</h2><?php if (can('tickets.edit')): ?><a class="btn btn-sm" href="<?= h($new('tickets')) ?>">+ Raise ticket</a><?php endif; ?></div>
+      <?php render('_table', ['entity' => entity('tickets'), 'name' => 'tickets', 'rows' => $tickets, 'columns' => ['reference', 'subject', 'category', 'priority', 'status', 'sla_due_at']]); ?>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Opportunities</h2><?php if (can('sales.edit')): ?><a class="btn btn-sm" href="<?= h($new('opportunities')) ?>">+ Add opportunity</a><?php endif; ?></div>
+      <?php render('_table', ['entity' => entity('opportunities'), 'name' => 'opportunities', 'rows' => $opps, 'columns' => ['title', 'opp_type', 'stage', 'monthly_value', '_tcv', 'expected_close']]); ?>
+    </section>
+  </div>
+  <aside>
+    <?php if ($dd !== null) render('_direct_debit', ['account' => $account, 'dd' => $dd]); ?>
+    <section class="card">
+      <div class="card-head"><h2>Key contacts</h2></div>
+      <?php foreach (['Main contact' => $mainContact, 'Accounts contact' => $billingContact] as $role => $c): ?>
+        <div class="key-contact">
+          <div class="muted small"><?= h($role) ?><?= $role === 'Accounts contact' ? ' · invoices & statements' : '' ?></div>
+          <?php if ($c): ?>
+            <a href="<?= h(url('contacts', ['action' => 'view', 'id' => $c['id']])) ?>"><strong><?= h($c['name']) ?></strong></a>
+            <?php if ($role === 'Accounts contact' && $mainContact && (int)$c['id'] === (int)$mainContact['id']): ?><span class="muted">(same as main)</span><?php endif; ?>
+            <div><?= display_value($contactEntity, 'email', $c) ?></div>
+            <div><?= display_value($contactEntity, 'phone', $c) ?> <?= display_value($contactEntity, 'mobile', $c) ?></div>
+          <?php elseif ($role === 'Accounts contact' && $mainContact): ?>
+            <span class="muted">Same as main contact</span>
+          <?php else: ?>
+            <span class="text-warning">Not set</span><?php if ($canEdit): ?> · <a href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">add</a><?php endif; ?>
+          <?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+      <?php if (xero_connected() && $account['xero_contact_id'] && ($billingContact || $mainContact) && $canEdit && xero_can_write_contacts()): ?>
+        <form method="post" action="<?= h(url('xero', ['action' => 'push', 'id' => $id])) ?>" class="inline" data-confirm="Set this customer's invoice email in Xero to <?= h(($billingContact ?: $mainContact)['email'] ?? '') ?>?">
+          <?= csrf_field() ?><button class="btn btn-sm">Send accounts contact to Xero</button>
+        </form>
+        <?php if (setting('xero_push_contacts') === '1'): ?><p class="help">Xero is updated automatically when the accounts contact changes.</p><?php endif; ?>
+      <?php endif; ?>
+    </section>
+  </aside>
+</div>
+
+<?php elseif ($tab === 'supplier'): ?>
+<?php render('_supplier_body', $supplierData + ['inAccount' => true]); ?>
+
+<?php elseif ($tab === 'dealer'): ?>
+    <?php
+        $groupMrr = array_sum(array_map(fn($c) => (float)$c['_mrr'], $children));
+        $commission = $account['dealer_commission_pct'] !== null ? $groupMrr * (float)$account['dealer_commission_pct'] / 100 : null; ?>
+    <section class="card">
+      <div class="card-head"><h2>Dealer's customers <span class="count"><?= count($children) ?></span></h2>
+        <?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a><?php endif; ?></div>
+      <p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
+        <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p>
+      <?php if ($children): ?>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>Customer</th><th>Status</th><th>Relationship</th><th>MSA</th><th class="num">MRR</th></tr></thead>
+          <tbody>
+          <?php foreach ($children as $c): ?>
+            <tr>
+              <td><a class="row-link" href="<?= h(url('accounts', ['action' => 'view', 'id' => $c['id']])) ?>"><?= h($c['name']) ?></a> <span class="muted"><?= h($c['account_number']) ?></span></td>
+              <td><?= badge($c['status']) ?></td>
+              <td><?= $c['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referral' ?></td>
+              <td><?= $c['msa_covered'] ? '✔' : '<span class="muted">—</span>' ?></td>
+              <td class="num"><?= h(money($c['_mrr'])) ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table></div>
+      <?php else: ?><p class="muted">No customers under this dealer yet.</p><?php endif; ?>
+    </section>
+
+<?php endif; ?>

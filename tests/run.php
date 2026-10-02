@@ -1995,9 +1995,65 @@ test('PDF text: plain fonts, and compressed streams with embedded fonts (ToUnico
     eq("Total due\nRef ABC", pdf_extract_text($raw), 'kerning move not taken as a space; TJ gap is');
 });
 
+test('one company record: a customer can also be a supplier and a dealer, with shared details', function () {
+    $acc = fn($id) => db_one('SELECT * FROM accounts WHERE id = ?', [$id]);
+    $sup = fn($id) => db_one('SELECT * FROM suppliers WHERE account_id = ?', [$id]);
+    $save = function (int $id, array $changes) use ($acc) {
+        [$data, $errors] = validate(entity('accounts'), $changes + $acc($id) + account_contact_values($acc($id)));
+        eq([], $errors);
+        update_row('accounts', $id, $data);
+    };
+
+    // Ticking "also a supplier" makes a linked supplier record from the customer's details.
+    $id = create('accounts', ['name' => 'Dual Role Comms Ltd', 'type' => 'business', 'status' => 'active', 'phone' => '0113 000 0001',
+        'address' => '1 Dual Street', 'city' => 'Leeds', 'postcode' => 'ls1 1aa', 'email' => 'hello@dual.example', 'is_supplier' => '1']);
+    $s = $sup($id);
+    eq(['Dual Role Comms Ltd', '0113 000 0001', '1 Dual Street', 'LS1 1AA', 'hello@dual.example', 'email'], [$s['name'], $s['phone'], $s['address'], $s['postcode'], $s['email'], $s['ordering']]);
+    eq(1, account_contact_values($acc($id))['is_supplier']);
+    ok((bool)array_filter(list_rows('accounts', ['preset' => 'suppliers', 'per_page' => 0])['rows'], fn($r) => (int)$r['id'] === $id), 'in the "also suppliers" list');
+
+    // Shared details follow edits on either side; supplier-only details stay their own.
+    $save($id, ['name' => 'Dual Role Communications Ltd', 'city' => 'Bradford']);
+    eq(['Dual Role Communications Ltd', 'Bradford'], [$sup($id)['name'], $sup($id)['city']]);
+    [$data, $errors] = validate(entity('suppliers'), ['phone' => '0113 999 9999', 'email' => 'orders@dual.example'] + $sup($id));
+    eq([], $errors);
+    update_row('suppliers', (int)$sup($id)['id'], $data);
+    eq(['0113 999 9999', 'hello@dual.example'], [$acc($id)['phone'], $acc($id)['email']]);
+
+    // A second supplier can't claim the same customer.
+    [$data] = validate(entity('suppliers'), ['name' => 'Someone Else', 'account_id' => $id]);
+    ok(isset(validate_rules('suppliers', $data, null)['account_id']), 'one supplier per customer');
+
+    // Unticking unlinks; the supplier record (and its history) is kept.
+    $supplierId = (int)$sup($id)['id'];
+    $save($id, ['is_supplier' => '0']);
+    eq(null, $sup($id));
+    eq(null, db_value('SELECT account_id FROM suppliers WHERE id = ?', [$supplierId]));
+    // Ticking again finds that supplier by name rather than making a duplicate.
+    $save($id, ['is_supplier' => '1']);
+    eq($supplierId, (int)$sup($id)['id']);
+
+    // From the supplier side: a supplier that is also a dealer gets a customer record, filled from the supplier.
+    $sid = create('suppliers', ['name' => 'Reseller Supplies Ltd', 'phone' => '0161 000 0002', 'address' => '5 Trade Park', 'postcode' => 'M1 1AA']);
+    $aid = supplier_make_account(db_one('SELECT * FROM suppliers WHERE id = ?', [$sid]), true);
+    $a = $acc($aid);
+    eq(['Reseller Supplies Ltd', '0161 000 0002', '5 Trade Park', 1, 'active'], [$a['name'], $a['phone'], $a['address'], (int)$a['is_dealer'], $a['status']]);
+    eq($sid, (int)$sup($aid)['id']);
+    ok(str_starts_with($a['account_number'], 'ACC-'), 'gets an account number');
+
+    // Linking an existing customer to an existing supplier only fills blanks.
+    $cid = create('accounts', ['name' => 'Linked Later Ltd', 'type' => 'business', 'status' => 'active', 'phone' => '0200 000 0000']);
+    $sid2 = create('suppliers', ['name' => 'Linked Later Limited', 'phone' => '0300 000 0000', 'city' => 'York']);
+    [$data] = validate(entity('suppliers'), ['account_id' => $cid] + db_one('SELECT * FROM suppliers WHERE id = ?', [$sid2]));
+    update_row('suppliers', $sid2, $data);
+    eq(['Linked Later Ltd', '0200 000 0000', 'York'], [$acc($cid)['name'], $acc($cid)['phone'], $acc($cid)['city']]);
+    eq(['Linked Later Limited', '0300 000 0000'], [$sup($cid)['name'], $sup($cid)['phone']]);
+});
+
 test('invoice reader: tables, unlabelled dates and totals laid out in columns', function () {
     // Laid out like a real distributor invoice: date under the number, "Total Due" above the table, right-aligned columns.
     $pdf = new SimplePdf();
+    $pdf->addPage();
     $t = fn($x, $y, $s, $align = 'left') => $pdf->text($x, $y, $s, 10, false, [0, 0, 0], $align);
     $t(30, 40, 'NetXL Distribution'); $t(560, 40, 'INVOICE #DUK-12076093', 'right');
     $t(560, 56, '29 September 2026', 'right');
@@ -2016,6 +2072,7 @@ test('invoice reader: tables, unlabelled dates and totals laid out in columns', 
 
     // Headed boxes: values under their labels; "Unit Price" is a price, and a table amount is never a PO number.
     $pdf = new SimplePdf();
+    $pdf->addPage();
     $t = fn($x, $y, $s, $align = 'left') => $pdf->text($x, $y, $s, 10, false, [0, 0, 0], $align);
     $t(30, 100, 'Invoice Number'); $t(160, 100, 'Invoice Date'); $t(260, 100, 'Due Date'); $t(360, 100, 'Reference');
     $t(30, 114, 'INV-004512'); $t(160, 114, '2 October 2026'); $t(260, 114, '1 November 2026'); $t(360, 114, 'PO-000003');

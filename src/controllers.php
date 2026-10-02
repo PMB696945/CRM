@@ -412,6 +412,10 @@ function entity_controller(string $name): void
             } elseif ($name === 'tickets') {
                 ticket_view($entity, $row);
             } elseif ($name === 'suppliers') {
+                if ($row['account_id'] && !query('standalone')) {
+                    // Also a customer or dealer: shown as the Supplier tab of the one company record.
+                    redirect(url('accounts', ['action' => 'view', 'id' => $row['account_id'], 'tab' => 'supplier']));
+                }
                 supplier_view($entity, $row);
             } else {
                 page('view', compact('name', 'entity', 'row', 'canWrite'), $entity['label']);
@@ -550,6 +554,22 @@ function entity_controller(string $name): void
             }
             redirect(safe_return($_POST['_return'] ?? null, $id ? url('products', ['action' => 'view', 'id' => $id]) : url('products')));
 
+        case 'make_account':
+            // A supplier that is also a customer or dealer: give it a customer record (one company, with tabs).
+            if ($name !== 'suppliers' || !is_post() || !$id) {
+                not_found();
+            }
+            verify_csrf();
+            require_permission('suppliers.edit');
+            require_permission('customers.edit');
+            $supplier = find('suppliers', $id) ?? not_found();
+            if ($supplier['account_id']) {
+                redirect(url('accounts', ['action' => 'view', 'id' => $supplier['account_id']]));
+            }
+            $accountId = supplier_make_account($supplier, ($_POST['role'] ?? '') === 'dealer');
+            flash('Customer record added. ' . $supplier['name'] . ' is now one company with Customer and Supplier tabs.');
+            redirect(url('accounts', ['action' => 'view', 'id' => $accountId, 'tab' => 'overview']));
+
         case 'xero_import':
             // Bring in (and link) suppliers from Xero contacts marked as suppliers.
             if ($name !== 'suppliers' || !is_post()) {
@@ -647,8 +667,28 @@ function account_view(array $entity, array $account): void
     }
 
     $files = account_documents($id);
+    $supplier = account_supplier($id);
+    $tabs = ['overview' => 'Overview', 'customer' => 'Customer'];
+    if ($supplier && (can('suppliers.view') || can('suppliers.edit'))) {
+        $tabs['supplier'] = 'Supplier';
+    }
+    if ($account['is_dealer']) {
+        $tabs['dealer'] = 'Dealer';
+    }
+    $tab = isset($tabs[query('tab')]) ? query('tab') : 'overview';
+    $supplierData = null;
+    if ($tab === 'supplier') {
+        $supplierData = [
+            'supplier' => $supplier,
+            'products' => list_rows('supplier_products', ['filters' => ['supplier_id' => $supplier['id']], 'per_page' => 0, 'sort' => 'description'])['rows'],
+            'orders' => list_rows('purchase_orders', ['filters' => ['supplier_id' => $supplier['id']], 'per_page' => 20, 'sort' => 'created_at', 'dir' => 'desc'])['rows'],
+            'files' => supplier_documents((int)$supplier['id']),
+            'invoices' => db_all('SELECT * FROM supplier_invoices WHERE supplier_id = ? ORDER BY id DESC LIMIT 10', [$supplier['id']]),
+            'canWrite' => can('suppliers.edit'),
+        ];
+    }
     $orders = list_rows('customer_orders', ['filters' => ['account_id' => $id], 'per_page' => 10, 'sort' => 'created_at', 'dir' => 'desc'])['rows'];
-    page('account', compact('orders', 'files', 'entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
+    page('account', compact('tabs', 'tab', 'supplier', 'supplierData', 'orders', 'files', 'entity', 'account', 'contacts', 'services', 'tickets', 'opps', 'activities', 'mrr', 'activeCount', 'openTickets', 'xero', 'dd', 'children', 'quotes', 'contracts',
         'sites', 'mainContact', 'billingContact', 'pendingRequest', 'history', 'giacomOrders', 'giacomChecks'), $account['name']);
 }
 

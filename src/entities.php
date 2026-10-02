@@ -134,7 +134,7 @@ function entities(): array
     // Cached per request, keyed on the features that change the definitions.
     static $cache = [];
     $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '') . '|' . (can('finance.view') ? 'fin' : '')
-        . '|' . (can('costs.view') ? 'cv' : '') . (can('costs.edit') ? 'ce' : '') . (can('products.edit') ? 'pe' : '');
+        . '|' . (can('costs.view') ? 'cv' : '') . (can('costs.edit') ? 'ce' : '') . (can('products.edit') ? 'pe' : '') . (can('suppliers.edit') ? 'se' : '');
     if (isset($cache[$key])) {
         return $cache[$key];
     }
@@ -148,6 +148,8 @@ function entities(): array
                 'type'           => ['label' => 'Type', 'type' => 'select', 'options' => opts(['business', 'residential']), 'required' => true],
                 'status'         => ['label' => 'Status', 'type' => 'select', 'options' => ['prospect' => 'Prospect', 'active' => 'Active', 'suspended' => 'Suspended', 'churned' => 'Closed / churned'], 'required' => true],
                 'is_dealer'      => ['label' => 'This customer is a dealer', 'type' => 'bool', 'help' => 'Dealers can have other customers under them'],
+                'is_supplier'    => ['label' => 'This company is also a supplier', 'type' => 'bool', 'virtual' => true, 'if' => fn() => can('suppliers.edit'),
+                    'help' => 'Adds a Supplier tab for their products, purchase orders and invoices. The name, address and phone are shared.'],
                 'parent_id'      => ['label' => 'Dealer', 'type' => 'ref', 'ref' => 'accounts', 'ref_where' => 'is_dealer = 1', 'help' => 'The dealer this customer came through or is billed via'],
                 'parent_relationship' => ['label' => 'Relationship to dealer', 'type' => 'select', 'options' => ['referral' => 'Referred by the dealer', 'billed_via_dealer' => 'Billed via the dealer']],
                 'msa_covered'    => ['label' => "Covered by the dealer's MSA", 'type' => 'bool', 'help' => "Contracts become service schedules under the dealer's master services agreement"],
@@ -188,6 +190,7 @@ function entities(): array
             'filters' => ['status', 'type', 'owner_id', 'parent_id'],
             'presets' => [
                 'dealers' => ['label' => 'Dealers', 'sql' => 't.is_dealer = 1'],
+                'suppliers' => ['label' => 'Also suppliers', 'sql' => 'EXISTS (SELECT 1 FROM suppliers su WHERE su.account_id = t.id)'],
             ],
             'default_sort' => ['name', 'asc'],
             'computed' => [
@@ -473,6 +476,8 @@ function entities(): array
                 'postcode'       => ['label' => 'Postcode', 'type' => 'text'],
                 'payment_terms'  => ['label' => 'Payment terms', 'type' => 'text', 'section' => 'Terms & notes', 'help' => 'e.g. 30 days from invoice, Direct Debit'],
                 'notes'          => ['label' => 'Notes', 'type' => 'textarea'],
+                'account_id'     => ['label' => 'Customer / dealer record', 'type' => 'ref', 'ref' => 'accounts', 'section' => 'Links',
+                    'help' => 'When they are also a customer or dealer: one company record, with this as its Supplier tab. The name, address and phone are shared.'],
                 'xero_contact_id' => ['label' => 'Xero contact', 'type' => 'ref', 'ref' => 'xero_contacts', 'if' => 'xero_connected',
                     'ref_where' => 'is_supplier = 1', 'help' => 'Linked automatically when brought in from Xero'],
             ],
@@ -817,6 +822,20 @@ function after_save(string $name, int $id, array $data, ?array $existing): void
     if ($name === 'accounts' && array_key_exists('main_name', $data)) {
         save_account_contacts($id, $data);
     }
+    if ($name === 'accounts') {
+        if (array_key_exists('is_supplier', $data)) {
+            account_set_supplier($id, (bool)$data['is_supplier']);
+        }
+        company_sync('accounts', $id);
+    }
+    if ($name === 'suppliers' && !empty($data['account_id'])) {
+        // Newly linked: fill each side's blanks from the other. Afterwards, changes here carry over to the customer.
+        $linked = (int)($existing['account_id'] ?? 0) !== (int)$data['account_id'];
+        company_sync('suppliers', $id, $linked);
+        if ($linked) {
+            company_sync('accounts', (int)$data['account_id'], true);
+        }
+    }
     if ($name === 'contacts' && isset($data['account_id'])) {
         // Keep the customer's main/accounts contact in step with the ticks on the contact.
         foreach (['is_primary' => 'main_contact_id', 'is_billing' => 'billing_contact_id'] as $flag => $column) {
@@ -849,6 +868,7 @@ function account_contact_values(?array $account): array
         'billing_same' => $same ? 1 : 0,
         'billing_name' => $same ? null : $billing['name'], 'billing_phone' => $same ? null : ($billing['phone'] ?: $billing['mobile']),
         'billing_email' => $same ? null : $billing['email'],
+        'is_supplier' => !empty($account['id']) && db_value('SELECT 1 FROM suppliers WHERE account_id = ?', [$account['id']]) ? 1 : 0,
     ];
 }
 
@@ -900,6 +920,12 @@ function contract_end_date(string $start, int $months): string
 function validate_rules(string $name, array $data, ?int $id): array
 {
     $errors = [];
+    if ($name === 'suppliers' && !empty($data['account_id'])) {
+        $other = db_one('SELECT id, name FROM suppliers WHERE account_id = ? AND id <> ?', [$data['account_id'], (int)$id]);
+        if ($other) {
+            $errors['account_id'] = 'That customer is already linked to the supplier ' . $other['name'] . '.';
+        }
+    }
     if ($name === 'accounts') {
         $parent = $data['parent_id'] ?? null;
         if ($parent) {

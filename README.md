@@ -22,6 +22,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **Everywhere** | Global search (names, postcodes, phone numbers, circuit IDs, ticket refs), filters, sorting, pagination and CSV export on every list. Works on mobile and supports dark mode |
 | **Xero balances** | Connect Xero read-only to see each customer's outstanding and overdue balance and number of unpaid invoices. Adds an "In arrears" and "Over credit limit" filter, an overdue-debt total on the dashboard, and a link to the contact in Xero. Syncs on demand or by cron |
 | **GoCardless Direct Debit** | Shows whether each customer has an active, pending or failed Direct Debit mandate. If they don't have one, creates a personal GoCardless setup link, prefilled with their details, that you can copy or email in one click. When they complete it, the CRM links them automatically. Adds a "No Direct Debit" filter and a dashboard count |
+| **One company, several roles** | Like Xero contacts: a company can be a customer, a supplier and a dealer at once. Its page has tabs: Overview (head office, contacts, address book, files, activity), Customer, Supplier and Dealer. Tick **This company is also a supplier** on the customer, or use **Also a customer / Also a dealer** on a supplier. The name, address and phone are shared |
 | **Dealers** | Mark any customer as a dealer and put other customers under it: referred by the dealer, or billed via the dealer, optionally covered by the dealer's master services agreement (MSA). Dealer pages show their customers, the group's combined MRR and commission |
 | **Quotes** | Build quotes from your product catalogue and email them. The customer accepts (name, email and a tick box) or declines on a branded web page. You're emailed when they respond |
 | **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and sent for signature via Signable. The signed PDF is saved, and the services can be added to the customer as pending |
@@ -200,6 +201,14 @@ npm run watch:css    # or rebuild automatically while you edit
 
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
+
+## Customers that are also suppliers or dealers
+
+One company has one record with tabs: **Overview**, **Customer**, **Supplier** (when it supplies you) and **Dealer** (when it's a dealer).
+- **From a customer:** edit it and tick **This company is also a supplier**. A supplier record is made from its details, or an existing supplier with the same name is linked. Untick to unlink; the supplier and its purchase orders are kept.
+- **From a supplier:** use **Also a customer** or **Also a dealer** on its page, or pick the **Customer / dealer record** when editing it.
+- **Shared details:** the name, address and phone are shared, so changing them on either side updates both. Supplier-only details (orders email, account number with them, portal, payment terms) stay on the Supplier tab.
+- **Finding them:** the **Also suppliers** list on Customers shows every company that's both. Existing suppliers with the same name (or the same Xero contact) as a customer are linked when you update.
 
 ## Dealers
 

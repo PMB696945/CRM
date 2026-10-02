@@ -59,6 +59,84 @@ function product_supplier_prices(int $productId): array
         WHERE sp.product_id = ? ORDER BY sp.preferred DESC, sp.active DESC, sp.cost_price', [$productId]);
 }
 
+/** Details a customer/dealer record and its supplier record share (same column names in both). */
+const COMPANY_SHARED_FIELDS = ['name', 'phone', 'address', 'address2', 'city', 'county', 'postcode'];
+
+/** The supplier record linked to a customer or dealer, if any. */
+function account_supplier(int $accountId): ?array
+{
+    return db_one('SELECT * FROM suppliers WHERE account_id = ?', [$accountId]);
+}
+
+/**
+ * Copy the shared details from one side of a linked company to the other.
+ * Empty values never wipe the other side; with $blanksOnly, only empty values on the other side are filled.
+ */
+function company_sync(string $from, int $id, bool $blanksOnly = false): void
+{
+    [$src, $dst] = $from === 'accounts'
+        ? [db_one('SELECT * FROM accounts WHERE id = ?', [$id]), account_supplier($id)]
+        : [$s = db_one('SELECT * FROM suppliers WHERE id = ?', [$id]), !empty($s['account_id']) ? db_one('SELECT * FROM accounts WHERE id = ?', [$s['account_id']]) : null];
+    if (!$src || !$dst) {
+        return;
+    }
+    $set = [];
+    foreach (COMPANY_SHARED_FIELDS as $f) {
+        $v = trim((string)$src[$f]);
+        if ($v !== '' && $v !== (string)$dst[$f] && (!$blanksOnly || trim((string)$dst[$f]) === '')) {
+            $set[$f] = $f === 'postcode' ? strtoupper($v) : $v;
+        }
+    }
+    if ($set) {
+        $table = $from === 'accounts' ? 'suppliers' : 'accounts';
+        db_exec("UPDATE $table SET " . implode(', ', array_map(fn($k) => "$k = ?", array_keys($set))) . ' WHERE id = ?', [...array_values($set), $dst['id']]);
+    }
+}
+
+/** Tick or untick "also a supplier" on a customer: link (or create) its supplier record, or unlink it (the supplier is kept). */
+function account_set_supplier(int $accountId, bool $on): void
+{
+    $current = account_supplier($accountId);
+    if (!$on) {
+        if ($current) {
+            db_exec('UPDATE suppliers SET account_id = NULL WHERE id = ?', [$current['id']]);
+            audit('update', "Supplier {$current['name']} unlinked from its customer record", 'suppliers', (int)$current['id']);
+        }
+        return;
+    }
+    if ($current) {
+        return;
+    }
+    $account = db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]);
+    // An existing supplier of the same name (or Xero contact) is linked rather than duplicated.
+    $match = array_values(array_filter(db_all('SELECT id, name, xero_contact_id FROM suppliers WHERE account_id IS NULL'),
+        fn($s) => ($account['xero_contact_id'] && (int)$s['xero_contact_id'] === (int)$account['xero_contact_id'])
+            || company_match_key($s['name']) === company_match_key($account['name'])));
+    if (count($match) === 1) {
+        db_exec('UPDATE suppliers SET account_id = ? WHERE id = ?', [$accountId, $match[0]['id']]);
+        company_sync('suppliers', (int)$match[0]['id'], true);
+        company_sync('accounts', $accountId, true);
+        audit('update', "Supplier {$match[0]['name']} linked to customer {$account['name']}", 'suppliers', (int)$match[0]['id']);
+        return;
+    }
+    $cols = ['account_id' => $accountId, 'ordering' => 'email'] + array_intersect_key($account, array_flip(COMPANY_SHARED_FIELDS));
+    $cols['email'] = $account['email'];
+    db_exec('INSERT INTO suppliers (' . implode(', ', array_keys($cols)) . ') VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')', array_values($cols));
+    audit('create', "Supplier {$account['name']} added (also a customer)", 'suppliers', (int)db()->lastInsertId());
+}
+
+/** Make a customer record for a supplier that is also a customer or dealer. */
+function supplier_make_account(array $supplier, bool $dealer): int
+{
+    $cols = ['name' => $supplier['name'], 'type' => 'business', 'status' => 'active', 'is_dealer' => $dealer ? 1 : 0, 'email' => $supplier['email'],
+        'xero_contact_id' => $supplier['xero_contact_id'] && !db_value('SELECT 1 FROM accounts WHERE xero_contact_id = ?', [$supplier['xero_contact_id']]) ? $supplier['xero_contact_id'] : null]
+        + array_intersect_key($supplier, array_flip(COMPANY_SHARED_FIELDS));
+    $accountId = insert_row('accounts', $cols);
+    db_exec('UPDATE suppliers SET account_id = ? WHERE id = ?', [$accountId, $supplier['id']]);
+    audit('create', "Customer {$supplier['name']} added from the supplier record" . ($dealer ? ' (dealer)' : ''), 'accounts', $accountId, null, null, $accountId);
+    return $accountId;
+}
+
 function supplier_view(array $entity, array $supplier): void
 {
     $id = (int)$supplier['id'];
