@@ -519,7 +519,7 @@ function xero_refresh_contact(array $x): array
     if (!$c) {
         return $x;
     }
-    db_exec('UPDATE xero_contacts SET name = ?, account_number = ?, email = ?, status = ?, is_supplier = ?, is_customer = ?, details = COALESCE(?, details) WHERE id = ?', [
+    db_exec('UPDATE xero_contacts SET name = ?, account_number = ?, email = ?, status = ?, is_supplier = ?, is_customer = ?, details = COALESCE(?, details), synced_at = NOW() WHERE id = ?', [
         mb_substr($c['Name'] ?? $x['name'], 0, 255), $c['AccountNumber'] ?? null, $c['EmailAddress'] ?? null, $c['ContactStatus'] ?? $x['status'],
         !empty($c['IsSupplier']) ? 1 : 0, !empty($c['IsCustomer']) ? 1 : (int)$x['is_customer'], xero_contact_details($c), $x['id']]);
     return db_one('SELECT * FROM xero_contacts WHERE id = ?', [$x['id']]);
@@ -620,13 +620,36 @@ function xero_account_number_changes(): array
     return $rows;
 }
 
+/** Where every customer stands for Xero account numbers, to explain what can and can't change. */
+function xero_account_number_overview(): array
+{
+    $changes = xero_account_number_changes();
+    $noNumber = db_all("SELECT a.id, a.name, a.account_number FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
+        WHERE x.account_number IS NULL OR TRIM(x.account_number) = '' ORDER BY a.name");
+    return [
+        'linked' => (int)db_value('SELECT COUNT(*) FROM accounts WHERE xero_contact_id IS NOT NULL'),
+        'same' => (int)db_value('SELECT COUNT(*) FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id WHERE TRIM(x.account_number) = a.account_number'),
+        'changes' => $changes,
+        'will_change' => count(array_filter($changes, fn($r) => $r['problem'] === null)),
+        'no_number' => $noNumber,
+        'unlinked' => db_all("SELECT id, name, account_number FROM accounts WHERE xero_contact_id IS NULL AND status <> 'churned' ORDER BY name"),
+    ];
+}
+
 /** Give linked customers their Xero account numbers (where that's possible). Returns how many changed. */
 function xero_adopt_account_numbers(bool $refresh = false): int
 {
     if ($refresh) {
-        // Linked contacts with no account number stored may have had one added in Xero since the last sync.
+        // A full sync brings in every contact's current account number (100 contacts per request).
+        try {
+            xero_sync();
+        } catch (IntegrationException) {
+            // Carry on with what's stored, re-reading a few below.
+        }
+        // Then re-read individually the longest-unchecked of those still without one, so repeated presses work through them all.
         foreach (db_all("SELECT x.* FROM xero_contacts x JOIN accounts a ON a.xero_contact_id = x.id
-            WHERE x.account_number IS NULL OR TRIM(x.account_number) = '' LIMIT 50") as $x) {
+            WHERE (x.account_number IS NULL OR TRIM(x.account_number) = '') AND (x.synced_at IS NULL OR x.synced_at < NOW() - INTERVAL 10 MINUTE)
+            ORDER BY x.synced_at LIMIT 30") as $x) {
             try {
                 xero_refresh_contact($x);
             } catch (IntegrationException) {
