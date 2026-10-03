@@ -171,6 +171,15 @@ if ($path === '/api.xro/2.0/Contacts') {
         'PaymentTerms' => ['Bills' => ['Day' => 30, 'Type' => 'DAYSAFTERBILLDATE']]];
     $contacts[6] = ['ContactID' => $contacts[6]['ContactID'], 'Name' => 'Giacom Limited', 'ContactStatus' => 'ACTIVE', 'IsSupplier' => true, 'EmailAddress' => 'billing@giacom.example'];
     $contacts[7] = ['IsSupplier' => true, 'ContactStatus' => 'ARCHIVED'] + $contacts[7];
+    // Customers in Xero that aren't in the CRM yet.
+    $contacts[10] = ['ContactID' => $contacts[10]['ContactID'], 'Name' => 'Brand New Bakery Ltd', 'ContactStatus' => 'ACTIVE', 'IsCustomer' => true,
+        'AccountNumber' => 'BNB01', 'EmailAddress' => 'accounts@bakery.example', 'FirstName' => 'Pat', 'LastName' => 'Baker', 'CompanyNumber' => '01234567',
+        'TaxNumber' => 'GB 111 2222 33', 'Website' => 'bakery.example',
+        'Phones' => [['PhoneType' => 'DEFAULT', 'PhoneAreaCode' => '0113', 'PhoneNumber' => '496 0123'], ['PhoneType' => 'MOBILE', 'PhoneNumber' => '07700 900123']],
+        'Addresses' => [['AddressType' => 'STREET', 'AddressLine1' => '3 Oven Street', 'City' => 'Leeds', 'Region' => 'West Yorkshire', 'PostalCode' => 'ls2 2bb']],
+        'ContactPersons' => [['FirstName' => 'Robin', 'LastName' => 'Flour', 'EmailAddress' => 'robin@bakery.example', 'IncludeInEmails' => true]]];
+    $contacts[11] = ['ContactID' => $contacts[11]['ContactID'], 'Name' => 'Jo Bloggs', 'FirstName' => 'Jo', 'LastName' => 'Bloggs', 'ContactStatus' => 'ACTIVE', 'IsCustomer' => true,
+        'EmailAddress' => 'jo@home.example', 'AccountNumber' => 'JB-1'];
     json_out(200, ['Contacts' => array_slice($contacts, ($page - 1) * 100, 100)]);
 }
 

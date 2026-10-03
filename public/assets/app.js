@@ -171,7 +171,7 @@ if (bulkForm) {
     const n = boxes().filter((b) => b.checked).length;
     bulkForm.querySelectorAll('[data-needs-selection]').forEach((b) => { b.disabled = n === 0; });
     const label = bulkForm.querySelector('[data-selected-count]');
-    if (label) label.textContent = n ? `${n} selected` : 'Tick products to send them to Xero';
+    if (label) label.textContent = n ? `${n} selected` : (label.dataset.empty || 'Tick products to send them to Xero');
   };
   document.addEventListener('change', (e) => {
     if (e.target.matches('[data-check-all]')) boxes().forEach((b) => { b.checked = e.target.checked; });

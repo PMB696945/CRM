@@ -79,6 +79,7 @@ match (true) {
     $page === 'users'     => users_controller(),
     $page === 'profile'   => profile_controller(),
     $page === 'xero'      => xero_controller(),
+    $page === 'xero_customers' => xero_customers_controller(),
     $page === 'gocardless' => gocardless_controller(),
     $page === 'quotes'    => quotes_controller(),
     $page === 'contracts' => contracts_controller(),

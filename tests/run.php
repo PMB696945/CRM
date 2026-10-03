@@ -384,6 +384,30 @@ test('syncs balances, paging, 429 retry and auto-links customers', function () {
     eq(null, setting('xero_last_sync_error'));
 });
 
+test('customers can be added from Xero contacts, with company details, people and the Xero link', function () {
+    $names = array_column(xero_importable_contacts(), 'name');
+    eq(['Brand New Bakery Ltd', 'Greenfield Farm Supplies', 'Jo Bloggs'], $names, 'Xero customers not yet in the CRM');
+    ok(count(xero_importable_contacts(false)) > 100, 'all contacts on request');
+    eq(['Brand New Bakery Ltd'], array_column(xero_importable_contacts(false, 'bakery'), 'name'), 'search');
+
+    $ids = array_column(array_filter(xero_importable_contacts(), fn($c) => $c['name'] !== 'Greenfield Farm Supplies'), 'id');
+    $r = xero_create_customers($ids);
+    eq(2, count($r['created']));
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$r['created'][0]]);
+    eq(['BNB01', 'Brand New Bakery Ltd', 'business', 'active', 'accounts@bakery.example', '0113 496 0123', '01234567', '3 Oven Street', 'Leeds', 'West Yorkshire', 'LS2 2BB', (int)$ids[0]],
+        [$a['account_number'], $a['name'], $a['type'], $a['status'], $a['email'], $a['phone'], $a['company_number'], $a['address'], $a['city'], $a['county'], $a['postcode'], (int)$a['xero_contact_id']]);
+    ok(str_contains((string)$a['notes'], 'GB 111 2222 33'), 'VAT number kept in the notes');
+    $main = db_one('SELECT * FROM contacts WHERE id = ?', [$a['main_contact_id']]);
+    eq(['Pat Baker', 'accounts@bakery.example', '07700 900123', 1, 1], [$main['name'], $main['email'], $main['mobile'] ?: $main['phone'], (int)$main['is_primary'], (int)$main['is_billing']]);
+    eq(['Robin Flour'], array_column(db_all('SELECT name FROM contacts WHERE account_id = ? AND id <> ?', [$a['id'], $main['id']]), 'name'), 'other people added as contacts');
+    $jo = db_one('SELECT * FROM accounts WHERE id = ?', [$r['created'][1]]);
+    eq(['residential', 'JB-1'], [$jo['type'], $jo['account_number']], 'a person is a residential customer');
+
+    eq(['Greenfield Farm Supplies'], array_column(xero_importable_contacts(), 'name'), 'gone from the list once added');
+    $again = xero_create_customers($ids);
+    eq([[], 2], [$again['created'], count($again['skipped'])], 'never added twice');
+});
+
 test('suppliers are brought in from Xero: same name linked, others added with details, archived skipped', function () {
     eq(1, (int)db_value("SELECT COUNT(*) FROM suppliers WHERE name = 'Giacom'"), 'Giacom is the first supplier');
     eq(['created' => 1, 'linked' => 1, 'updated' => 1], xero_import_suppliers());

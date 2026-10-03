@@ -751,6 +751,38 @@ function csv_safe(string $value): string
         : $value;
 }
 
+/** Pick Xero contacts and create them as CRM customers. */
+function xero_customers_controller(): void
+{
+    require_permission('customers.edit');
+    if (!xero_connected()) {
+        flash('Connect Xero first (Admin → Xero).', 'error');
+        redirect(url('accounts'));
+    }
+    if (is_post()) {
+        verify_csrf();
+        if (($_POST['action'] ?? '') === 'sync') {
+            try {
+                xero_sync();
+                flash('Contacts refreshed from Xero.');
+            } catch (IntegrationException $e) {
+                flash('Xero: ' . $e->getMessage(), 'error');
+            }
+            redirect(url('xero_customers'));
+        }
+        $r = xero_create_customers(array_map('intval', (array)($_POST['ids'] ?? [])));
+        $n = count($r['created']);
+        audit('xero_customers', "$n customer(s) created from Xero");
+        flash($n ? "$n customer" . ($n === 1 ? '' : 's') . ' added from Xero and linked to it.' . ($r['skipped'] ? ' Skipped: ' . implode(', ', $r['skipped']) . '.' : '')
+            : 'Nothing was added. Tick the contacts to add first.', $n ? 'success' : 'error');
+        redirect($n === 1 ? url('accounts', ['action' => 'view', 'id' => $r['created'][0]]) : url('xero_customers'));
+    }
+    $all = query('show') === 'all';
+    $q = trim((string)query('q'));
+    $contacts = xero_importable_contacts(!$all, $q);
+    page('xero_customers', compact('contacts', 'all', 'q'), 'Add customers from Xero');
+}
+
 function xero_controller(): void
 {
     $action = query('action');

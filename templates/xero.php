@@ -174,6 +174,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
 <?php if ($connected && $stats['unlinked_total']): ?>
 <section class="card">
   <div class="card-head"><h2>Customers not linked to Xero <small class="count"><?= (int)$stats['unlinked_total'] ?></small></h2>
+    <a class="btn btn-sm" href="<?= h(url('xero_customers')) ?>">Add customers from Xero</a>
     <a href="<?= h(url('accounts', ['preset' => 'no_xero'])) ?>">All →</a></div>
   <p class="help">These active customers couldn't be matched automatically. Matching uses the Xero contact's <b>account number</b> (set it to the CRM account number, e.g. ACC-10001), then <b>email</b>, then <b>company name</b>. Or choose the contact yourself by editing the customer.</p>
   <ul class="link-list">

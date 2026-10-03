@@ -202,6 +202,21 @@ npm run watch:css    # or rebuild automatically while you edit
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
 
+## Adding customers from Xero
+
+**Customers → Add from Xero** (also on Admin → Xero) lists the contacts in Xero that aren't customers in the CRM yet.
+- **What's listed:** Xero customers by default, which are contacts you've raised a sales invoice to. Use **All contacts** for the rest, or search.
+- **Adding them:** tick the ones you want and press **Add as customers**. Each becomes an active customer, already linked to Xero for balances.
+- **Details brought across:**
+  - their Xero account number (if not already used);
+  - company email, phone, street (or postal) address, and company number;
+  - the VAT number and website, in the notes;
+  - Xero's contact person as the main contact, who also gets invoices;
+  - Xero's other contact people, as contacts.
+- **Type:** a contact named after one person becomes a residential customer.
+- **Safety:** contacts already in the CRM are never added twice. A supplier already brought in from the same Xero contact is joined to the new customer as one company.
+- **Refreshing:** press **Refresh from Xero** to pick up contacts added in Xero since the last sync.
+
 ## Supplier invoices to Xero
 
 When a supplier invoice is approved to pay (with **Send approved supplier invoices to Xero as bills** on, under Admin → Xero), it goes to Xero as a bill:

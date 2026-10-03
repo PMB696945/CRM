@@ -471,14 +471,104 @@ function xero_contact_details(array $c): ?string
         }
     }
     $terms = $c['PaymentTerms']['Bills'] ?? null;
+    $people = [];
+    foreach ($c['ContactPersons'] ?? [] as $p) {
+        $name = trim(($p['FirstName'] ?? '') . ' ' . ($p['LastName'] ?? ''));
+        if ($name !== '' || !empty($p['EmailAddress'])) {
+            $people[] = array_filter(['name' => $name, 'email' => trim((string)($p['EmailAddress'] ?? ''))]);
+        }
+    }
     $details = array_filter([
         'contact_name' => trim(($c['FirstName'] ?? '') . ' ' . ($c['LastName'] ?? '')),
         'phone' => $phone ?? $mobile,
+        'mobile' => $phone !== null ? $mobile : null,
+        'company_number' => trim((string)($c['CompanyNumber'] ?? '')),
+        'vat_number' => trim((string)($c['TaxNumber'] ?? '')),
+        'people' => $people,
         'website' => trim((string)($c['Website'] ?? '')),
         'payment_terms' => $terms && isset($terms['Day']) ? xero_payment_terms_label((int)$terms['Day'], (string)($terms['Type'] ?? '')) : '',
         'address' => $address,
     ]);
     return $details ? json_encode($details) : null;
+}
+
+/* ------------------------------------------------- Customers from Xero --- */
+
+/** Xero contacts not yet linked to a CRM customer (not archived), for importing. */
+function xero_importable_contacts(bool $customersOnly = true, string $q = ''): array
+{
+    $where = ["(x.status IS NULL OR x.status <> 'ARCHIVED')", 'NOT EXISTS (SELECT 1 FROM accounts a WHERE a.xero_contact_id = x.id)'];
+    $params = [];
+    if ($customersOnly) {
+        $where[] = 'x.is_customer = 1';
+    }
+    if ($q !== '') {
+        $where[] = '(x.name LIKE ? OR x.email LIKE ? OR x.account_number LIKE ?)';
+        array_push($params, "%$q%", "%$q%", "%$q%");
+    }
+    return db_all('SELECT x.* FROM xero_contacts x WHERE ' . implode(' AND ', $where) . ' ORDER BY x.name', $params);
+}
+
+/**
+ * Create CRM customers from Xero contacts, linked to them, with their company details,
+ * main/accounts contact and other people. Returns ['created' => [account ids], 'skipped' => [names]].
+ */
+function xero_create_customers(array $xeroIds): array
+{
+    $out = ['created' => [], 'skipped' => []];
+    foreach (array_unique(array_map('intval', $xeroIds)) as $xid) {
+        $x = db_one('SELECT * FROM xero_contacts WHERE id = ?', [$xid]);
+        if (!$x) {
+            continue;
+        }
+        if (db_value('SELECT 1 FROM accounts WHERE xero_contact_id = ?', [$xid])) {
+            $out['skipped'][] = $x['name'] . ' (already a customer)';
+            continue;
+        }
+        $d = json_decode((string)$x['details'], true) ?: [];
+        $person = trim((string)($d['contact_name'] ?? ''));
+        $addr = $d['address'] ?? [];
+        // Their Xero account number becomes the CRM one, unless it's taken.
+        $number = trim((string)$x['account_number']);
+        if ($number !== '' && (mb_strlen($number) > 20 || db_value('SELECT 1 FROM accounts WHERE account_number = ?', [$number]))) {
+            $number = '';
+        }
+        $data = [
+            'account_number' => $number ?: null,
+            'name' => mb_substr($x['name'], 0, 150),
+            // A contact named after one person (e.g. "Jo Bloggs") is a household; anything else a business.
+            'type' => $person !== '' && company_match_key($person) === company_match_key($x['name']) ? 'residential' : 'business',
+            'status' => 'active',
+            'email' => $x['email'] ? strtolower($x['email']) : null,
+            'phone' => $d['phone'] ?? null,
+            'company_number' => mb_substr((string)($d['company_number'] ?? ''), 0, 20) ?: null,
+            'address' => $addr['address'] ?? null, 'address2' => ($addr['address2'] ?? '') ?: null, 'city' => ($addr['city'] ?? '') ?: null,
+            'county' => ($addr['county'] ?? '') ?: null, 'postcode' => ($addr['postcode'] ?? '') ?: null,
+            'xero_contact_id' => $xid,
+            'notes' => trim(implode("\n", array_filter([
+                !empty($d['vat_number']) ? 'VAT number: ' . $d['vat_number'] : '',
+                !empty($d['website']) ? 'Website: ' . $d['website'] : '',
+            ]))) ?: null,
+            // The Xero contact's person and email become the main contact, who also gets the invoices.
+            'main_name' => $person !== '' ? $person : ($x['email'] ? 'Accounts' : ''),
+            'main_job_title' => null,
+            'main_phone' => ($d['mobile'] ?? null) ?: ($d['phone'] ?? null),
+            'main_email' => $x['email'] ? strtolower($x['email']) : null,
+            'billing_same' => 1,
+        ];
+        $id = insert_row('accounts', $data);
+        foreach ($d['people'] ?? [] as $p) {
+            if (!empty($p['email']) && strcasecmp($p['email'], (string)$x['email']) === 0) {
+                continue;
+            }
+            db_exec('INSERT INTO contacts (account_id, name, email) VALUES (?, ?, ?)', [$id, mb_substr($p['name'] ?? '', 0, 150) ?: $p['email'], $p['email'] ?? null]);
+        }
+        // Already a supplier in the CRM (same Xero contact): one company record.
+        db_exec('UPDATE suppliers SET account_id = ? WHERE xero_contact_id = ? AND account_id IS NULL AND NOT EXISTS (SELECT 1 FROM (SELECT account_id FROM suppliers WHERE account_id = ?) t)', [$id, $xid, $id]);
+        audit('create', "Customer {$x['name']} added from Xero", 'accounts', $id, null, null, $id);
+        $out['created'][] = $id;
+    }
+    return $out;
 }
 
 function xero_payment_terms_label(int $day, string $type): string
