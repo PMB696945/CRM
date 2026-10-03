@@ -428,6 +428,16 @@ test('customers already in the CRM can take their Xero account numbers', functio
     eq('HARB01', db_value('SELECT account_number FROM accounts WHERE id = ?', [$one['id']]));
     eq($two['account_number'], db_value('SELECT account_number FROM accounts WHERE id = ?', [$two['id']]));
     eq(0, xero_adopt_account_numbers(), 'nothing left to change');
+    // The number is on another Xero contact of the same name (archived), so Xero won't put it on the linked one.
+    db_exec('UPDATE xero_contacts SET account_number = NULL WHERE id = ?', [$two['xero_contact_id']]);
+    $twoName = db_value('SELECT name FROM xero_contacts WHERE id = ?', [$two['xero_contact_id']]);
+    db_exec("INSERT INTO xero_contacts (contact_id, name, account_number, status) VALUES ('e0000000-0000-0000-0000-000000000001', ?, 'OLD002', 'ARCHIVED')", [$twoName]);
+    $row = array_column(xero_account_number_changes(), null, 'id')[$two['id']];
+    eq(['OLD002', true, null], [$row['to'], $row['source']['archived'], $row['problem']]);
+    eq(1, xero_adopt_account_numbers());
+    eq('OLD002', db_value('SELECT account_number FROM accounts WHERE id = ?', [$two['id']]));
+    db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$two['account_number'], $two['id']]);
+    db_exec("DELETE FROM xero_contacts WHERE contact_id = 'e0000000-0000-0000-0000-000000000001'");
     // One given a number in Xero since the last sync is found when refreshing.
     global $mockState;
     $st = mock_state();

@@ -127,6 +127,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <?php if ($ov['no_number']): ?><li><b><?= count($ov['no_number']) ?></b> have no account number in Xero as last read:
       <?= h(implode(', ', array_map(fn($a) => $a['name'], array_slice($ov['no_number'], 0, 8)))) ?><?= count($ov['no_number']) > 8 ? '…' : '' ?>.
       Pressing the button below reads Xero again first.</li><?php endif; ?>
+    <?php if (array_filter($numberChanges, fn($r) => $r['source'])): ?><li>Some customers' numbers are on <b>another Xero contact</b> with the same name, usually an archived or duplicate one. That's why Xero says the number “already exists” when you type it in. The CRM uses that number; to tidy Xero, merge the two contacts there (open the contact → Options → Merge).</li><?php endif; ?>
     <?php if ($ov['unlinked']): ?><li><b><?= count($ov['unlinked']) ?></b> aren't linked to a Xero contact, so they can't take a Xero number:
       <?= h(implode(', ', array_map(fn($a) => $a['name'], array_slice($ov['unlinked'], 0, 8)))) ?><?= count($ov['unlinked']) > 8 ? '…' : '' ?>.
       Link them under <i>Customers not linked to Xero</i> below (edit the customer and choose its Xero contact).</li><?php endif; ?>
@@ -135,7 +136,7 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
     <div class="table-wrap"><table class="table table-compact">
       <thead><tr><th>Customer</th><th>In the CRM</th><th>In Xero</th><th></th></tr></thead>
       <tbody><?php foreach (array_slice($numberChanges, 0, 50) as $r): ?>
-        <tr><td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $r['id']])) ?>"><?= h($r['name']) ?></a></td><td><?= h($r['from']) ?></td><td><b><?= h($r['to']) ?></b></td>
+        <tr><td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $r['id']])) ?>"><?= h($r['name']) ?></a></td><td><?= h($r['from']) ?></td><td><b><?= h($r['to']) ?></b><?php if ($r['source']): ?><div class="small muted">on <a href="<?= h(xero_contact_url($r['source']['contact_id'])) ?>" target="_blank" rel="noopener"><?= $r['source']['archived'] ? 'an archived' : 'another' ?> Xero contact ↗</a></div><?php endif; ?></td>
           <td class="small <?= $r['problem'] ? 'text-warning' : 'muted' ?>"><?= $r['problem'] ? 'Left as it is: ' . h($r['problem']) : 'Will change' ?></td></tr>
       <?php endforeach; ?></tbody>
     </table></div>

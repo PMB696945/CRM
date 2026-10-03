@@ -348,7 +348,7 @@ function xero_auto_link(): int
 {
     $external = [];
     $taken = 'SELECT xero_contact_id FROM accounts WHERE xero_contact_id IS NOT NULL';
-    foreach (db_all("SELECT id, name, account_number, email FROM xero_contacts WHERE id NOT IN ($taken)") as $c) {
+    foreach (db_all("SELECT id, name, account_number, email FROM xero_contacts WHERE id NOT IN ($taken) AND (status IS NULL OR status <> 'ARCHIVED')") as $c) {
         $external[(int)$c['id']] = [
             'account_number' => [strtolower(trim((string)$c['account_number']))],
             'email'          => [email_match_key($c['email'])],
@@ -382,7 +382,8 @@ function xero_sync(): array
     }
     try {
         $started = microtime(true);
-        $contacts = xero_fetch_all('Contacts', 'Contacts');
+        // Archived contacts too: an older or duplicate contact may hold the customer's account number.
+        $contacts = xero_fetch_all('Contacts', 'Contacts', ['includeArchived' => 'true']);
         $invoices = xero_fetch_all('Invoices', 'Invoices', ['where' => 'Type=="ACCREC"', 'Statuses' => 'AUTHORISED', 'summaryOnly' => 'true']);
         $creditNotes = xero_fetch_all('CreditNotes', 'CreditNotes', ['where' => 'Type=="ACCRECCREDIT" AND Status=="AUTHORISED"']);
         $balances = xero_calculate_balances($invoices, $creditNotes, date('Y-m-d'));
@@ -553,6 +554,12 @@ function xero_create_customers(array $xeroIds): array
         // Their Xero account number becomes the CRM one, unless it's taken.
         $number = trim((string)$x['account_number']);
         if ($number === '') {
+            // Xero keeps account numbers unique, so it may be on another contact of this name (e.g. an archived one).
+            $holders = array_values(array_filter(db_all("SELECT name, TRIM(account_number) AS n FROM xero_contacts WHERE id <> ? AND account_number IS NOT NULL AND TRIM(account_number) <> ''", [$xid]),
+                fn($h) => company_match_key($h['name']) === company_match_key($x['name'])));
+            $number = count($holders) === 1 ? $holders[0]['n'] : '';
+        }
+        if ($number === '') {
             $out['no_number'][] = $x['name'];
         } elseif (mb_strlen($number) > 20) {
             $out['no_number'][] = "{$x['name']} (their Xero account number $number is longer than 20 characters)";
@@ -605,8 +612,23 @@ function xero_create_customers(array $xeroIds): array
  */
 function xero_account_number_changes(): array
 {
-    $rows = db_all("SELECT a.id, a.name, a.account_number AS `from`, TRIM(x.account_number) AS `to` FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
+    $rows = db_all("SELECT a.id, a.name, a.account_number AS `from`, TRIM(x.account_number) AS `to`, NULL AS source FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
         WHERE x.account_number IS NOT NULL AND TRIM(x.account_number) <> '' AND TRIM(x.account_number) <> a.account_number ORDER BY a.name");
+    // Linked to a Xero contact with no account number, while another contact of the same name (often an
+    // archived or duplicate one) holds it: Xero won't let the number be used twice, so that's theirs.
+    $holders = [];
+    foreach (db_all("SELECT id, contact_id, name, status, TRIM(account_number) AS account_number FROM xero_contacts WHERE account_number IS NOT NULL AND TRIM(account_number) <> ''") as $h) {
+        $holders[company_match_key($h['name'])][] = $h;
+    }
+    foreach (db_all("SELECT a.id, a.name, a.account_number, x.id AS xid, x.name AS xname FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
+        WHERE x.account_number IS NULL OR TRIM(x.account_number) = ''") as $a) {
+        $found = array_values(array_filter($holders[company_match_key($a['xname'])] ?? [], fn($h) => (int)$h['id'] !== (int)$a['xid']));
+        if (count($found) === 1 && $found[0]['account_number'] !== $a['account_number']) {
+            $rows[] = ['id' => $a['id'], 'name' => $a['name'], 'from' => $a['account_number'], 'to' => $found[0]['account_number'],
+                'source' => ['name' => $found[0]['name'], 'contact_id' => $found[0]['contact_id'], 'archived' => $found[0]['status'] === 'ARCHIVED']];
+        }
+    }
+    usort($rows, fn($x, $y) => strcasecmp($x['name'], $y['name']));
     $wanted = array_count_values(array_map('strtolower', array_column($rows, 'to')));
     foreach ($rows as &$r) {
         $r['problem'] = match (true) {
@@ -626,6 +648,8 @@ function xero_account_number_overview(): array
     $changes = xero_account_number_changes();
     $noNumber = db_all("SELECT a.id, a.name, a.account_number FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
         WHERE x.account_number IS NULL OR TRIM(x.account_number) = '' ORDER BY a.name");
+    $foundElsewhere = array_column(array_filter($changes, fn($r) => $r['source']), 'id');
+    $noNumber = array_values(array_filter($noNumber, fn($a) => !in_array($a['id'], $foundElsewhere)));
     return [
         'linked' => (int)db_value('SELECT COUNT(*) FROM accounts WHERE xero_contact_id IS NOT NULL'),
         'same' => (int)db_value('SELECT COUNT(*) FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id WHERE TRIM(x.account_number) = a.account_number'),
