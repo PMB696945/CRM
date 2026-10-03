@@ -117,6 +117,32 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
   <?php endif; ?>
 </section>
 
+<?php $diffs = xero_customer_differences(); ?>
+<section class="card">
+  <div class="card-head"><h2>Customer details from Xero</h2></div>
+  <p>Bring changes made in Xero (name, email, phone, address, company number) into the linked customers in the CRM. The Xero contact's email becomes the customer's company email and their accounts contact's email.</p>
+  <form method="post" action="<?= h(url('xero', ['action' => 'customer_details'])) ?>" id="bulk-form" class="stack">
+    <?= csrf_field() ?>
+    <label class="check"><input type="checkbox" name="keep_updated" value="1" <?= setting('xero_update_customers') === '1' ? 'checked' : '' ?>> Update customers automatically on each sync when their details change in Xero</label>
+    <p class="help">Only what changed in Xero since the previous sync is copied, so details you've edited in the CRM aren't overwritten by older ones in Xero.</p>
+    <?php if ($diffs): ?>
+      <p class="small"><b><?= count($diffs) ?></b> customer<?= count($diffs) === 1 ? '' : 's' ?> differ from Xero. Tick the ones to update from Xero now:</p>
+      <div class="table-wrap"><table class="table table-compact">
+        <thead><tr><th class="check-col"><input type="checkbox" data-check-all aria-label="Select all"></th><th>Customer</th><th>In the CRM → in Xero</th></tr></thead>
+        <tbody><?php foreach ($diffs as $d): ?>
+          <tr><td class="check-col"><input type="checkbox" name="ids[]" value="<?= (int)$d['id'] ?>" form="bulk-form" aria-label="Update <?= h($d['name']) ?>"></td>
+            <td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $d['id']])) ?>"><?= h($d['name']) ?></a></td>
+            <td class="small"><?php foreach ($d['changes'] as $f => $c): ?><div><span class="muted"><?= h(XERO_CUSTOMER_FIELDS[$f]) ?>:</span> <?= $c['from'] !== '' ? h($c['from']) : '<i class="muted">blank</i>' ?> → <b><?= h($c['to']) ?></b></div><?php endforeach; ?></td></tr>
+        <?php endforeach; ?></tbody>
+      </table></div>
+    <?php else: ?><p class="muted small">Every linked customer matches Xero (as of the last sync).</p><?php endif; ?>
+    <div class="actions">
+      <?php if ($diffs): ?><button class="btn" name="apply" value="1" data-needs-selection>Update ticked customers from Xero</button><span class="small muted" data-selected-count data-empty="None ticked yet">None ticked yet</span><?php endif; ?>
+      <button class="btn btn-ghost">Save</button>
+    </div>
+  </form>
+</section>
+
 <?php $ov = xero_account_number_overview(); $numberChanges = $ov['changes']; ?>
 <section class="card">
   <div class="card-head"><h2>Customer account numbers</h2></div>

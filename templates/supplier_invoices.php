@@ -32,7 +32,7 @@
       <td class="num"><?= $r['net'] !== null ? h(money($r['net'])) : '<span class="muted">—</span>' ?></td>
       <td class="num"><?= $r['total'] !== null ? h(money($r['total'])) : '<span class="muted">—</span>' ?></td>
       <td><?= invoice_status_badge($r['status']) ?></td>
-      <td class="small"><?= $r['xero_invoice_id'] ? '<a href="' . h(xero_bill_url($r['xero_invoice_id'])) . '" target="_blank" rel="noopener">Bill ↗</a>' : ($r['xero_error'] ? '<span class="text-danger">Problem</span>' : '<span class="muted">—</span>') ?></td>
+      <td class="small"><?= $r['xero_invoice_id'] ? xero_link(xero_bill_url($r['xero_invoice_id']), 'Bill') : ($r['xero_error'] ? '<span class="text-danger">Problem</span>' : '<span class="muted">—</span>') ?></td>
     </tr>
   <?php endforeach; ?>
   <?php if (!$rows): ?><tr><td colspan="8" class="empty-row">No invoices here.</td></tr><?php endif; ?>

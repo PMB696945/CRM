@@ -465,6 +465,63 @@ test('customers already in the CRM can take their Xero account numbers', functio
     db_exec('UPDATE xero_contacts SET account_number = NULL WHERE id IN (?, ?)', [$one['xero_contact_id'], $two['xero_contact_id']]);
 });
 
+test('only roles allowed to open Xero get links to it; others still see the balance', function () {
+    as_role('staff');
+    ok(can('finance.view') && !can('xero.open'), 'staff see balances but not Xero itself');
+    eq('Harbour', xero_link('https://go.xero.com/x', 'Harbour'), 'just the text');
+    foreach (['finance', 'manager', 'admin'] as $role) {
+        as_role($role);
+        ok(str_contains(xero_link('https://go.xero.com/x', 'Harbour'), 'href="https://go.xero.com/x"'), "$role can open Xero");
+    }
+    as_role('super_admin');
+});
+
+test('customer details changed in Xero come into the CRM, without undoing CRM edits', function () {
+    global $mockState;
+    $xid = (int)db_value("SELECT id FROM xero_contacts WHERE contact_id = 'c1000000-0000-0000-0000-000000000001'");
+    $id = (int)db_value('SELECT id FROM accounts WHERE xero_contact_id = ?', [$xid]);
+    ok($id > 0, 'a linked customer');
+    $orig = db_one('SELECT name, email, phone, billing_contact_id, main_contact_id FROM accounts WHERE id = ?', [$id]);
+    $origContact = db_one('SELECT id, email FROM contacts WHERE id = ?', [$orig['billing_contact_id'] ?: ($orig['main_contact_id'] ?: 0)]);
+
+    // On request: differences listed, ticked customers updated.
+    db_exec("UPDATE accounts SET name = 'Harbour View Dental (old name)' WHERE id = ?", [$id]);
+    $diff = array_column(xero_customer_differences(), null, 'id')[$id] ?? null;
+    eq(['Harbour View Dental (old name)', 'Harbour View Dental Ltd'], [$diff['changes']['name']['from'], $diff['changes']['name']['to']]);
+    eq(1, xero_update_customers_from_xero([$id]));
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$id]);
+    eq('Harbour View Dental Ltd', $a['name']);
+    eq(strtolower((string)db_value('SELECT email FROM xero_contacts WHERE id = ?', [$xid])),
+        db_value('SELECT email FROM contacts WHERE id = ?', [$a['billing_contact_id'] ?: $a['main_contact_id']]), 'accounts contact email from Xero');
+    ok(!isset(array_column(xero_customer_differences(), null, 'id')[$id]), 'matches Xero now');
+
+    // Automatically on sync: only what changed in Xero is copied; an edit made in the CRM stays.
+    set_setting('xero_update_customers', '1');
+    db_exec("UPDATE accounts SET phone = '01632 960000' WHERE id = ?", [$id]);
+    $st = mock_state();
+    $st['contact_changes']['c1000000-0000-0000-0000-000000000001'] = ['Name' => 'Harbour View Dental Group Ltd', 'EmailAddress' => 'finance@harbour.example.co.uk',
+        'Phones' => [['PhoneType' => 'DEFAULT', 'PhoneNumber' => '0113 000 0000']]];
+    file_put_contents($mockState, json_encode($st));
+    xero_sync(); // first sync sees the new phone too: Xero changed it
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$id]);
+    eq(['Harbour View Dental Group Ltd', 'finance@harbour.example.co.uk', '0113 000 0000'], [$a['name'], $a['email'], $a['phone']]);
+    db_exec("UPDATE accounts SET phone = '01632 960000' WHERE id = ?", [$id]);
+    $s = xero_sync(); // nothing changed in Xero this time
+    eq([0, '01632 960000'], [$s['updated'], db_value('SELECT phone FROM accounts WHERE id = ?', [$id])], 'CRM edit kept');
+
+    set_setting('xero_update_customers', null);
+    unset($st['contact_changes']['c1000000-0000-0000-0000-000000000001']);
+    file_put_contents($mockState, json_encode($st));
+    xero_sync();
+    db_exec('UPDATE accounts SET name = ?, email = ?, phone = ? WHERE id = ?', [$orig['name'], $orig['email'], $orig['phone'], $id]);
+    if ($origContact) {
+        db_exec('UPDATE contacts SET email = ? WHERE id = ?', [$origContact['email'], $origContact['id']]);
+    } else {
+        db_exec('UPDATE accounts SET main_contact_id = NULL, billing_contact_id = NULL WHERE id = ?', [$id]);
+        db_exec("DELETE FROM contacts WHERE account_id = ? AND name = 'Accounts'", [$id]);
+    }
+});
+
 test('suppliers are brought in from Xero: same name linked, others added with details, archived skipped', function () {
     eq(1, (int)db_value("SELECT COUNT(*) FROM suppliers WHERE name = 'Giacom'"), 'Giacom is the first supplier');
     eq(['created' => 1, 'linked' => 1, 'updated' => 1], xero_import_suppliers());
@@ -1133,7 +1190,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'xero.open', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
     eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));

@@ -389,6 +389,12 @@ function xero_sync(): array
         $balances = xero_calculate_balances($invoices, $creditNotes, date('Y-m-d'));
         $now = date('Y-m-d H:i:s');
 
+        // Linked customers' Xero details as last seen, to tell what has since changed in Xero.
+        $before = [];
+        foreach (db_all('SELECT a.id AS account_id, x.* FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id') as $row) {
+            $before[(int)$row['account_id']] = xero_customer_values($row);
+        }
+
         db()->beginTransaction();
         $upsert = db()->prepare('INSERT INTO xero_contacts (contact_id, name, account_number, email, status, is_supplier, is_customer, details, synced_at, merged_to)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -421,12 +427,14 @@ function xero_sync(): array
         if (setting('xero_use_account_numbers') === '1') {
             xero_adopt_account_numbers();
         }
+        $updated = setting('xero_update_customers') === '1' ? xero_update_customers_changed_in_xero($before) : 0;
         $suppliers = setting('xero_import_suppliers') === '1' ? xero_import_suppliers() : null;
 
         $summary = [
             'contacts'  => count($contacts),
             'invoices'  => count($invoices),
             'linked'    => $linked,
+            'updated'   => $updated,
             'suppliers' => $suppliers ? $suppliers['created'] + $suppliers['linked'] : null,
             'seconds'   => round(microtime(true) - $started, 1),
         ];
@@ -494,6 +502,131 @@ function xero_contact_details(array $c): ?string
         'address' => $address,
     ]);
     return $details ? json_encode($details) : null;
+}
+
+/* ------------------------------------------- Customer details from Xero --- */
+
+/** Customer details that come from Xero, with their labels. */
+const XERO_CUSTOMER_FIELDS = ['name' => 'Name', 'email' => 'Company email', 'billing_email' => 'Accounts contact email', 'phone' => 'Main phone',
+    'address' => 'Address line 1', 'address2' => 'Address line 2', 'city' => 'Town / city', 'county' => 'County', 'postcode' => 'Postcode', 'company_number' => 'Company no.'];
+
+/** A Xero contact's details in the CRM's terms (blank ones left out). */
+function xero_customer_values(array $x): array
+{
+    $d = json_decode((string)($x['details'] ?? ''), true) ?: [];
+    $a = $d['address'] ?? [];
+    $email = $x['email'] ? strtolower(trim((string)$x['email'])) : '';
+    return array_filter([
+        'name' => trim((string)$x['name']), 'email' => $email, 'billing_email' => $email, 'phone' => (string)($d['phone'] ?? ''),
+        'address' => (string)($a['address'] ?? ''), 'address2' => (string)($a['address2'] ?? ''), 'city' => (string)($a['city'] ?? ''),
+        'county' => (string)($a['county'] ?? ''), 'postcode' => (string)($a['postcode'] ?? ''), 'company_number' => mb_substr((string)($d['company_number'] ?? ''), 0, 20),
+    ], fn($v) => $v !== '');
+}
+
+/** A customer's current values for the fields that come from Xero. */
+function xero_customer_current(array $a): array
+{
+    $billing = db_value('SELECT email FROM contacts WHERE id = ?', [$a['billing_contact_id'] ?: ($a['main_contact_id'] ?: 0)]);
+    $out = ['billing_email' => strtolower((string)$billing)];
+    foreach (array_keys(XERO_CUSTOMER_FIELDS) as $f) {
+        if ($f !== 'billing_email') {
+            $out[$f] = $f === 'email' ? strtolower((string)$a[$f]) : (string)$a[$f];
+        }
+    }
+    return $out;
+}
+
+/**
+ * Linked customers whose details differ from their Xero contact (only where Xero has a value):
+ * [['id', 'name', 'changes' => [field => ['from', 'to']]]].
+ */
+function xero_customer_differences(): array
+{
+    $out = [];
+    foreach (db_all('SELECT a.*, x.name AS x_name, x.email AS x_email, x.details AS x_details FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id ORDER BY a.name') as $a) {
+        $xero = xero_customer_values(['name' => $a['x_name'], 'email' => $a['x_email'], 'details' => $a['x_details']]);
+        $current = xero_customer_current($a);
+        $changes = [];
+        foreach ($xero as $f => $v) {
+            if (strcasecmp(trim($current[$f] ?? ''), trim($v)) !== 0 && !($f === 'postcode' && strtoupper(str_replace(' ', '', $current[$f] ?? '')) === strtoupper(str_replace(' ', '', $v)))) {
+                $changes[$f] = ['from' => $current[$f] ?? '', 'to' => $v];
+            }
+        }
+        if ($changes) {
+            $out[] = ['id' => (int)$a['id'], 'name' => $a['name'], 'changes' => $changes];
+        }
+    }
+    return $out;
+}
+
+/** Write Xero's values onto a customer: [field => new value]. Shared details carry over to a linked supplier. */
+function xero_apply_customer_values(int $accountId, array $values, string $why): void
+{
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]);
+    if (!$a || !$values) {
+        return;
+    }
+    $columns = array_diff_key($values, ['billing_email' => 1]);
+    if (isset($columns['postcode'])) {
+        $columns['postcode'] = strtoupper($columns['postcode']);
+    }
+    if ($columns) {
+        db_exec('UPDATE accounts SET ' . implode(', ', array_map(fn($k) => "$k = ?", array_keys($columns))) . ' WHERE id = ?', [...array_values($columns), $accountId]);
+        company_sync('accounts', $accountId);
+    }
+    if (isset($values['billing_email'])) {
+        $contactId = $a['billing_contact_id'] ?: $a['main_contact_id'];
+        if ($contactId) {
+            db_exec('UPDATE contacts SET email = ? WHERE id = ?', [$values['billing_email'], $contactId]);
+        } else {
+            db_exec('INSERT INTO contacts (account_id, name, email, is_primary, is_billing) VALUES (?, ?, ?, 1, 1)', [$accountId, 'Accounts', $values['billing_email']]);
+            $contactId = (int)db()->lastInsertId();
+            db_exec('UPDATE accounts SET main_contact_id = ?, billing_contact_id = ? WHERE id = ?', [$contactId, $contactId, $accountId]);
+        }
+    }
+    $changes = [];
+    $current = xero_customer_current($a);
+    foreach ($values as $f => $v) {
+        $changes[XERO_CUSTOMER_FIELDS[$f]] = ['from' => $current[$f] ?? '', 'to' => $v];
+    }
+    audit('update', "Customer {$a['name']} updated from Xero ($why): " . implode(', ', array_keys($changes)), 'accounts', $accountId, null, $changes, $accountId);
+}
+
+/** Copy chosen Xero differences onto customers. Returns how many customers changed. */
+function xero_update_customers_from_xero(array $accountIds): int
+{
+    $n = 0;
+    foreach (xero_customer_differences() as $d) {
+        if (in_array($d['id'], $accountIds, true)) {
+            xero_apply_customer_values($d['id'], array_map(fn($c) => $c['to'], $d['changes']), 'copied on request');
+            $n++;
+        }
+    }
+    return $n;
+}
+
+/**
+ * After a sync: copy to each customer only what changed in Xero since the last sync,
+ * so details edited in the CRM aren't overwritten by unchanged ones in Xero.
+ */
+function xero_update_customers_changed_in_xero(array $before): int
+{
+    $n = 0;
+    foreach (db_all('SELECT a.id AS account_id, x.* FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id') as $row) {
+        $id = (int)$row['account_id'];
+        if (!isset($before[$id])) {
+            continue; // newly linked: nothing to compare against
+        }
+        $now = xero_customer_values($row);
+        $changed = array_filter($now, fn($v, $f) => strcasecmp($before[$id][$f] ?? '', $v) !== 0, ARRAY_FILTER_USE_BOTH);
+        $current = xero_customer_current(db_one('SELECT * FROM accounts WHERE id = ?', [$id]));
+        $changed = array_filter($changed, fn($v, $f) => strcasecmp($current[$f] ?? '', $v) !== 0, ARRAY_FILTER_USE_BOTH);
+        if ($changed) {
+            xero_apply_customer_values($id, $changed, 'changed in Xero');
+            $n++;
+        }
+    }
+    return $n;
 }
 
 /* ------------------------------------------------- Customers from Xero --- */
@@ -784,6 +917,18 @@ function xero_import_suppliers(): array
         }
     }
     return $out;
+}
+
+/**
+ * A link into Xero for people allowed to open records there (they need their own Xero login);
+ * for everyone else just the text, so the CRM doesn't send staff to a system they can't use.
+ */
+function xero_link(string $href, string $html, string $class = ''): string
+{
+    if (!can('xero.open')) {
+        return $class !== '' ? '<span class="' . h($class) . '">' . $html . '</span>' : $html;
+    }
+    return '<a href="' . h($href) . '"' . ($class !== '' ? ' class="' . h($class) . '"' : '') . ' target="_blank" rel="noopener">' . $html . ' ↗</a>';
 }
 
 /** Link to the contact in Xero's web app. */

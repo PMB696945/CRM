@@ -38,7 +38,7 @@ $synced = setting('xero_last_sync_at');
     <?php foreach ($contacts as $c): $d = json_decode((string)$c['details'], true) ?: []; $a = $d['address'] ?? []; ?>
       <tr>
         <td class="check-col"><input type="checkbox" name="ids[]" value="<?= (int)$c['id'] ?>" form="bulk-form" aria-label="Add <?= h($c['name']) ?>"></td>
-        <td><a href="<?= h(xero_contact_url($c['contact_id'])) ?>" target="_blank" rel="noopener"><?= h($c['name']) ?> ↗</a>
+        <td><?= xero_link(xero_contact_url($c['contact_id']), h($c['name'])) ?>
           <?= $c['is_supplier'] ? ' <span class="badge">Supplier</span>' : '' ?></td>
         <td class="small"><?= h((string)($d['contact_name'] ?? '')) ?><?php if ($c['email']): ?><div class="muted"><?= h($c['email']) ?></div><?php endif; ?></td>
         <td class="small"><?= h((string)($d['phone'] ?? '')) ?></td>

@@ -318,6 +318,9 @@ function display_value(array $entity, string $column, array $row, bool $link = t
             }
             if (isset(EXTERNAL_REFS[$def['ref']]) && !empty($row[$column . '__ext'])) {
                 $href = (EXTERNAL_REFS[$def['ref']][1])($row[$column . '__ext']);
+                if ($def['ref'] === 'xero_contacts') {
+                    return xero_link($href, h($label));
+                }
                 return '<a href="' . h($href) . '" target="_blank" rel="noopener">' . h($label) . ' ↗</a>';
             }
             if ($link && entity($def['ref']) !== null) {

@@ -814,7 +814,8 @@ function xero_controller(): void
         try {
             $s = xero_sync();
             audit('sync', 'Xero sync run');
-            flash(sprintf('Xero sync complete: %d contacts, %d unpaid invoices, %d customers newly linked.', $s['contacts'], $s['invoices'], $s['linked']));
+            flash(sprintf('Xero sync complete: %d contacts, %d unpaid invoices, %d customers newly linked', $s['contacts'], $s['invoices'], $s['linked'])
+                . (setting('xero_update_customers') === '1' ? sprintf(', %d updated with changes made in Xero.', $s['updated'] ?? 0) : '.'));
         } catch (XeroException | PDOException $e) {
             flash('Xero sync failed: ' . $e->getMessage(), 'error');
         }
@@ -841,6 +842,13 @@ function xero_controller(): void
     if (is_post()) {
         verify_csrf();
         switch ($action) {
+            case 'customer_details':
+                set_setting('xero_update_customers', !empty($_POST['keep_updated']) ? '1' : null);
+                $n = !empty($_POST['apply']) ? xero_update_customers_from_xero(array_map('intval', (array)($_POST['ids'] ?? []))) : 0;
+                audit('settings', "Xero customer details: $n customer(s) updated" . (setting('xero_update_customers') ? ', updated on each sync' : ''));
+                flash(!empty($_POST['apply']) ? ($n ? "$n customer" . ($n === 1 ? '' : 's') . ' updated from Xero.' : 'Tick the customers to update first.') : 'Saved.', !empty($_POST['apply']) && !$n ? 'error' : 'success');
+                break;
+
             case 'account_numbers':
                 set_setting('xero_use_account_numbers', !empty($_POST['keep_in_step']) ? '1' : null);
                 $n = !empty($_POST['apply']) ? xero_adopt_account_numbers(true) : 0;

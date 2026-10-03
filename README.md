@@ -202,6 +202,17 @@ npm run watch:css    # or rebuild automatically while you edit
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
 
+## Customer details from Xero
+
+The sync brings in each Xero contact, but it doesn't change customers unless you ask. **Admin → Xero → Customer details from Xero** covers this:
+- **The list:** shows every linked customer whose name, email, phone, address or company number differs from Xero.
+- **One-off update:** tick the customers and press **Update ticked customers from Xero**.
+- **Automatic update:** tick **Update customers automatically on each sync**. Then whatever changes in Xero is copied over at the next sync. Only details changed in Xero since the previous sync are copied, so edits made in the CRM aren't overwritten.
+- **Email:** the Xero contact's email becomes the customer's company email and their accounts contact's email.
+- **Linked supplier:** changes carry over to a linked supplier record.
+
+**Who can open Xero:** the permission **Open records in Xero** controls who gets links into Xero: the balance on a customer, supplier contacts and bills. By default Admin, Manager and Finance have it. Staff still see balances (with *See balances*) as plain figures, without the link.
+
 ## Adding customers from Xero
 
 **Customers → Add from Xero** (also on Admin → Xero) lists the contacts in Xero that aren't customers in the CRM yet.

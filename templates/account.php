@@ -77,8 +77,9 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
     <?php if ($xero):
         $overLimit = $account['credit_limit'] !== null && (float)$xero['outstanding'] > (float)$account['credit_limit'];
         $inCredit = (float)$xero['outstanding'] < 0; ?>
-      <a class="kpi <?= (float)$xero['overdue'] > 0 ? 'kpi-alert' : '' ?>" href="<?= h(xero_contact_url($xero['contact_id'])) ?>" target="_blank" rel="noopener" title="Open in Xero">
-        <span class="kpi-label">Xero balance ↗</span>
+      <?php $openXero = can('xero.open'); ?>
+      <<?= $openXero ? 'a' : 'div' ?> class="kpi <?= (float)$xero['overdue'] > 0 ? 'kpi-alert' : '' ?>"<?= $openXero ? ' href="' . h(xero_contact_url($xero['contact_id'])) . '" target="_blank" rel="noopener" title="Open in Xero"' : '' ?>>
+        <span class="kpi-label">Xero balance<?= $openXero ? ' ↗' : '' ?></span>
         <span class="kpi-value"><?= $inCredit ? h(money(-$xero['outstanding'])) . ' <small>credit</small>' : h(money($xero['outstanding'])) ?></span>
         <span class="kpi-sub">
           <?php if ((float)$xero['overdue'] > 0): ?><span class="text-danger"><?= h(money($xero['overdue'])) ?> overdue</span> · since <?= h(fmt_date($xero['oldest_due_date'])) ?><?php else: ?>Nothing overdue<?php endif; ?>
@@ -86,7 +87,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
           <?php if ($overLimit): ?><br><span class="text-danger">Over credit limit (<?= h(money($account['credit_limit'])) ?>)</span><?php endif; ?>
           <br><small>Synced <?= h(fmt_datetime($xero['synced_at'])) ?></small>
         </span>
-      </a>
+      </<?= $openXero ? 'a' : 'div' ?>>
     <?php else: ?>
       <a class="kpi" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">
         <span class="kpi-label">Xero balance</span>

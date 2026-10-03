@@ -65,7 +65,7 @@ $link = fn($u) => $u ? '<a href="' . h(preg_match('#^https?://#i', $u) ? $u : 'h
             'Partner portal' => $link($supplier['portal_url']),
             'Address' => h($line($supplier['address'], $supplier['address2'], $supplier['city'], $supplier['county'], $supplier['postcode'])),
             'Payment terms' => h((string)$supplier['payment_terms']),
-            'Xero' => $xeroContact ? '<a href="' . h(xero_contact_url($xeroContact['contact_id'])) . '" target="_blank" rel="noopener">' . h($xeroContact['name']) . ' ↗</a>' : '',
+            'Xero' => $xeroContact ? xero_link(xero_contact_url($xeroContact['contact_id']), h($xeroContact['name'])) : '',
             'Notes' => nl2br(h((string)$supplier['notes'])),
         ] as $label => $value): if ($value === '') continue; ?>
           <dt><?= h($label) ?></dt><dd><?= $value ?></dd>
