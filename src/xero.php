@@ -417,6 +417,9 @@ function xero_sync(): array
         }
         $linked = xero_auto_link();
         db()->commit();
+        if (setting('xero_use_account_numbers') === '1') {
+            xero_adopt_account_numbers();
+        }
         $suppliers = setting('xero_import_suppliers') === '1' ? xero_import_suppliers() : null;
 
         $summary = [
@@ -569,6 +572,43 @@ function xero_create_customers(array $xeroIds): array
         $out['created'][] = $id;
     }
     return $out;
+}
+
+/**
+ * Linked customers whose CRM account number differs from their Xero contact's account number:
+ * [['id', 'name', 'from', 'to', 'problem']]. A problem (too long, or used by another customer) means it's left alone.
+ */
+function xero_account_number_changes(): array
+{
+    $rows = db_all("SELECT a.id, a.name, a.account_number AS `from`, TRIM(x.account_number) AS `to` FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
+        WHERE x.account_number IS NOT NULL AND TRIM(x.account_number) <> '' AND TRIM(x.account_number) <> a.account_number ORDER BY a.name");
+    $wanted = array_count_values(array_map('strtolower', array_column($rows, 'to')));
+    foreach ($rows as &$r) {
+        $r['problem'] = match (true) {
+            mb_strlen($r['to']) > 20 => 'longer than 20 characters',
+            $wanted[strtolower($r['to'])] > 1 => 'more than one customer has it in Xero',
+            (bool)db_value('SELECT name FROM accounts WHERE account_number = ? AND id <> ?', [$r['to'], $r['id']]) =>
+                'already used by ' . db_value('SELECT name FROM accounts WHERE account_number = ? AND id <> ?', [$r['to'], $r['id']]),
+            default => null,
+        };
+    }
+    return $rows;
+}
+
+/** Give linked customers their Xero account numbers (where that's possible). Returns how many changed. */
+function xero_adopt_account_numbers(): int
+{
+    $n = 0;
+    foreach (xero_account_number_changes() as $r) {
+        if ($r['problem'] !== null || db_value('SELECT 1 FROM accounts WHERE account_number = ? AND id <> ?', [$r['to'], $r['id']])) {
+            continue;
+        }
+        db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$r['to'], $r['id']]);
+        audit('update', "Customer {$r['name']}: account number {$r['from']} → {$r['to']} (from Xero)", 'accounts', (int)$r['id'], null,
+            ['Account no.' => ['from' => $r['from'], 'to' => $r['to']]], (int)$r['id']);
+        $n++;
+    }
+    return $n;
 }
 
 function xero_payment_terms_label(int $day, string $type): string

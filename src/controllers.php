@@ -840,6 +840,13 @@ function xero_controller(): void
     if (is_post()) {
         verify_csrf();
         switch ($action) {
+            case 'account_numbers':
+                set_setting('xero_use_account_numbers', !empty($_POST['keep_in_step']) ? '1' : null);
+                $n = !empty($_POST['apply']) ? xero_adopt_account_numbers() : 0;
+                audit('settings', "Xero account numbers: $n customer(s) updated" . (setting('xero_use_account_numbers') ? ', kept in step on each sync' : ''));
+                flash($n ? "$n customer account number" . ($n === 1 ? '' : 's') . ' changed to match Xero.' : (!empty($_POST['apply']) ? 'No account numbers could be changed.' : 'Saved.'));
+                break;
+
             case 'accounts':
                 try {
                     $n = xero_fetch_accounts();

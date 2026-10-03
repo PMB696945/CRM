@@ -117,6 +117,28 @@ $scopes = setting('xero_scopes') ?: XERO_DEFAULT_SCOPES;
   <?php endif; ?>
 </section>
 
+<?php $numberChanges = xero_account_number_changes(); ?>
+<section class="card">
+  <div class="card-head"><h2>Customer account numbers</h2></div>
+  <p>Use each customer's Xero <b>account number</b> (the reference printed under their address on your Xero invoices, e.g. FINN01) as their account number in the CRM. Customers added from Xero get it automatically; this does the same for customers that were already in the CRM.</p>
+  <?php if ($numberChanges): ?>
+    <div class="table-wrap"><table class="table table-compact">
+      <thead><tr><th>Customer</th><th>In the CRM</th><th>In Xero</th><th></th></tr></thead>
+      <tbody><?php foreach (array_slice($numberChanges, 0, 25) as $r): ?>
+        <tr><td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $r['id']])) ?>"><?= h($r['name']) ?></a></td><td><?= h($r['from']) ?></td><td><b><?= h($r['to']) ?></b></td>
+          <td class="small <?= $r['problem'] ? 'text-warning' : 'muted' ?>"><?= $r['problem'] ? 'Left as it is: ' . h($r['problem']) : 'Will change' ?></td></tr>
+      <?php endforeach; ?></tbody>
+    </table></div>
+    <?php if (count($numberChanges) > 25): ?><p class="help">…and <?= count($numberChanges) - 25 ?> more.</p><?php endif; ?>
+  <?php else: ?><p class="muted">Every linked customer already has the same account number as in Xero (or has none set in Xero).</p><?php endif; ?>
+  <form method="post" action="<?= h(url('xero', ['action' => 'account_numbers'])) ?>" class="stack" data-confirm="Change customers' account numbers to their Xero account numbers?">
+    <?= csrf_field() ?>
+    <label class="check"><input type="checkbox" name="keep_in_step" value="1" <?= setting('xero_use_account_numbers') === '1' ? 'checked' : '' ?>> Keep them in step: after each sync, use Xero's account number when it changes</label>
+    <div class="actions"><button class="btn" name="apply" value="1">Use Xero account numbers now</button><button class="btn btn-ghost" data-skip-confirm>Save</button></div>
+  </form>
+  <p class="help">Quotes, contracts and documents already sent keep the number they were sent with. Customers with no account number in Xero keep theirs.</p>
+</section>
+
 <section class="card">
   <div class="card-head"><h2>Supplier bills</h2></div>
   <p>When a supplier invoice is approved to pay (Purchasing → Supplier invoices), send it to Xero as a <b>bill</b>, with the uploaded invoice attached. The lines come from its purchase order when the amounts agree, otherwise from the invoice.</p>

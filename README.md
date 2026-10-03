@@ -217,6 +217,8 @@ npm run watch:css    # or rebuild automatically while you edit
 - **Safety:** contacts already in the CRM are never added twice. A supplier already brought in from the same Xero contact is joined to the new customer as one company.
 - **Refreshing:** press **Refresh from Xero** to pick up contacts added in Xero since the last sync.
 
+**Customer account numbers** (Admin → Xero) gives customers that were already in the CRM their Xero account number too. It first lists what would change, and you can tick **Keep them in step** to update them after each sync. A number that's too long, or already used by another customer, is left alone and listed with the reason.
+
 ## Supplier invoices to Xero
 
 When a supplier invoice is approved to pay (with **Send approved supplier invoices to Xero as bills** on, under Admin → Xero), it goes to Xero as a bill:

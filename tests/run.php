@@ -408,6 +408,24 @@ test('customers can be added from Xero contacts, with company details, people an
     eq([[], 2], [$again['created'], count($again['skipped'])], 'never added twice');
 });
 
+test('customers already in the CRM can take their Xero account numbers', function () {
+    $linked = db_all('SELECT a.id, a.account_number, a.xero_contact_id FROM accounts a WHERE a.xero_contact_id IS NOT NULL ORDER BY a.id LIMIT 3');
+    ok(count($linked) === 3, 'three linked customers to try');
+    [$one, $two, $three] = $linked;
+    db_exec('UPDATE xero_contacts SET account_number = NULL WHERE id IN (?, ?, ?)', [$one['xero_contact_id'], $two['xero_contact_id'], $three['xero_contact_id']]);
+    db_exec("UPDATE xero_contacts SET account_number = ' HARB01 ' WHERE id = ?", [$one['xero_contact_id']]);
+    db_exec('UPDATE xero_contacts SET account_number = ? WHERE id = ?', [$three['account_number'], $two['xero_contact_id']]); // another customer's number
+    $changes = array_column(xero_account_number_changes(), null, 'id');
+    eq(['HARB01', null], [$changes[$one['id']]['to'], $changes[$one['id']]['problem']]);
+    ok(str_starts_with((string)$changes[$two['id']]['problem'], 'already used by'), 'never takes another customer\'s number');
+    eq(1, xero_adopt_account_numbers());
+    eq('HARB01', db_value('SELECT account_number FROM accounts WHERE id = ?', [$one['id']]));
+    eq($two['account_number'], db_value('SELECT account_number FROM accounts WHERE id = ?', [$two['id']]));
+    eq(0, xero_adopt_account_numbers(), 'nothing left to change');
+    db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$one['account_number'], $one['id']]);
+    db_exec('UPDATE xero_contacts SET account_number = NULL WHERE id IN (?, ?)', [$one['xero_contact_id'], $two['xero_contact_id']]);
+});
+
 test('suppliers are brought in from Xero: same name linked, others added with details, archived skipped', function () {
     eq(1, (int)db_value("SELECT COUNT(*) FROM suppliers WHERE name = 'Giacom'"), 'Giacom is the first supplier');
     eq(['created' => 1, 'linked' => 1, 'updated' => 1], xero_import_suppliers());
