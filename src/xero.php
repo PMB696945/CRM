@@ -512,17 +512,36 @@ function xero_importable_contacts(bool $customersOnly = true, string $q = ''): a
     return db_all('SELECT x.* FROM xero_contacts x WHERE ' . implode(' AND ', $where) . ' ORDER BY x.name', $params);
 }
 
+/** Re-read one contact from Xero and update its stored copy. Returns the updated row. */
+function xero_refresh_contact(array $x): array
+{
+    $c = xero_api('GET', xero_urls()['api'] . '/Contacts/' . rawurlencode($x['contact_id']))['Contacts'][0] ?? null;
+    if (!$c) {
+        return $x;
+    }
+    db_exec('UPDATE xero_contacts SET name = ?, account_number = ?, email = ?, status = ?, is_supplier = ?, is_customer = ?, details = COALESCE(?, details) WHERE id = ?', [
+        mb_substr($c['Name'] ?? $x['name'], 0, 255), $c['AccountNumber'] ?? null, $c['EmailAddress'] ?? null, $c['ContactStatus'] ?? $x['status'],
+        !empty($c['IsSupplier']) ? 1 : 0, !empty($c['IsCustomer']) ? 1 : (int)$x['is_customer'], xero_contact_details($c), $x['id']]);
+    return db_one('SELECT * FROM xero_contacts WHERE id = ?', [$x['id']]);
+}
+
 /**
  * Create CRM customers from Xero contacts, linked to them, with their company details,
  * main/accounts contact and other people. Returns ['created' => [account ids], 'skipped' => [names]].
  */
 function xero_create_customers(array $xeroIds): array
 {
-    $out = ['created' => [], 'skipped' => []];
+    $out = ['created' => [], 'skipped' => [], 'no_number' => []];
     foreach (array_unique(array_map('intval', $xeroIds)) as $xid) {
         $x = db_one('SELECT * FROM xero_contacts WHERE id = ?', [$xid]);
         if (!$x) {
             continue;
+        }
+        // Fetch the contact afresh, so details changed in Xero since the last sync (e.g. its account number) are used.
+        try {
+            $x = xero_refresh_contact($x);
+        } catch (IntegrationException) {
+            // Use what the last sync brought in.
         }
         if (db_value('SELECT 1 FROM accounts WHERE xero_contact_id = ?', [$xid])) {
             $out['skipped'][] = $x['name'] . ' (already a customer)';
@@ -533,7 +552,13 @@ function xero_create_customers(array $xeroIds): array
         $addr = $d['address'] ?? [];
         // Their Xero account number becomes the CRM one, unless it's taken.
         $number = trim((string)$x['account_number']);
-        if ($number !== '' && (mb_strlen($number) > 20 || db_value('SELECT 1 FROM accounts WHERE account_number = ?', [$number]))) {
+        if ($number === '') {
+            $out['no_number'][] = $x['name'];
+        } elseif (mb_strlen($number) > 20) {
+            $out['no_number'][] = "{$x['name']} (their Xero account number $number is longer than 20 characters)";
+            $number = '';
+        } elseif ($taken = db_value('SELECT name FROM accounts WHERE account_number = ?', [$number])) {
+            $out['no_number'][] = "{$x['name']} ($number is already used by $taken)";
             $number = '';
         }
         $data = [
@@ -596,8 +621,19 @@ function xero_account_number_changes(): array
 }
 
 /** Give linked customers their Xero account numbers (where that's possible). Returns how many changed. */
-function xero_adopt_account_numbers(): int
+function xero_adopt_account_numbers(bool $refresh = false): int
 {
+    if ($refresh) {
+        // Linked contacts with no account number stored may have had one added in Xero since the last sync.
+        foreach (db_all("SELECT x.* FROM xero_contacts x JOIN accounts a ON a.xero_contact_id = x.id
+            WHERE x.account_number IS NULL OR TRIM(x.account_number) = '' LIMIT 50") as $x) {
+            try {
+                xero_refresh_contact($x);
+            } catch (IntegrationException) {
+                break;
+            }
+        }
+    }
     $n = 0;
     foreach (xero_account_number_changes() as $r) {
         if ($r['problem'] !== null || db_value('SELECT 1 FROM accounts WHERE account_number = ? AND id <> ?', [$r['to'], $r['id']])) {

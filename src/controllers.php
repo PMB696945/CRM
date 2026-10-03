@@ -774,7 +774,8 @@ function xero_customers_controller(): void
         $n = count($r['created']);
         audit('xero_customers', "$n customer(s) created from Xero");
         flash($n ? "$n customer" . ($n === 1 ? '' : 's') . ' added from Xero and linked to it.' . ($r['skipped'] ? ' Skipped: ' . implode(', ', $r['skipped']) . '.' : '')
-            : 'Nothing was added. Tick the contacts to add first.', $n ? 'success' : 'error');
+            . ($r['no_number'] ? ' Given a CRM account number because Xero has none for them: ' . implode(', ', $r['no_number']) . '.' : '')
+            : 'Nothing was added. Tick the contacts to add first.', $n ? ($r['no_number'] ? 'warning' : 'success') : 'error');
         redirect($n === 1 ? url('accounts', ['action' => 'view', 'id' => $r['created'][0]]) : url('xero_customers'));
     }
     $all = query('show') === 'all';
@@ -842,7 +843,7 @@ function xero_controller(): void
         switch ($action) {
             case 'account_numbers':
                 set_setting('xero_use_account_numbers', !empty($_POST['keep_in_step']) ? '1' : null);
-                $n = !empty($_POST['apply']) ? xero_adopt_account_numbers() : 0;
+                $n = !empty($_POST['apply']) ? xero_adopt_account_numbers(true) : 0;
                 audit('settings', "Xero account numbers: $n customer(s) updated" . (setting('xero_use_account_numbers') ? ', kept in step on each sync' : ''));
                 flash($n ? "$n customer account number" . ($n === 1 ? '' : 's') . ' changed to match Xero.' : (!empty($_POST['apply']) ? 'No account numbers could be changed.' : 'Saved.'));
                 break;

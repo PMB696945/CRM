@@ -152,7 +152,7 @@ if ($path === '/api.xro/2.0/Items' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     json_out(200, ['Items' => $out]);
 }
 
-if ($path === '/api.xro/2.0/Contacts') {
+if ($path === '/api.xro/2.0/Contacts' || preg_match('#^/api.xro/2.0/Contacts/([0-9a-f-]{36})$#', $path, $one)) {
     $contacts = [
         ['ContactID' => 'c1000000-0000-0000-0000-000000000001', 'Name' => 'Harbour View Dental Ltd', 'EmailAddress' => 'accounts@harbour.example.co.uk', 'ContactStatus' => 'ACTIVE'],
         ['ContactID' => 'c1000000-0000-0000-0000-000000000002', 'Name' => 'Kestrel Logistics (Midlands) Limited', 'AccountNumber' => 'ACC-KESTREL', 'ContactStatus' => 'ACTIVE'],
@@ -180,6 +180,19 @@ if ($path === '/api.xro/2.0/Contacts') {
         'ContactPersons' => [['FirstName' => 'Robin', 'LastName' => 'Flour', 'EmailAddress' => 'robin@bakery.example', 'IncludeInEmails' => true]]];
     $contacts[11] = ['ContactID' => $contacts[11]['ContactID'], 'Name' => 'Jo Bloggs', 'FirstName' => 'Jo', 'LastName' => 'Bloggs', 'ContactStatus' => 'ACTIVE', 'IsCustomer' => true,
         'EmailAddress' => 'jo@home.example', 'AccountNumber' => 'JB-1'];
+    // Changes made in Xero since the last sync (set by tests).
+    foreach ($contacts as &$c) {
+        $c = ($state['contact_changes'][$c['ContactID']] ?? []) + $c;
+    }
+    unset($c);
+    if (!empty($one)) {
+        foreach ($contacts as $c) {
+            if ($c['ContactID'] === $one[1]) {
+                json_out(200, ['Contacts' => [$c]]);
+            }
+        }
+        json_out(404, ['Title' => 'Not Found']);
+    }
     json_out(200, ['Contacts' => array_slice($contacts, ($page - 1) * 100, 100)]);
 }
 

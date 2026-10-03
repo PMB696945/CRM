@@ -391,7 +391,13 @@ test('customers can be added from Xero contacts, with company details, people an
     eq(['Brand New Bakery Ltd'], array_column(xero_importable_contacts(false, 'bakery'), 'name'), 'search');
 
     $ids = array_column(array_filter(xero_importable_contacts(), fn($c) => $c['name'] !== 'Greenfield Farm Supplies'), 'id');
+    // Jo's account number is added in Xero after the last sync: adding fetches the contact afresh.
+    global $mockState;
+    $st = mock_state();
+    $st['contact_changes'][db_value("SELECT contact_id FROM xero_contacts WHERE name = 'Jo Bloggs'")] = ['AccountNumber' => 'BLOG001'];
+    file_put_contents($mockState, json_encode($st));
     $r = xero_create_customers($ids);
+    eq([], $r['no_number'], 'both have account numbers in Xero');
     eq(2, count($r['created']));
     $a = db_one('SELECT * FROM accounts WHERE id = ?', [$r['created'][0]]);
     eq(['BNB01', 'Brand New Bakery Ltd', 'business', 'active', 'accounts@bakery.example', '0113 496 0123', '01234567', '3 Oven Street', 'Leeds', 'West Yorkshire', 'LS2 2BB', (int)$ids[0]],
@@ -401,7 +407,7 @@ test('customers can be added from Xero contacts, with company details, people an
     eq(['Pat Baker', 'accounts@bakery.example', '07700 900123', 1, 1], [$main['name'], $main['email'], $main['mobile'] ?: $main['phone'], (int)$main['is_primary'], (int)$main['is_billing']]);
     eq(['Robin Flour'], array_column(db_all('SELECT name FROM contacts WHERE account_id = ? AND id <> ?', [$a['id'], $main['id']]), 'name'), 'other people added as contacts');
     $jo = db_one('SELECT * FROM accounts WHERE id = ?', [$r['created'][1]]);
-    eq(['residential', 'JB-1'], [$jo['type'], $jo['account_number']], 'a person is a residential customer');
+    eq(['residential', 'BLOG001'], [$jo['type'], $jo['account_number']], 'a person is a residential customer, with the account number now in Xero');
 
     eq(['Greenfield Farm Supplies'], array_column(xero_importable_contacts(), 'name'), 'gone from the list once added');
     $again = xero_create_customers($ids);
@@ -422,6 +428,17 @@ test('customers already in the CRM can take their Xero account numbers', functio
     eq('HARB01', db_value('SELECT account_number FROM accounts WHERE id = ?', [$one['id']]));
     eq($two['account_number'], db_value('SELECT account_number FROM accounts WHERE id = ?', [$two['id']]));
     eq(0, xero_adopt_account_numbers(), 'nothing left to change');
+    // One given a number in Xero since the last sync is found when refreshing.
+    global $mockState;
+    $st = mock_state();
+    $st['contact_changes'][db_value('SELECT contact_id FROM xero_contacts WHERE id = ?', [$three['xero_contact_id']])] = ['AccountNumber' => 'COPP001'];
+    file_put_contents($mockState, json_encode($st));
+    eq(0, xero_adopt_account_numbers(), 'not seen without refreshing');
+    eq(1, xero_adopt_account_numbers(true));
+    eq('COPP001', db_value('SELECT account_number FROM accounts WHERE id = ?', [$three['id']]));
+    db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$three['account_number'], $three['id']]);
+    unset($st['contact_changes']);
+    file_put_contents($mockState, json_encode($st));
     db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$one['account_number'], $one['id']]);
     db_exec('UPDATE xero_contacts SET account_number = NULL WHERE id IN (?, ?)', [$one['xero_contact_id'], $two['xero_contact_id']]);
 });
