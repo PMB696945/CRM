@@ -170,7 +170,7 @@ if ($path === '/api.xro/2.0/Contacts' || preg_match('#^/api.xro/2.0/Contacts/([0
                         ['AddressType' => 'STREET', 'AddressLine1' => '1 Mill Lane', 'AddressLine2' => 'Unit 4', 'City' => 'Bolton', 'Region' => 'Lancs', 'PostalCode' => 'bl1 1aa']],
         'PaymentTerms' => ['Bills' => ['Day' => 30, 'Type' => 'DAYSAFTERBILLDATE']]];
     $contacts[6] = ['ContactID' => $contacts[6]['ContactID'], 'Name' => 'Giacom Limited', 'ContactStatus' => 'ACTIVE', 'IsSupplier' => true, 'EmailAddress' => 'billing@giacom.example'];
-    $contacts[7] = ['IsSupplier' => true, 'ContactStatus' => 'ARCHIVED'] + $contacts[7];
+    $contacts[7] = ['IsSupplier' => true, 'ContactStatus' => 'ARCHIVED', 'MergedToContactID' => $contacts[8]['ContactID']] + $contacts[7];
     // Customers in Xero that aren't in the CRM yet.
     $contacts[10] = ['ContactID' => $contacts[10]['ContactID'], 'Name' => 'Brand New Bakery Ltd', 'ContactStatus' => 'ACTIVE', 'IsCustomer' => true,
         'AccountNumber' => 'BNB01', 'EmailAddress' => 'accounts@bakery.example', 'FirstName' => 'Pat', 'LastName' => 'Baker', 'CompanyNumber' => '01234567',

@@ -371,6 +371,8 @@ test('syncs balances, paging, 429 retry and auto-links customers', function () {
     $north   = $mk('Northgate Motors');                                                   // ambiguous: 2 Xero contacts
     $s = xero_sync();
     eq(150, $s['contacts'], 'both pages of contacts fetched');
+    eq(db_value("SELECT contact_id FROM xero_contacts WHERE name = 'Supplier 4'"), db_value("SELECT merged_to FROM xero_contacts WHERE name = 'Supplier 3'"), 'merged contacts remember where they went');
+    ok(str_contains(implode(' ', mock_state()['calls']), 'includeArchived=true'), 'archived contacts are fetched too');
     eq(7, $s['invoices']);
     eq(3, $s['linked']);
     $bal = fn($id) => db_one('SELECT x.* FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id WHERE a.id = ?', [$id]);
@@ -438,6 +440,16 @@ test('customers already in the CRM can take their Xero account numbers', functio
     eq('OLD002', db_value('SELECT account_number FROM accounts WHERE id = ?', [$two['id']]));
     db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$two['account_number'], $two['id']]);
     db_exec("DELETE FROM xero_contacts WHERE contact_id = 'e0000000-0000-0000-0000-000000000001'");
+    // Merged in Xero: the old contact (a different name, archived) keeps the number and points at the one kept.
+    $twoContact = db_value('SELECT contact_id FROM xero_contacts WHERE id = ?', [$two['xero_contact_id']]);
+    db_exec("INSERT INTO xero_contacts (contact_id, name, account_number, status, merged_to) VALUES ('e0000000-0000-0000-0000-000000000002', 'Old Trading Name Ltd', NULL, 'ARCHIVED', ?)", [$twoContact]);
+    db_exec("INSERT INTO xero_contacts (contact_id, name, account_number, status, merged_to) VALUES ('e0000000-0000-0000-0000-000000000003', 'Even Older Name', 'MRG003', 'ARCHIVED', 'e0000000-0000-0000-0000-000000000002')");
+    $row = array_column(xero_account_number_changes(), null, 'id')[$two['id']];
+    eq(['MRG003', true], [$row['to'], $row['source']['merged']], 'found through a chain of merges');
+    eq(1, xero_adopt_account_numbers());
+    eq('MRG003', db_value('SELECT account_number FROM accounts WHERE id = ?', [$two['id']]));
+    db_exec('UPDATE accounts SET account_number = ? WHERE id = ?', [$two['account_number'], $two['id']]);
+    db_exec("DELETE FROM xero_contacts WHERE contact_id IN ('e0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000003')");
     // One given a number in Xero since the last sync is found when refreshing.
     global $mockState;
     $st = mock_state();

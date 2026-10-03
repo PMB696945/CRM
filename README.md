@@ -219,7 +219,7 @@ npm run watch:css    # or rebuild automatically while you edit
 
 **Customer account numbers** (Admin → Xero) gives customers that were already in the CRM their Xero account number too. It first lists what would change, and you can tick **Keep them in step** to update them after each sync. A number that's too long, or already used by another customer, is left alone and listed with the reason.
 
-Xero won't let two contacts share an account number, archived ones included. If a customer's number is on another Xero contact with the same name (often an archived or duplicate one), the CRM uses it and links to that contact so you can merge the two in Xero.
+Xero won't let two contacts share an account number, archived ones included. When you merge contacts in Xero, the contact merged away is archived and keeps its account number. The CRM follows the merge to the contact that was kept, through several merges if need be, and uses that number. Failing that, it uses the number from the only other contact with the same name.
 
 ## Supplier invoices to Xero
 

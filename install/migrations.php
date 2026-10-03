@@ -829,4 +829,10 @@ return [
             }
         }
     },
+    21 => function (): void {
+        // Xero contacts merged into another: the archived one keeps details such as the account number.
+        if (!column_exists('xero_contacts', 'merged_to')) {
+            db()->exec('ALTER TABLE xero_contacts ADD COLUMN merged_to CHAR(36) NULL AFTER status, ADD KEY idx_xero_merged (merged_to)');
+        }
+    },
 ];

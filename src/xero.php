@@ -390,11 +390,11 @@ function xero_sync(): array
         $now = date('Y-m-d H:i:s');
 
         db()->beginTransaction();
-        $upsert = db()->prepare('INSERT INTO xero_contacts (contact_id, name, account_number, email, status, is_supplier, is_customer, details, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        $upsert = db()->prepare('INSERT INTO xero_contacts (contact_id, name, account_number, email, status, is_supplier, is_customer, details, synced_at, merged_to)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE name = VALUES(name), account_number = VALUES(account_number),
                 email = VALUES(email), status = VALUES(status), is_supplier = VALUES(is_supplier), is_customer = VALUES(is_customer),
-                details = COALESCE(VALUES(details), details), synced_at = VALUES(synced_at)');
+                details = COALESCE(VALUES(details), details), synced_at = VALUES(synced_at), merged_to = VALUES(merged_to)');
         $seen = [];
         foreach ($contacts as $c) {
             if (empty($c['ContactID'])) {
@@ -402,13 +402,13 @@ function xero_sync(): array
             }
             $upsert->execute([$c['ContactID'], mb_substr($c['Name'] ?? '(no name)', 0, 255), $c['AccountNumber'] ?? null,
                 $c['EmailAddress'] ?? null, $c['ContactStatus'] ?? null, !empty($c['IsSupplier']) ? 1 : 0, !empty($c['IsCustomer']) ? 1 : 0,
-                xero_contact_details($c), $now]);
+                xero_contact_details($c), $now, ($c['MergedToContactID'] ?? '') && $c['MergedToContactID'] !== '00000000-0000-0000-0000-000000000000' ? $c['MergedToContactID'] : null]);
             $seen[$c['ContactID']] = true;
         }
         // Contacts with balances that weren't in the list (e.g. archived) still need a row.
         foreach ($balances as $id => $b) {
             if (!isset($seen[$id])) {
-                $upsert->execute([$id, mb_substr($b['name'] ?? '(unknown contact)', 0, 255), null, null, null, 0, 1, null, $now]);
+                $upsert->execute([$id, mb_substr($b['name'] ?? '(unknown contact)', 0, 255), null, null, null, 0, 1, null, $now, null]);
             }
         }
         db_exec('UPDATE xero_contacts SET outstanding = 0, overdue = 0, open_invoices = 0, oldest_due_date = NULL');
@@ -554,10 +554,8 @@ function xero_create_customers(array $xeroIds): array
         // Their Xero account number becomes the CRM one, unless it's taken.
         $number = trim((string)$x['account_number']);
         if ($number === '') {
-            // Xero keeps account numbers unique, so it may be on another contact of this name (e.g. an archived one).
-            $holders = array_values(array_filter(db_all("SELECT name, TRIM(account_number) AS n FROM xero_contacts WHERE id <> ? AND account_number IS NOT NULL AND TRIM(account_number) <> ''", [$xid]),
-                fn($h) => company_match_key($h['name']) === company_match_key($x['name'])));
-            $number = count($holders) === 1 ? $holders[0]['n'] : '';
+            // Xero keeps account numbers unique, so it may be on a contact merged into this one (or a duplicate).
+            $number = xero_number_held_elsewhere($x)['number'] ?? '';
         }
         if ($number === '') {
             $out['no_number'][] = $x['name'];
@@ -607,6 +605,40 @@ function xero_create_customers(array $xeroIds): array
 }
 
 /**
+ * The account number for a Xero contact that has none of its own, held on another contact: one merged into it
+ * in Xero (followed through chains of merges), else the only other contact of the same name that has one
+ * (Xero keeps account numbers unique, so it can't be typed onto this one). Returns ['number', 'name', 'contact_id', 'archived', 'merged'] or null.
+ */
+function xero_number_held_elsewhere(array $contact): ?array
+{
+    // Contacts merged into this one, and into those, and so on.
+    $ids = [$contact['contact_id']];
+    $found = [];
+    for ($depth = 0; $depth < 5 && $ids; $depth++) {
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $merged = db_all("SELECT contact_id, name, status, TRIM(account_number) AS n FROM xero_contacts WHERE merged_to IN ($marks)", $ids);
+        foreach ($merged as $m) {
+            if ($m['n'] !== '' && $m['n'] !== null) {
+                $found[$m['n']] = ['number' => $m['n'], 'name' => $m['name'], 'contact_id' => $m['contact_id'], 'archived' => $m['status'] === 'ARCHIVED', 'merged' => true];
+            }
+        }
+        $ids = array_column($merged, 'contact_id');
+    }
+    if (count($found) === 1) {
+        return reset($found);
+    }
+    if ($found) {
+        return null; // several merged contacts with different numbers: can't tell which
+    }
+    $key = company_match_key($contact['name']);
+    $holders = array_values(array_filter(db_all("SELECT contact_id, name, status, TRIM(account_number) AS n FROM xero_contacts
+        WHERE contact_id <> ? AND account_number IS NOT NULL AND TRIM(account_number) <> ''", [$contact['contact_id']]), fn($h) => company_match_key($h['name']) === $key));
+    return count($holders) === 1
+        ? ['number' => $holders[0]['n'], 'name' => $holders[0]['name'], 'contact_id' => $holders[0]['contact_id'], 'archived' => $holders[0]['status'] === 'ARCHIVED', 'merged' => false]
+        : null;
+}
+
+/**
  * Linked customers whose CRM account number differs from their Xero contact's account number:
  * [['id', 'name', 'from', 'to', 'problem']]. A problem (too long, or used by another customer) means it's left alone.
  */
@@ -614,18 +646,13 @@ function xero_account_number_changes(): array
 {
     $rows = db_all("SELECT a.id, a.name, a.account_number AS `from`, TRIM(x.account_number) AS `to`, NULL AS source FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
         WHERE x.account_number IS NOT NULL AND TRIM(x.account_number) <> '' AND TRIM(x.account_number) <> a.account_number ORDER BY a.name");
-    // Linked to a Xero contact with no account number, while another contact of the same name (often an
-    // archived or duplicate one) holds it: Xero won't let the number be used twice, so that's theirs.
-    $holders = [];
-    foreach (db_all("SELECT id, contact_id, name, status, TRIM(account_number) AS account_number FROM xero_contacts WHERE account_number IS NOT NULL AND TRIM(account_number) <> ''") as $h) {
-        $holders[company_match_key($h['name'])][] = $h;
-    }
-    foreach (db_all("SELECT a.id, a.name, a.account_number, x.id AS xid, x.name AS xname FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
+    // Linked to a Xero contact with no account number, while a contact merged into it (or a duplicate of
+    // the same name) holds it: Xero won't let the number be used twice, so that's theirs.
+    foreach (db_all("SELECT a.id, a.name, a.account_number, x.contact_id, x.name AS xname FROM accounts a JOIN xero_contacts x ON x.id = a.xero_contact_id
         WHERE x.account_number IS NULL OR TRIM(x.account_number) = ''") as $a) {
-        $found = array_values(array_filter($holders[company_match_key($a['xname'])] ?? [], fn($h) => (int)$h['id'] !== (int)$a['xid']));
-        if (count($found) === 1 && $found[0]['account_number'] !== $a['account_number']) {
-            $rows[] = ['id' => $a['id'], 'name' => $a['name'], 'from' => $a['account_number'], 'to' => $found[0]['account_number'],
-                'source' => ['name' => $found[0]['name'], 'contact_id' => $found[0]['contact_id'], 'archived' => $found[0]['status'] === 'ARCHIVED']];
+        $held = xero_number_held_elsewhere(['contact_id' => $a['contact_id'], 'name' => $a['xname']]);
+        if ($held && $held['number'] !== $a['account_number']) {
+            $rows[] = ['id' => $a['id'], 'name' => $a['name'], 'from' => $a['account_number'], 'to' => $held['number'], 'source' => $held];
         }
     }
     usort($rows, fn($x, $y) => strcasecmp($x['name'], $y['name']));
