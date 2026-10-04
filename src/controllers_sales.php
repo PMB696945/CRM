@@ -436,6 +436,10 @@ function settings_controller(): void
         }
         foreach ($keys as $key) {
             $value = trim((string)($_POST[$key] ?? ''));
+            if ($key === 'company_address') {
+                // One tidy line per line typed: no carriage returns, stray spaces or blank lines.
+                $value = implode("\n", array_filter(array_map('trim', preg_split('/\R/u', $value)), fn($l) => $l !== ''));
+            }
             if (in_array($key, ['contracts_auto_on_accept', 'require_2fa', 'force_https'], true)) {
                 $value = empty($_POST[$key]) ? '0' : '1';
             }

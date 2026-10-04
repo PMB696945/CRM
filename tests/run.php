@@ -1112,6 +1112,18 @@ test('signing is picked up, signed PDF saved, pending services created', functio
     eq(3, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status = 'pending'", [$flow['account']]));
 });
 
+test('our address prints tidily however it was typed in Settings', function () {
+    $saved = [setting('company_address'), setting('company_name')];
+    set_setting('company_address', "Hadley House \r\n9 & 10 Croft Street\r\n \r\nCheltenham\r\nGloucestershire \r\nGL53 0ED");
+    eq('Hadley House, 9 & 10 Croft Street, Cheltenham, Gloucestershire, GL53 0ED', company_address_line());
+    eq(['Netcomm', 'Hadley House', '9 & 10 Croft Street', 'Cheltenham', 'Gloucestershire', 'GL53 0ED'], explode("\n", (function () {
+        set_setting('company_name', 'Netcomm');
+        return po_default_delivery(null);
+    })()));
+    set_setting('company_address', $saved[0]);
+    set_setting('company_name', $saved[1]);
+});
+
 test('one-off quote lines (e.g. installation) have no term and don\'t become services', function () use (&$flow) {
     eq('One-off (no term)', term_label(0));
     ok(array_key_first(term_options()) === 0, 'offered first in term lists');

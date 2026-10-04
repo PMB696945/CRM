@@ -254,7 +254,7 @@ function po_default_delivery(?array $account): string
 {
     $parts = $account
         ? [$account['name'], $account['address'], $account['address2'], $account['city'], $account['county'], $account['postcode']]
-        : [company('name', config('app_name')), company('address')];
+        : [company('name', config('app_name')), ...company_address_lines()];
     return implode("\n", array_filter(array_map(fn($v) => trim((string)$v), $parts)));
 }
 

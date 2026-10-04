@@ -79,7 +79,7 @@ function contract_fields(array $account, ?array $quote, array $contract, array $
     $address = implode("\n", array_filter([$account['address'], $account['city'], $account['postcode']]));
     return [
         'our_company_name'    => company('name', config('app_name')),
-        'our_company_address' => company('address'),
+        'our_company_address' => company_address_line(),
         'our_company_number'  => company('number'),
         'customer_name'       => $account['name'],
         'account_number'      => $account['account_number'],

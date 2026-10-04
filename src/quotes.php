@@ -236,10 +236,10 @@ function quote_pdf(array $quote): string
     $pdf->text($right, $pdf->y + 2, 'QUOTE', 10, true, $brand, 'right');
     $pdf->text($right, $pdf->y + 16, (string)$quote['reference'], 14, true, $ink, 'right');
     $pdf->y += 26;
-    $contact = array_filter([company('address'), implode(' · ', array_filter([company('phone'), company('email')])),
+    $contact = array_filter([company_address_line(), implode(' · ', array_filter([company('phone'), company('email')])),
         company('number') ? 'Company no. ' . company('number') : '']);
     foreach ($contact as $c) {
-        foreach ($pdf->wrap(str_replace("\n", ', ', $c), $width * 0.6, 9) as $l) {
+        foreach ($pdf->wrap($c, $width * 0.6, 9) as $l) {
             $pdf->text($m, $pdf->y, $l, 9, false, $muted);
             $pdf->y += 12;
         }
@@ -252,7 +252,7 @@ function quote_pdf(array $quote): string
     $pdf->y += 13;
     $pdf->text($m, $pdf->y, $account['name'], 11, true, $ink);
     $pdf->y += 15;
-    $addr = implode(', ', array_filter([$account['address'] ?? '', $account['address2'] ?? '', $account['city'] ?? '', $account['postcode'] ?? '']));
+    $addr = implode(', ', array_filter(array_map(fn($v) => trim((string)$v), [$account['address'] ?? '', $account['address2'] ?? '', $account['city'] ?? '', $account['postcode'] ?? ''])));
     foreach (array_filter([$addr, $quote['recipient_name'] ? 'FAO ' . $quote['recipient_name'] : '']) as $l) {
         foreach ($pdf->wrap($l, $width * 0.55, 9.5) as $w) {
             $pdf->text($m, $pdf->y, $w, 9.5, false, $ink);

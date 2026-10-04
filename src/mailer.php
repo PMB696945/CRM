@@ -11,6 +11,18 @@ function company(string $key, string $default = ''): string
     return (string)(setting('company_' . $key) ?: $default);
 }
 
+/** Our address as tidy lines (no stray spaces, carriage returns or blank lines), as typed in Settings. */
+function company_address_lines(): array
+{
+    return array_values(array_filter(array_map('trim', preg_split('/\R/u', company('address'))), fn($l) => $l !== ''));
+}
+
+/** Our address on one line: "Hadley House, 9 & 10 Croft Street, Cheltenham". */
+function company_address_line(): string
+{
+    return implode(', ', array_map(fn($l) => rtrim($l, ', '), company_address_lines()));
+}
+
 function mail_configured(): bool
 {
     return (bool)setting('mail_from_email');
