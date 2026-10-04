@@ -424,6 +424,10 @@
   .step-done { @apply bg-success-500 border-success-500 text-white dark:border-success-500 dark:bg-success-500; }
   .copy-row { @apply mt-1.5 flex gap-2; }
   .copy-row input { @apply flex-1 font-mono text-theme-xs; }
+  .address-lookup { @apply rounded-lg border border-dashed border-gray-200 p-3 dark:border-gray-800; }
+  .address-lookup .lookup-row { @apply flex gap-2; }
+  .address-lookup .lookup-row input { @apply max-w-xs flex-1 uppercase; }
+  .address-lookup select { @apply mt-2; }
   .link-list { @apply m-0 columns-1 pl-5 text-theme-sm sm:columns-2 lg:columns-3; }
   .link-list li { @apply mb-1.5 break-inside-avoid; }
   .card-head .muted form { @apply mx-2; }

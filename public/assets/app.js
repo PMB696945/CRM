@@ -27,6 +27,61 @@ document.querySelectorAll('form[data-entity]').forEach((form) => {
   });
 });
 
+// Find an address by postcode (Giacom) on customer and site forms, and fill in the address fields.
+document.querySelectorAll('form[data-address-lookup]').forEach((form) => {
+  const line1 = form.querySelector('[name="address"]');
+  if (!line1) return;
+  const field = line1.closest('.field') || line1.parentElement;
+  const box = document.createElement('div');
+  box.className = 'field wide address-lookup';
+  box.innerHTML = '<label for="lookup-postcode">Find address</label>'
+    + '<div class="lookup-row"><input id="lookup-postcode" type="text" placeholder="Postcode, e.g. GL53 0ED" autocomplete="off" aria-describedby="lookup-help">'
+    + '<button type="button" class="btn btn-sm">Find</button></div>'
+    + '<select hidden aria-label="Choose the address"></select>'
+    + '<div class="help" id="lookup-help">Pick an address to fill in the fields below, or type it in yourself.</div>';
+  field.before(box);
+  const input = box.querySelector('input');
+  const button = box.querySelector('button');
+  const list = box.querySelector('select');
+  const help = box.querySelector('.help');
+  let found = [];
+  const set = (name, value) => {
+    const el = form.querySelector(`[name="${name}"]`);
+    if (el && value !== undefined) { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); }
+  };
+  const find = async () => {
+    const postcode = input.value.trim();
+    if (!postcode) { input.focus(); return; }
+    button.disabled = true;
+    help.textContent = 'Looking up addresses…';
+    try {
+      const res = await fetch(form.dataset.addressLookup + '&' + new URLSearchParams({ postcode }), { credentials: 'same-origin' });
+      const data = await res.json();
+      found = data.addresses || [];
+      if (!found.length) { list.hidden = true; help.textContent = data.error || 'No addresses found.'; return; }
+      list.replaceChildren(new Option(`${found.length} address${found.length === 1 ? '' : 'es'} found: choose one`, ''));
+      found.forEach((a, i) => list.add(new Option(a.label, String(i))));
+      list.hidden = false;
+      list.focus();
+      help.textContent = 'Pick an address to fill in the fields below.';
+    } catch (err) {
+      help.textContent = 'The address lookup isn\'t available just now. Type the address in yourself.';
+    } finally {
+      button.disabled = false;
+    }
+  };
+  button.addEventListener('click', find);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); find(); } });
+  list.addEventListener('change', () => {
+    const a = found[Number(list.value)];
+    if (!a || list.value === '') return;
+    ['address', 'address2', 'city', 'county', 'postcode'].forEach((k) => set(k, a.fields[k]));
+    const name = form.querySelector('[name="name"]');
+    if (form.dataset.entity === 'accounts' && name && !name.value.trim() && a.fields.organisation) set('name', a.fields.organisation);
+    help.textContent = 'Filled in. Check the details below.';
+  });
+});
+
 // Copy buttons: <button data-copy="#input-id">
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-copy]');

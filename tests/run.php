@@ -1542,6 +1542,18 @@ test('Giacom: address search and availability check are saved and summarised', f
     eq('M13HE', g_state()['last']['address_search']['postcode']);
     eq('12 Canal Street, Manchester, M1 3HE', $addresses[0]['label']);
     eq('Unit 2 Bramble <Dental> & Co, 10 Canal Street, Manchester, M1 3HE', $addresses[1]['label']);
+    // The same addresses fill in customer and site forms.
+    eq(['address' => 'Unit 2, 10 Canal Street', 'address2' => '', 'city' => 'Manchester', 'county' => '', 'postcode' => 'M1 3HE', 'organisation' => 'Bramble <Dental> & Co'],
+        giacom_address_fields($addresses[1]));
+    eq(['address' => 'Hadley House', 'address2' => 'Croft Street, Charlton Kings', 'city' => 'Cheltenham', 'county' => 'Gloucestershire', 'postcode' => 'GL53 0ED', 'organisation' => ''],
+        giacom_address_fields(['building' => 'Hadley House', 'street' => 'Croft Street', 'locality' => 'Charlton Kings', 'city' => 'CHELTENHAM', 'county' => 'Gloucestershire', 'postcode' => 'GL530ED']));
+    eq('Flat 3, 22A High Street', giacom_address_fields(['sub-premise' => 'Flat 3', 'building' => '22A', 'street' => 'High Street', 'postcode' => 'GL530ED'])['address']);
+    $_GET = ['postcode' => 'M1 3HE'];
+    ob_start();
+    address_lookup_controller();
+    $json = json_decode(ob_get_clean(), true);
+    $_GET = [];
+    eq(['12 Canal Street, Manchester, M1 3HE', '12 Canal Street'], [$json['addresses'][0]['label'], $json['addresses'][0]['fields']['address']]);
     $g['check'] = giacom_check($addresses[1], null, $g['acc'], null);
     $c = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
     $r = json_decode($c['result'], true);

@@ -154,6 +154,32 @@ function refs_controller(): void
     echo json_encode($out);
 }
 
+/** Address lookup for customer and site forms: the addresses Giacom knows at a postcode, as JSON. */
+function address_lookup_controller(): void
+{
+    if (!headers_sent()) {
+        header('Content-Type: application/json');
+    }
+    if (!can('customers.edit')) {
+        http_response_code(403);
+        echo json_encode(['error' => 'You can\'t add or edit customers.']);
+        return;
+    }
+    if (!giacom_configured()) {
+        echo json_encode(['error' => 'Address lookup uses Giacom: add your Giacom details under Admin → Giacom.']);
+        return;
+    }
+    try {
+        $out = [];
+        foreach (giacom_address_search((string)query('postcode'), trim((string)query('building'))) as $a) {
+            $out[] = ['label' => $a['label'], 'fields' => giacom_address_fields($a)];
+        }
+        echo json_encode($out ? ['addresses' => $out] : ['error' => 'No addresses found at that postcode.']);
+    } catch (IntegrationException $e) {
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+}
+
 function users_controller(): void
 {
     require_permission('users.manage');

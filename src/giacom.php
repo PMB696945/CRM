@@ -173,6 +173,31 @@ function giacom_address_search(string $postcode, string $building = '', string $
     return $out;
 }
 
+/**
+ * A Giacom address as the CRM's address fields: line 1 (unit, building name, number and street),
+ * line 2, town, county and postcode, plus the organisation at the address.
+ */
+function giacom_address_fields(array $a): array
+{
+    $t = fn($k) => trim((string)($a[$k] ?? ''));
+    $building = $t('building');
+    $premise = $t('premise');
+    $street = $t('street');
+    $numbered = $building !== '' && preg_match('/^\d+[A-Za-z]?(?:\s*-\s*\d+[A-Za-z]?)?$/', $building);
+    $names = array_values(array_unique(array_filter([$t('sub-premise'), $premise !== $building ? $premise : '', $numbered ? '' : $building])));
+    $road = trim(($numbered ? $building . ' ' : '') . $street);
+    // A named building goes on line 1 with the road on line 2; a numbered one shares line 1 with the road.
+    if ($names && !$numbered && $road !== '') {
+        [$line1, $line2] = [implode(', ', $names), implode(', ', array_filter([$road, $t('locality')]))];
+    } else {
+        [$line1, $line2] = [implode(', ', array_filter([...$names, $road])), $t('locality')];
+    }
+    return [
+        'address' => $line1, 'address2' => $line2, 'city' => ucwords(strtolower($t('city'))) ?: $t('city'),
+        'county' => $t('county'), 'postcode' => giacom_postcode($t('postcode')), 'organisation' => $t('organisation'),
+    ];
+}
+
 function giacom_address_label(array $a): string
 {
     $first = trim(implode(' ', array_filter([$a['sub-premise'] ?? '', $a['organisation'] ?? ''])));

@@ -8,7 +8,7 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
 <?php if (!empty($errors['_'])): ?><div class="flash flash-error"><?= h($errors['_']) ?></div><?php endif; ?>
 <?php if ($errors && empty($errors['_'])): ?><div class="flash flash-error">Please fix the highlighted fields.</div><?php endif; ?>
 
-<form method="post" class="card form-grid" data-entity="<?= h($name) ?>">
+<form method="post" class="card form-grid" data-entity="<?= h($name) ?>"<?= in_array($name, ['accounts', 'sites'], true) && giacom_configured() && can('customers.edit') ? ' data-address-lookup="' . h(url('address_lookup')) . '"' : '' ?>>
   <?= csrf_field() ?>
   <?php if ($return): ?><input type="hidden" name="_return" value="<?= h($return) ?>"><?php endif; ?>
   <?php foreach ($entity['fields'] as $field => $def):

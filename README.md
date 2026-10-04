@@ -202,6 +202,15 @@ npm run watch:css    # or rebuild automatically while you edit
 - `resources/css/app.css` holds TailAdmin's design tokens (colours, font, shadows) and the CRM's components (cards, tables, badges, forms and so on), written with Tailwind's `@apply`.
 - Tailwind also scans `templates/` and `src/`, so you can use utility classes directly in templates too.
 
+## Finding an address
+
+When Giacom is connected, the customer and site forms have a **Find address** box above the address fields. It works like this:
+1. Type a postcode and press **Find** (or Enter).
+2. Choose the address from Giacom's list.
+3. The address lines, town, county and postcode fill in.
+
+On a new customer with no name yet, the company name at that address fills in too. You can still type an address in yourself.
+
 ## Customer details from Xero
 
 The sync brings in each Xero contact, but it doesn't change customers unless you ask. **Admin → Xero → Customer details from Xero** covers this:
