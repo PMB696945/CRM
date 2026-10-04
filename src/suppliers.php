@@ -24,6 +24,10 @@ function supplier_product_saved(int $id): void
 /** A supplier's cost expressed per the product's own billing cycle. */
 function supplier_cost_for_product(array $sp, array $product): float
 {
+    // One-off costs aren't spread over time: a one-off cost is the one-off product's cost as it is.
+    if (($sp['billing_frequency'] ?? '') === 'one_off' || ($product['billing_frequency'] ?? '') === 'one_off') {
+        return round((float)$sp['cost_price'], 2);
+    }
     $monthly = (float)$sp['cost_price'] * (BILLING_PER_MONTH[$sp['billing_frequency']] ?? 1);
     return round($monthly / (BILLING_PER_MONTH[$product['billing_frequency'] ?? 'monthly'] ?? 1), 2);
 }

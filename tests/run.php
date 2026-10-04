@@ -1112,6 +1112,33 @@ test('signing is picked up, signed PDF saved, pending services created', functio
     eq(3, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status = 'pending'", [$flow['account']]));
 });
 
+test('one-off quote lines (e.g. installation) have no term and don\'t become services', function () use (&$flow) {
+    eq('One-off (no term)', term_label(0));
+    ok(array_key_first(term_options()) === 0, 'offered first in term lists');
+    [$lines, $errors] = quote_parse_lines(['line_description' => ['Hosted seat', 'Installation'], 'line_product_id' => ['', ''], 'line_service_type' => ['voip', 'other'],
+        'line_quantity' => ['2', '1'], 'line_monthly_price' => ['10', '0'], 'line_setup_fee' => ['0', '150'], 'line_term_months' => ['36', '0']]);
+    eq([], $errors);
+    $t = quote_totals($lines);
+    eq([20.0, 150.0, 870.0, 36], [$t['monthly'], $t['setup'], $t['tcv'], $t['term']], 'installation counted once; term from the ongoing line');
+    $qid = (int)db_value('SELECT quote_id FROM contracts WHERE id = ?', [$flow['contract']]);
+    $before = (int)db_value('SELECT COUNT(*) FROM quote_lines WHERE quote_id = ?', [$qid]);
+    db_exec("INSERT INTO quote_lines (quote_id, service_type, description, quantity, monthly_price, setup_fee, term_months, sort) VALUES (?, 'other', 'Installation', 1, 0, 150, 0, 99)", [$qid]);
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$flow['contract']]);
+    eq(3, contract_create_services($c), 'still just the 3 ongoing services');
+    db_exec('DELETE FROM quote_lines WHERE quote_id = ? AND sort = 99', [$qid]);
+    db_exec("DELETE FROM services WHERE account_id = ? AND status = 'pending' AND id > (SELECT m FROM (SELECT MAX(id) - 3 AS m FROM services) x)", [$flow['account']]);
+    ok($before > 0);
+
+    // A one-off product: no term, nothing per month, its cost isn't spread over time.
+    $pid = create('products', ['sku' => 'INSTALL-1', 'name' => 'On-site installation', 'category' => 'other', 'billing_frequency' => 'one_off',
+        'monthly_price' => '150', 'cost_price' => '60', 'term_months' => '24']);
+    $p = db_one('SELECT * FROM products WHERE id = ?', [$pid]);
+    eq([0, 'One-off'], [(int)$p['term_months'], BILLING_FREQUENCIES[$p['billing_frequency']]]);
+    eq(0.0, (float)list_rows('products', ['filters' => [], 'q' => 'INSTALL-1'])['rows'][0]['_monthly']);
+    eq(0.0, monthly_equivalent(150, 'one_off'));
+    eq(60.0, supplier_cost_for_product(['cost_price' => 60, 'billing_frequency' => 'one_off'], $p));
+});
+
 test('MSA-covered customer gets one service schedule; missing templates are explained', function () use (&$dealerIds) {
     $b = db_one('SELECT * FROM accounts WHERE id = ?', [$dealerIds['b']]);
     $lines = [['service_type' => 'leased_line', 'description' => 'LL', 'quantity' => 1, 'monthly_price' => 300, 'setup_fee' => 0, 'term_months' => 36]];
@@ -1814,9 +1841,9 @@ test('password rules', function () {
 });
 
 echo "Terms, documents and suppliers\n";
-test('terms are set values: 30 days, 12, 24, 36, 60 months', function () {
-    eq(['30 days', '36 months', 'No minimum term', '18 months'], [term_label(1), term_label(36), term_label(0), term_label(18)]);
-    eq([1, 12, 24, 36, 60], array_keys(TERM_OPTIONS));
+test('terms are set values: one-off, 30 days, 12, 24, 36, 60 months', function () {
+    eq(['30 days', '36 months', 'One-off (no term)', '18 months'], [term_label(1), term_label(36), term_label(0), term_label(18)]);
+    eq([0, 1, 12, 24, 36, 60], array_keys(TERM_OPTIONS));
     ok(isset(term_options(18)[18]) && !isset(term_options(36)[18]), 'an older value is kept as a choice');
     eq('term', entity('products')['fields']['term_months']['type']);
     [$data, $errors] = validate(entity('opportunities'), ['account_id' => '', 'title' => 'x', 'opp_type' => 'upsell', 'stage' => 'lead', 'term_months' => '1']);

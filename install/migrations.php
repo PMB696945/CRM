@@ -835,4 +835,8 @@ return [
             db()->exec('ALTER TABLE xero_contacts ADD COLUMN merged_to CHAR(36) NULL AFTER status, ADD KEY idx_xero_merged (merged_to)');
         }
     },
+    22 => function (): void {
+        // Products can be one-off (installation, hardware bought outright) as well as recurring.
+        db()->exec("ALTER TABLE products MODIFY billing_frequency VARCHAR(20) NOT NULL DEFAULT 'monthly'");
+    },
 ];

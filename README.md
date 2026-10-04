@@ -263,6 +263,13 @@ When a supplier invoice is approved to pay (with **Send approved supplier invoic
 
 If you switch on something that needs a new Xero permission, Admin → Xero shows **Press Reconnect to finish** until you've reconnected and approved it.
 
+## One-off charges
+
+Use **One-off** for charges like installation, or hardware bought outright.
+- **Products:** a product's billing cycle can be **One-off**. Its term is set to **One-off (no term)** and it counts as £0 a month. On a quote it goes in as a one-off charge.
+- **Quote lines:** any quote line can have the term **One-off (no term)**. It's set automatically when a line has a one-off cost but no monthly price. The one-off cost is counted once in the contract value.
+- **Signed contracts:** a one-off line doesn't become a pending service.
+
 ## Products and purchase orders
 
 **Products** has its own menu section: **Products & tariffs** (what you sell) and **Supplier prices** (what each supplier charges you).

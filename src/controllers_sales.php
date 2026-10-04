@@ -68,7 +68,10 @@ function quotes_controller(): void
                     redirect(url('quotes', ['action' => 'view', 'id' => $qid]));
                 }
             }
-            $products = array_map(fn($p) => ['monthly_price' => monthly_equivalent($p['monthly_price'], $p['billing_frequency'])] + $p,
+            // Quotes work in monthly amounts; a one-off product is a one-off charge with no term.
+            $products = array_map(fn($p) => $p['billing_frequency'] === 'one_off'
+                ? ['monthly_price' => 0, 'setup_fee' => round((float)$p['monthly_price'] + (float)$p['setup_fee'], 2), 'term_months' => 0] + $p
+                : ['monthly_price' => monthly_equivalent($p['monthly_price'], $p['billing_frequency'])] + $p,
                 db_all('SELECT id, name, category, monthly_price, billing_frequency, setup_fee, term_months FROM products WHERE active = 1 ORDER BY name'));
             page('quote_form', compact('quote', 'values', 'lines', 'errors', 'products'), $quote ? 'Edit quote' : 'New quote');
             return;

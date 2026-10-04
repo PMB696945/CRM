@@ -22,7 +22,7 @@ const CARRIERS = [
 ];
 
 /** Contract terms offered, in months (1 = 30 days, rolling). */
-const TERM_OPTIONS = [1 => '30 days', 12 => '12 months', 24 => '24 months', 36 => '36 months', 60 => '60 months'];
+const TERM_OPTIONS = [0 => 'One-off (no term)', 1 => '30 days', 12 => '12 months', 24 => '24 months', 36 => '36 months', 60 => '60 months'];
 
 function term_label(mixed $months): string
 {
@@ -50,8 +50,10 @@ const STAGE_PROBABILITY = ['lead' => 10, 'qualified' => 25, 'proposal' => 50, 'n
 /** Billing cycles, and how many of each make a month (for MRR). */
 const BILLING_FREQUENCIES = [
     'weekly' => 'Weekly', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'biannually' => 'Bi-annually', 'yearly' => 'Yearly',
+    'one_off' => 'One-off',
 ];
-const BILLING_PER_MONTH = ['weekly' => 52 / 12, 'monthly' => 1, 'quarterly' => 1 / 3, 'biannually' => 1 / 6, 'yearly' => 1 / 12];
+// A one-off charge (e.g. installation, hardware bought outright) adds nothing per month.
+const BILLING_PER_MONTH = ['weekly' => 52 / 12, 'monthly' => 1, 'quarterly' => 1 / 3, 'biannually' => 1 / 6, 'yearly' => 1 / 12, 'one_off' => 0];
 
 /** A price per billing cycle as a monthly amount (services and quotes work in monthly amounts). */
 function monthly_equivalent(mixed $price, ?string $frequency): float
@@ -61,7 +63,7 @@ function monthly_equivalent(mixed $price, ?string $frequency): float
 
 function billing_monthly_sql(string $price, string $frequency): string
 {
-    return "ROUND($price * CASE $frequency WHEN 'weekly' THEN 52/12 WHEN 'quarterly' THEN 1/3 WHEN 'biannually' THEN 1/6 WHEN 'yearly' THEN 1/12 ELSE 1 END, 2)";
+    return "ROUND($price * CASE $frequency WHEN 'weekly' THEN 52/12 WHEN 'quarterly' THEN 1/3 WHEN 'biannually' THEN 1/6 WHEN 'yearly' THEN 1/12 WHEN 'one_off' THEN 0 ELSE 1 END, 2)";
 }
 
 const MARKETING_SOURCES = [
@@ -809,6 +811,10 @@ function before_save(string $name, array $data, ?array $existing): array
             }
             if (array_key_exists('billing_frequency', $data) || $existing === null) {
                 $data['billing_frequency'] = $data['billing_frequency'] ?? null ?: 'monthly';
+            }
+            // Bought once, so there's no minimum term.
+            if (($data['billing_frequency'] ?? $existing['billing_frequency'] ?? null) === 'one_off') {
+                $data['term_months'] = 0;
             }
             break;
     }

@@ -349,6 +349,10 @@ function contract_create_services(array $contract): int
     $lines = $contract['quote_id'] ? quote_lines((int)$contract['quote_id']) : [];
     $created = 0;
     foreach ($lines as $l) {
+        // One-off charges (installation, hardware bought outright) aren't ongoing services.
+        if ((int)$l['term_months'] === 0 && (float)$l['monthly_price'] == 0.0) {
+            continue;
+        }
         for ($n = 1; $n <= min((int)$l['quantity'], 100); $n++) {
             insert_row('services', [
                 'account_id' => $contract['account_id'], 'product_id' => $l['product_id'], 'service_type' => $l['service_type'],

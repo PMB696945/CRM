@@ -27,6 +27,17 @@ document.querySelectorAll('form[data-entity]').forEach((form) => {
   });
 });
 
+// Products: a one-off billing cycle means no minimum term.
+document.querySelectorAll('form[data-entity="products"], form[data-entity="supplier_products"]').forEach((form) => {
+  const cycle = form.querySelector('[name="billing_frequency"]');
+  const term = form.querySelector('[name="term_months"]');
+  if (!cycle || !term) return;
+  cycle.addEventListener('change', () => {
+    if (cycle.value === 'one_off') term.value = '0';
+    else if (term.value === '0') term.value = '24';
+  });
+});
+
 // Find an address by postcode (Giacom) on customer and site forms, and fill in the address fields.
 document.querySelectorAll('form[data-address-lookup]').forEach((form) => {
   const line1 = form.querySelector('[name="address"]');
@@ -130,6 +141,17 @@ document.querySelectorAll('.quote-form').forEach((form) => {
     form.querySelector('[data-total-tcv]').textContent = money(tcv);
   };
   form.addEventListener('input', totals);
+  // A line with only a one-off cost (e.g. installation) has no term; give it one again if a monthly price is added.
+  form.addEventListener('change', (e) => {
+    if (!e.target.matches('[name="line_monthly_price[]"], [name="line_setup_fee[]"]')) return;
+    const tr = e.target.closest('tr');
+    const monthly = parseFloat(tr.querySelector('[name="line_monthly_price[]"]').value) || 0;
+    const setup = parseFloat(tr.querySelector('[name="line_setup_fee[]"]').value) || 0;
+    const term = tr.querySelector('[name="line_term_months[]"]');
+    if (monthly === 0 && setup > 0) term.value = '0';
+    else if (monthly > 0 && term.value === '0') term.value = '24';
+    totals();
+  });
   form.addEventListener('change', (e) => {
     const sel = e.target.closest('[data-product]');
     if (sel && sel.value) {
@@ -139,7 +161,7 @@ document.querySelectorAll('.quote-form').forEach((form) => {
       tr.querySelector('[name="line_monthly_price[]"]').value = o.dataset.monthly;
       tr.querySelector('[name="line_setup_fee[]"]').value = o.dataset.setup;
       const term = tr.querySelector('[name="line_term_months[]"]');
-      if (![...term.options].some((x) => x.value === o.dataset.term)) term.add(new Option(`${o.dataset.term} months`, o.dataset.term));
+      if (![...term.options].some((x) => x.value === o.dataset.term)) term.add(new Option(o.dataset.term === '0' ? 'One-off (no term)' : `${o.dataset.term} months`, o.dataset.term));
       term.value = o.dataset.term;
     }
     totals();
