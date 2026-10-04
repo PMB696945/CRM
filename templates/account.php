@@ -25,6 +25,28 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
   </div>
   <div class="actions">
     <?php if (can('marketing.send') && $activeCount): ?><a class="btn" href="<?= h(url('campaigns', ['action' => 'new', 'kind' => 'service_alert', 'account_id' => $id])) ?>">Send service alert</a><?php endif; ?>
+    <?php
+    // Things to create for this customer, whichever tab is open.
+    $newItems = array_filter([
+        'New contract' . ($account['is_dealer'] ? ' / MSA' : '') => can('sales.edit') ? url('contracts', ['action' => 'new', 'account_id' => $id]) : null,
+        'Opportunity' => can('sales.edit') ? $new('opportunities') : null,
+        'Support ticket' => can('tickets.edit') ? $new('tickets') : null,
+        'Service or line' => can('services.edit') ? $new('services', ['status' => 'active']) : null,
+        'Check broadband' => can('orders.check') && giacom_configured() ? url('giacom', ['action' => 'check', 'account_id' => $id]) : null,
+        'Contact' => $canEdit ? $new('contacts') : null,
+        'Site' => $canEdit ? $new('sites') : null,
+        'Customer under this dealer' => $canEdit && $account['is_dealer'] ? url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here]) : null,
+    ]);
+    ?>
+    <?php if (can('sales.edit')): ?><a class="btn btn-primary" href="<?= h(url('quotes', ['action' => 'new', 'account_id' => $id])) ?>">+ New quote</a><?php endif; ?>
+    <?php if ($newItems): ?>
+      <details class="dropdown">
+        <summary class="btn">New…</summary>
+        <div class="dropdown-panel card new-menu">
+          <?php foreach ($newItems as $label => $href): ?><a href="<?= h($href) ?>"><?= h($label) ?></a><?php endforeach; ?>
+        </div>
+      </details>
+    <?php endif; ?>
     <?php if ($canEdit): ?><a class="btn" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">Edit</a><?php endif; ?>
     <?php if ($canEdit && !$pendingRequest): ?>
       <details class="dropdown">

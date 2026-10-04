@@ -504,6 +504,8 @@
   .dropdown > summary { @apply list-none cursor-pointer; }
   .dropdown > summary::-webkit-details-marker { display: none; }
   .dropdown-panel { @apply absolute right-0 z-40 mt-2 mb-0 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-6 shadow-theme-lg; }
+  .dropdown-panel.new-menu { @apply w-56 gap-0 p-2; }
+  .new-menu a { @apply rounded-md px-3 py-2 text-theme-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5; }
   .dropdown-panel h3 { @apply text-base font-semibold text-gray-800 dark:text-white/90; }
   .btn-danger-ghost { @apply text-error-600 dark:text-error-500; }
   .table-compact td, .table-compact th { @apply px-3! py-1.5! text-theme-xs; }
