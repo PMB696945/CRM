@@ -263,6 +263,14 @@ When a supplier invoice is approved to pay (with **Send approved supplier invoic
 
 If you switch on something that needs a new Xero permission, Admin → Xero shows **Press Reconnect to finish** until you've reconnected and approved it.
 
+## Branding
+
+**Settings → Branding** is where you upload your logo and choose a brand colour.
+- **Logo:** PNG or JPG, up to 2 MB. Transparent backgrounds work.
+- **Quote PDFs:** the logo goes at the top left in place of your company name. The bar along the top and the headings use your colour.
+- **Customer pages:** the logo also shows on the quote and order tracking pages customers open from their emails.
+- **Hosting:** logos are turned into PDF images by the CRM itself, so nothing extra is needed on your hosting.
+
 ## One-off charges
 
 Use **One-off** for charges like installation, or hardware bought outright.

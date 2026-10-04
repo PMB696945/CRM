@@ -28,6 +28,8 @@ final class SimplePdf
 
     /** @var string[] content streams, one per page */
     private array $pages = [];
+    /** @var array[] images drawn: ['dict' => image dictionary, 'data' => stream, 'smask' => ?[dict, data]] */
+    private array $images = [];
     private int $page = -1;
     public float $y = 0;
 
@@ -163,6 +165,126 @@ final class SimplePdf
             . self::num($x) . ' ' . self::num(self::H - $top - $h) . ' ' . self::num($w) . ' ' . self::num($h) . ' re ' . ($stroke ? 'B' : 'f') . "\n";
     }
 
+    /**
+     * Draw a PNG or JPEG image (file contents) with its top-left at ($x, $top), scaled to fit within
+     * $maxW × $maxH keeping its shape. Returns [width, height] drawn, or null if the image can't be used.
+     */
+    public function image(string $bytes, float $x, float $top, float $maxW, float $maxH): ?array
+    {
+        $img = self::prepareImage($bytes);
+        if (!$img) {
+            return null;
+        }
+        $scale = min($maxW / $img['w'], $maxH / $img['h']);
+        [$w, $h] = [$img['w'] * $scale, $img['h'] * $scale];
+        $this->images[] = $img;
+        $name = 'Im' . count($this->images);
+        $this->pages[$this->page] .= 'q ' . self::num($w) . ' 0 0 ' . self::num($h) . ' ' . self::num($x) . ' ' . self::num(self::H - $top - $h) . " cm /$name Do Q\n";
+        return [$w, $h];
+    }
+
+    /** Turn a PNG or JPEG into a PDF image (with a soft mask for PNG transparency). Null if unsupported. */
+    public static function prepareImage(string $bytes): ?array
+    {
+        if (str_starts_with($bytes, "\xFF\xD8")) {
+            $info = @getimagesizefromstring($bytes);
+            if (!$info) {
+                return null;
+            }
+            $space = match ($info['channels'] ?? 3) { 1 => '/DeviceGray', 4 => '/DeviceCMYK', default => '/DeviceRGB' };
+            return ['w' => $info[0], 'h' => $info[1], 'data' => $bytes, 'smask' => null,
+                'dict' => "/Type /XObject /Subtype /Image /Width {$info[0]} /Height {$info[1]} /ColorSpace $space /BitsPerComponent 8 /Filter /DCTDecode"
+                    . ($space === '/DeviceCMYK' ? ' /Decode [1 0 1 0 1 0 1 0]' : '')];
+        }
+        if (!str_starts_with($bytes, "\x89PNG\r\n\x1A\n")) {
+            return null;
+        }
+        // Read the chunks.
+        $pos = 8;
+        $idat = $palette = $trns = '';
+        $hdr = null;
+        while ($pos + 8 <= strlen($bytes)) {
+            $len = unpack('N', substr($bytes, $pos, 4))[1];
+            $type = substr($bytes, $pos + 4, 4);
+            $chunk = substr($bytes, $pos + 8, $len);
+            $pos += 12 + $len;
+            match ($type) {
+                'IHDR' => $hdr = unpack('Nw/Nh/Cdepth/Ctype/Ccomp/Cfilter/Cinterlace', $chunk),
+                'PLTE' => $palette = $chunk,
+                'tRNS' => $trns = $chunk,
+                'IDAT' => $idat .= $chunk,
+                default => null,
+            };
+            if ($type === 'IEND') {
+                break;
+            }
+        }
+        if (!$hdr || $hdr['interlace'] !== 0 || !in_array($hdr['depth'], [8, 16], true) && !($hdr['type'] === 3 && $hdr['depth'] <= 8)) {
+            return null;
+        }
+        [$w, $h, $type, $depth] = [$hdr['w'], $hdr['h'], $hdr['type'], $hdr['depth']];
+        $raw = @gzuncompress($idat);
+        if ($raw === false) {
+            return null;
+        }
+        // Undo the PNG row filters.
+        $channels = [0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4][$type] ?? 0;
+        if (!$channels) {
+            return null;
+        }
+        $bpp = max(1, (int)($channels * $depth / 8));
+        $rowLen = (int)ceil($w * $channels * $depth / 8);
+        $prev = str_repeat("\0", $rowLen);
+        $rgb = $alpha = '';
+        $gray = $type === 0 || $type === 4;
+        for ($y = 0, $o = 0; $y < $h; $y++) {
+            $filter = ord($raw[$o] ?? "\0");
+            $line = substr($raw, $o + 1, $rowLen);
+            $o += $rowLen + 1;
+            $out = '';
+            for ($i = 0; $i < $rowLen; $i++) {
+                $a = $i >= $bpp ? ord($out[$i - $bpp]) : 0;
+                $b = ord($prev[$i]);
+                $c = $i >= $bpp ? ord($prev[$i - $bpp]) : 0;
+                $v = ord($line[$i] ?? "\0");
+                $v += match ($filter) {
+                    1 => $a, 2 => $b, 3 => intdiv($a + $b, 2),
+                    4 => (function () use ($a, $b, $c) { $p = $a + $b - $c; $pa = abs($p - $a); $pb = abs($p - $b); $pc = abs($p - $c);
+                        return $pa <= $pb && $pa <= $pc ? $a : ($pb <= $pc ? $b : $c); })(),
+                    default => 0,
+                };
+                $out .= chr($v & 0xFF);
+            }
+            $prev = $out;
+            // Split into colour and alpha (8 bits per sample).
+            if ($type === 3) {
+                for ($px = 0; $px < $w; $px++) {
+                    $bit = $px * $depth;
+                    $idx = (ord($out[intdiv($bit, 8)]) >> (8 - $depth - $bit % 8)) & ((1 << $depth) - 1);
+                    $rgb .= substr($palette, $idx * 3, 3) ?: "\0\0\0";
+                    $alpha .= $idx < strlen($trns) ? $trns[$idx] : "\xFF";
+                }
+                continue;
+            }
+            $step = $depth / 8;
+            for ($px = 0; $px < $w; $px++) {
+                $base = $px * $channels * $step;
+                $sample = fn($k) => $out[(int)($base + $k * $step)]; // high byte of 16-bit samples
+                $colour = $gray ? $sample(0) : $sample(0) . $sample(1) . $sample(2);
+                $rgb .= $colour;
+                if ($channels === 2 || $channels === 4) {
+                    $alpha .= $sample($channels - 1);
+                }
+            }
+        }
+        $space = $gray ? '/DeviceGray' : '/DeviceRGB';
+        $smask = $alpha !== '' && strspn($alpha, "\xFF") !== strlen($alpha)
+            ? ['dict' => "/Type /XObject /Subtype /Image /Width $w /Height $h /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode", 'data' => gzcompress($alpha)]
+            : null;
+        return ['w' => $w, 'h' => $h, 'data' => gzcompress($rgb), 'smask' => $smask,
+            'dict' => "/Type /XObject /Subtype /Image /Width $w /Height $h /ColorSpace $space /BitsPerComponent 8 /Filter /FlateDecode"];
+    }
+
     public function output(): string
     {
         $objects = [];
@@ -172,12 +294,24 @@ final class SimplePdf
         $objects[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
         $objects[5] = '<< /Title (' . str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], self::encode($this->title)) . ') /Producer (Telecom CRM) /CreationDate (D:' . date('YmdHis') . ') >>';
         $n = 6;
+        $xobjects = '';
+        foreach ($this->images as $i => $img) {
+            $id = $n++;
+            $smask = '';
+            if ($img['smask']) {
+                $m = $n++;
+                $objects[$m] = '<< ' . $img['smask']['dict'] . ' /Length ' . strlen($img['smask']['data']) . " >>\nstream\n" . $img['smask']['data'] . "\nendstream";
+                $smask = " /SMask $m 0 R";
+            }
+            $objects[$id] = '<< ' . $img['dict'] . $smask . ' /Length ' . strlen($img['data']) . " >>\nstream\n" . $img['data'] . "\nendstream";
+            $xobjects .= ' /Im' . ($i + 1) . " $id 0 R";
+        }
         foreach ($this->pages as $content) {
             $page = $n++;
             $stream = $n++;
             $kids[] = "$page 0 R";
             $objects[$page] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' . self::num(self::W) . ' ' . self::num(self::H) . '] '
-                . "/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents $stream 0 R >>";
+                . "/Resources << /Font << /F1 3 0 R /F2 4 0 R >>" . ($xobjects !== '' ? " /XObject <<$xobjects >>" : '') . " >> /Contents $stream 0 R >>";
             $objects[$stream] = '<< /Length ' . strlen($content) . " >>\nstream\n" . $content . "endstream";
         }
         $objects[2] = '<< /Type /Pages /Kids [' . implode(' ', $kids) . '] /Count ' . count($kids) . ' >>';

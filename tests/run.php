@@ -1112,6 +1112,53 @@ test('signing is picked up, signed PDF saved, pending services created', functio
     eq(3, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status = 'pending'", [$flow['account']]));
 });
 
+/** A small PNG: RGBA (colour type 6) with a transparent left half, or palette-based (type 3). */
+function test_png(int $w, int $h, int $type = 6): string
+{
+    $chunk = fn($t, $d) => pack('N', strlen($d)) . $t . $d . pack('N', crc32($t . $d));
+    $raw = '';
+    for ($y = 0; $y < $h; $y++) {
+        $raw .= "\0"; // no filter
+        for ($x = 0; $x < $w; $x++) {
+            $raw .= $type === 6 ? "\x46\x5F\xFF" . ($x < $w / 2 ? "\x00" : "\xFF") : chr($x < $w / 2 ? 0 : 1);
+        }
+    }
+    return "\x89PNG\r\n\x1A\n" . $chunk('IHDR', pack('NNCCCCC', $w, $h, 8, $type, 0, 0, 0))
+        . ($type === 3 ? $chunk('PLTE', "\xFF\xFF\xFF\x46\x5F\xFF") . $chunk('tRNS', "\x00") : '')
+        . $chunk('IDAT', gzcompress($raw)) . $chunk('IEND', '');
+}
+
+test('branding: a logo (PNG with transparency or JPEG) and colour on quote PDFs and customer pages', function () {
+    $img = SimplePdf::prepareImage(test_png(40, 10));
+    eq([40, 10, true], [$img['w'], $img['h'], $img['smask'] !== null], 'transparent PNG gets a soft mask');
+    $alpha = gzuncompress($img['smask']['data']);
+    eq(["\x00", "\xFF"], [$alpha[0], $alpha[39]]);
+    eq("\x46\x5F\xFF", substr(gzuncompress($img['data']), 0, 3));
+    $pal = SimplePdf::prepareImage(test_png(8, 2, 3));
+    eq(["\x00", "\xFF\xFF\xFF"], [gzuncompress($pal['smask']['data'])[0], substr(gzuncompress($pal['data']), 0, 3)], 'palette PNG with a transparent colour');
+    eq(null, SimplePdf::prepareImage('not an image'));
+
+    $tmp = tempnam(sys_get_temp_dir(), 'logo');
+    file_put_contents($tmp, 'GIF89a nonsense');
+    ok(str_contains((string)brand_save_logo(['error' => UPLOAD_ERR_OK, 'tmp_name' => $tmp, 'size' => 15]), 'PNG or JPG'));
+    file_put_contents($tmp, test_png(120, 30));
+    eq(null, brand_save_logo(['error' => UPLOAD_ERR_OK, 'tmp_name' => $tmp, 'size' => filesize($tmp)]));
+    eq('logo.png', setting('brand_logo'));
+    ok(str_starts_with((string)brand_logo_data_uri(), 'data:image/png;base64,'));
+    set_setting('brand_colour', '#0A7C3E');
+    eq([10, 124, 62], brand_colour());
+
+    $q = db_one('SELECT * FROM quotes ORDER BY id DESC LIMIT 1');
+    $pdf = quote_pdf($q);
+    ok(str_contains($pdf, '/Subtype /Image') && str_contains($pdf, '/SMask') && str_contains($pdf, '/Im1 Do'), 'logo drawn on the quote');
+    ok(str_contains($pdf, '0.04 0.49 0.24 rg'), 'brand colour used');
+
+    foreach (glob(storage_path('branding') . '/logo.*') as $f) { unlink($f); }
+    set_setting('brand_logo', null);
+    set_setting('brand_colour', null);
+    @unlink($tmp);
+});
+
 test('our address prints tidily however it was typed in Settings', function () {
     $saved = [setting('company_address'), setting('company_name')];
     set_setting('company_address', "Hadley House \r\n9 & 10 Croft Street\r\n \r\nCheltenham\r\nGloucestershire \r\nGL53 0ED");

@@ -10,7 +10,7 @@
 <body class="bg-gray-50 dark:bg-gray-900">
 <div class="mx-auto max-w-3xl px-4 py-8 sm:py-12">
   <div class="mb-6 flex items-center justify-between gap-4">
-    <span class="brand"><span class="brand-mark"><?= icon('phone') ?></span><?= h($company) ?></span>
+    <?php if ($logoUri = brand_logo_data_uri()): ?><img class="public-logo" src="<?= h($logoUri) ?>" alt="<?= h($company) ?>"><?php else: ?><span class="brand"><span class="brand-mark"><?= icon('phone') ?></span><?= h($company) ?></span><?php endif; ?>
     <?php if ($order): ?><span class="muted text-sm">Order <?= h($order['reference']) ?></span><?php endif; ?>
   </div>
 <?php if (!$order): ?>

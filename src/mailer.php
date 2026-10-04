@@ -11,6 +11,71 @@ function company(string $key, string $default = ''): string
     return (string)(setting('company_' . $key) ?: $default);
 }
 
+/** The uploaded logo: ['path', 'mime', 'bytes'] or null. */
+function brand_logo(): ?array
+{
+    $file = (string)setting('brand_logo');
+    if ($file === '' || !preg_match('/^logo\.(png|jpe?g)$/', $file)) {
+        return null;
+    }
+    try {
+        $path = storage_path('branding') . '/' . $file;
+    } catch (IntegrationException) {
+        return null;
+    }
+    if (!is_file($path)) {
+        return null;
+    }
+    return ['path' => $path, 'mime' => str_ends_with($file, '.png') ? 'image/png' : 'image/jpeg', 'bytes' => (string)file_get_contents($path)];
+}
+
+/** The logo as a data: URI for pages (CSP allows data: images), or null. */
+function brand_logo_data_uri(): ?string
+{
+    $logo = brand_logo();
+    return $logo ? 'data:' . $logo['mime'] . ';base64,' . base64_encode($logo['bytes']) : null;
+}
+
+/** The brand colour as [r, g, b] (Settings → Branding), default blue. */
+function brand_colour(): array
+{
+    $hex = (string)setting('brand_colour');
+    return preg_match('/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i', $hex, $m) ? [hexdec($m[1]), hexdec($m[2]), hexdec($m[3])] : [70, 95, 255];
+}
+
+/**
+ * Save an uploaded logo (PNG or JPEG, up to 2 MB). Returns a problem, or null when saved.
+ * PNGs must be usable in PDFs (not interlaced), so the quote PDF can show them.
+ */
+function brand_save_logo(array $file): ?string
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name']) && !is_file($file['tmp_name'])) {
+        return 'Choose a logo file to upload.';
+    }
+    if ($file['size'] > 2 * 1024 * 1024) {
+        return 'That file is over 2 MB. Save a smaller version of the logo (a few hundred pixels wide is plenty).';
+    }
+    $bytes = (string)file_get_contents($file['tmp_name']);
+    $info = @getimagesizefromstring($bytes);
+    $ext = match ($info[2] ?? null) { IMAGETYPE_PNG => 'png', IMAGETYPE_JPEG => 'jpg', default => null };
+    if (!$ext) {
+        return 'The logo must be a PNG or JPG image.';
+    }
+    if ($info[0] > 3000 || $info[1] > 3000) {
+        return 'That image is very large (' . $info[0] . ' × ' . $info[1] . ' pixels). Save a smaller version, up to 3000 pixels across.';
+    }
+    if (!SimplePdf::prepareImage($bytes)) {
+        return 'That PNG can\'t be used in PDFs (it may be interlaced). Save it again as a standard PNG, or as a JPG.';
+    }
+    $dir = storage_path('branding');
+    foreach (glob($dir . '/logo.*') ?: [] as $old) {
+        @unlink($old);
+    }
+    file_put_contents($dir . '/logo.' . $ext, $bytes);
+    set_setting('brand_logo', 'logo.' . $ext);
+    return null;
+}
+
 /** Our address as tidy lines (no stray spaces, carriage returns or blank lines), as typed in Settings. */
 function company_address_lines(): array
 {

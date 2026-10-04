@@ -1,5 +1,26 @@
 <?php $v = fn(string $k, string $d = '') => h(setting($k) ?? $d); ?>
 <div class="page-head"><h1>Settings</h1></div>
+<?php $logo = brand_logo_data_uri(); [$br, $bg, $bb] = brand_colour(); ?>
+<form method="post" action="<?= h(url('settings', ['action' => 'branding'])) ?>" enctype="multipart/form-data" class="mb-6">
+  <?= csrf_field() ?>
+  <section class="card form-grid">
+    <h2 class="wide">Branding</h2>
+    <p class="help wide">Your logo and colour on quote PDFs and the pages customers see (their quote and order tracking).</p>
+    <div class="field">
+      <label for="s_logo">Logo</label>
+      <?php if ($logo): ?><div class="brand-logo-preview"><img src="<?= h($logo) ?>" alt="Your logo"></div><?php endif; ?>
+      <input id="s_logo" type="file" name="logo" accept="image/png,image/jpeg">
+      <div class="help">PNG (a transparent background works well) or JPG, up to 2 MB. A wide logo around 600 pixels across looks best.</div>
+      <?php if ($logo): ?><label class="check mt-2"><input type="checkbox" name="remove_logo" value="1"> Remove the logo</label><?php endif; ?>
+    </div>
+    <div class="field">
+      <label for="s_colour">Brand colour</label>
+      <input id="s_colour" type="color" name="brand_colour" value="<?= h(sprintf('#%02X%02X%02X', $br, $bg, $bb)) ?>">
+      <div class="help">Used for the bar and headings on quote PDFs.</div>
+    </div>
+    <div class="wide"><button class="btn">Save branding</button></div>
+  </section>
+</form>
 <form method="post" action="<?= h(url('settings')) ?>">
   <?= csrf_field() ?>
   <div class="grid-2">

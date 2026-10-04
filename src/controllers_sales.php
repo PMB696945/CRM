@@ -424,6 +424,32 @@ function settings_controller(): void
     $before = array_combine($keys, array_map(fn($k) => (string)setting($k), $keys));
     if (is_post()) {
         verify_csrf();
+        if (query('action') === 'branding') {
+            if (!empty($_POST['remove_logo'])) {
+                foreach (glob(storage_path('branding') . '/logo.*') ?: [] as $old) {
+                    @unlink($old);
+                }
+                set_setting('brand_logo', null);
+                audit('settings', 'Logo removed');
+                flash('Logo removed.');
+                redirect(url('settings'));
+            }
+            $colour = trim((string)($_POST['brand_colour'] ?? ''));
+            if ($colour !== '' && !preg_match('/^#[0-9a-f]{6}$/i', $colour)) {
+                flash('The brand colour should look like #465FFF.', 'error');
+                redirect(url('settings'));
+            }
+            set_setting('brand_colour', $colour === '' ? null : strtoupper($colour));
+            if (($_FILES['logo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                if ($problem = brand_save_logo($_FILES['logo'])) {
+                    flash($problem, 'error');
+                    redirect(url('settings'));
+                }
+                audit('settings', 'Logo uploaded');
+            }
+            flash('Branding saved.');
+            redirect(url('settings'));
+        }
         if (query('action') === 'test_email') {
             try {
                 $me = current_user();

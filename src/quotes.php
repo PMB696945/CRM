@@ -223,7 +223,7 @@ function quote_pdf(array $quote): string
     $company = company('name', config('app_name'));
     $ink = [29, 41, 57];
     $muted = [102, 112, 133];
-    $brand = [70, 95, 255];
+    $brand = brand_colour();
     $pdf = new SimplePdf(50, "Quote {$quote['reference']} - $company");
     $m = $pdf->margin;
     $right = SimplePdf::W - $m;
@@ -232,10 +232,17 @@ function quote_pdf(array $quote): string
 
     // Header: company on the left, quote reference on the right.
     $pdf->rect(0, 0, SimplePdf::W, 6, $brand);
-    $pdf->text($m, $pdf->y, $company, 18, true, $ink);
     $pdf->text($right, $pdf->y + 2, 'QUOTE', 10, true, $brand, 'right');
     $pdf->text($right, $pdf->y + 16, (string)$quote['reference'], 14, true, $ink, 'right');
-    $pdf->y += 26;
+    // Our logo (Settings → Branding), or the company name.
+    $logo = brand_logo();
+    $drawn = $logo ? $pdf->image($logo['bytes'], $m, $pdf->y - 6, 200, 52) : null;
+    if ($drawn) {
+        $pdf->y += $drawn[1] + 4;
+    } else {
+        $pdf->text($m, $pdf->y, $company, 18, true, $ink);
+        $pdf->y += 26;
+    }
     $contact = array_filter([company_address_line(), implode(' · ', array_filter([company('phone'), company('email')])),
         company('number') ? 'Company no. ' . company('number') : '']);
     foreach ($contact as $c) {
