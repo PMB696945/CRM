@@ -31,7 +31,13 @@ function login_controller(): void
         }
         switch ($result['status']) {
             case 'ok':
-                redirect(must_set_up_2fa() ? url('profile') : url('dashboard'));
+                redirect(current_user(true)['must_change_password'] ? url('password') : (must_set_up_2fa() ? url('profile') : url('dashboard')));
+            case 'ip':
+                $error = 'The CRM can only be used from approved locations, and this isn\'t one of them. Ask your administrator if you need access from here.';
+                break;
+            case 'temp_expired':
+                $error = 'Your temporary password has expired. Ask your administrator to send you a new one.';
+                break;
             case '2fa':
                 $step = '2fa';
                 break;
@@ -47,6 +53,34 @@ function login_controller(): void
         }
     }
     render('login', ['error' => $error, 'email' => $email, 'step' => $step]);
+}
+
+/** Choose a new password: required after signing in with a temporary one, and available any time. */
+function password_controller(): void
+{
+    $user = current_user();
+    $forced = !empty($user['must_change_password']);
+    $error = null;
+    if (is_post()) {
+        verify_csrf();
+        $new = (string)($_POST['new_password'] ?? '');
+        $row = db_one('SELECT password_hash FROM users WHERE id = ?', [$user['id']]);
+        if (!$forced && !password_verify((string)($_POST['current_password'] ?? ''), (string)$row['password_hash'])) {
+            $error = 'Your current password isn\'t right.';
+        } elseif ($new !== (string)($_POST['confirm_password'] ?? '')) {
+            $error = 'The two new passwords don\'t match.';
+        } elseif (password_verify($new, (string)$row['password_hash'])) {
+            $error = 'Choose a different password from the temporary one.';
+        } elseif ($problem = password_problem($new, $user['email'])) {
+            $error = $problem;
+        } else {
+            db_exec('UPDATE users SET password_hash = ?, must_change_password = 0, temp_password_expires_at = NULL WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $user['id']]);
+            audit('password_change', $forced ? 'Chose a password after signing in with a temporary one' : 'Changed password', 'users', (int)$user['id']);
+            flash('Your password has been set.');
+            redirect(must_set_up_2fa() ? url('profile') : url('dashboard'));
+        }
+    }
+    page('password', ['forced' => $forced, 'error' => $error], 'Choose a password');
 }
 
 function dashboard_controller(): void
@@ -186,10 +220,10 @@ function users_controller(): void
     $action = query('action', 'list');
     $id = query_int('id');
     $errors = [];
-    $values = ['name' => '', 'email' => '', 'role' => 'staff', 'active' => 1];
+    $values = ['name' => '', 'email' => '', 'role' => 'staff', 'active' => 1, 'ip_anywhere' => 0];
 
     if ($id) {
-        $values = db_one('SELECT id, name, email, role, active FROM users WHERE id = ?', [$id]) ?? not_found();
+        $values = db_one('SELECT id, name, email, role, active, ip_anywhere, must_change_password FROM users WHERE id = ?', [$id]) ?? not_found();
         // Only super admins can change super admins.
         if ($values['role'] === 'super_admin' && !is_super_admin() && $action !== 'list') {
             forbidden();
@@ -204,8 +238,14 @@ function users_controller(): void
                 'email'  => strtolower(trim((string)($_POST['email'] ?? ''))),
                 'role'   => isset(roles()[$_POST['role'] ?? '']) ? $_POST['role'] : 'staff',
                 'active' => empty($_POST['active']) ? 0 : 1,
+                'ip_anywhere' => empty($_POST['ip_anywhere']) ? 0 : 1,
             ];
             $password = (string)($_POST['password'] ?? '');
+            // New users get a temporary password by email unless one is typed in.
+            $welcome = !$id && !empty($_POST['send_welcome']);
+            if ($welcome) {
+                $password = '';
+            }
             if ($values['name'] === '') {
                 $errors['name'] = 'Name is required.';
             }
@@ -214,7 +254,7 @@ function users_controller(): void
             } elseif (db_value('SELECT id FROM users WHERE email = ? AND id <> ?', [$values['email'], $id ?? 0])) {
                 $errors['email'] = 'That email is already in use.';
             }
-            if ((!$id || $password !== '') && ($problem = password_problem($password, $values['email']))) {
+            if ((!$id && !$welcome || $password !== '') && ($problem = password_problem($password, $values['email']))) {
                 $errors['password'] = $problem;
             }
             if ($values['role'] === 'super_admin' && !is_super_admin()) {
@@ -226,14 +266,19 @@ function users_controller(): void
             $before = $id ? db_one('SELECT name, email, role, active FROM users WHERE id = ?', [$id]) : null;
             if (!$errors) {
                 if ($id) {
-                    db_exec('UPDATE users SET name = ?, email = ?, role = ?, active = ? WHERE id = ?',
-                        [$values['name'], $values['email'], $values['role'], $values['active'], $id]);
+                    db_exec('UPDATE users SET name = ?, email = ?, role = ?, active = ?, ip_anywhere = ? WHERE id = ?',
+                        [$values['name'], $values['email'], $values['role'], $values['active'], $values['ip_anywhere'], $id]);
                     if ($password !== '') {
-                        db_exec('UPDATE users SET password_hash = ? WHERE id = ?', [password_hash($password, PASSWORD_DEFAULT), $id]);
+                        // A password set for someone else is temporary unless they're told otherwise.
+                        $mustChange = $id !== (int)current_user()['id'] && !empty($_POST['must_change']);
+                        db_exec('UPDATE users SET password_hash = ?, must_change_password = ?, temp_password_expires_at = ' . ($mustChange ? 'DATE_ADD(NOW(), INTERVAL ' . TEMP_PASSWORD_DAYS . ' DAY)' : 'NULL') . ' WHERE id = ?',
+                            [password_hash($password, PASSWORD_DEFAULT), $mustChange ? 1 : 0, $id]);
                     }
                 } else {
-                    db_exec('INSERT INTO users (name, email, role, active, password_hash) VALUES (?, ?, ?, ?, ?)',
-                        [$values['name'], $values['email'], $values['role'], $values['active'], password_hash($password, PASSWORD_DEFAULT)]);
+                    $mustChange = !$welcome && !empty($_POST['must_change']);
+                    db_exec('INSERT INTO users (name, email, role, active, ip_anywhere, password_hash, must_change_password, temp_password_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ' . ($mustChange ? 'DATE_ADD(NOW(), INTERVAL ' . TEMP_PASSWORD_DAYS . ' DAY)' : 'NULL') . ')',
+                        [$values['name'], $values['email'], $values['role'], $values['active'], $values['ip_anywhere'],
+                            password_hash($welcome ? bin2hex(random_bytes(16)) : $password, PASSWORD_DEFAULT), $mustChange ? 1 : 0]);
                     $id = null;
                 }
                 $savedUserId = $id ?: (int)db()->lastInsertId();
@@ -245,7 +290,7 @@ function users_controller(): void
                     db_exec('INSERT INTO ticket_group_members (group_id, user_id) VALUES (?, ?)', [$gid, $savedUserId]);
                 }
                 $userChanges = [];
-                foreach (['name', 'email', 'role', 'active'] as $f) {
+                foreach (['name', 'email', 'role', 'active', 'ip_anywhere'] as $f) {
                     if ((string)($before[$f] ?? '') !== (string)$values[$f]) {
                         $userChanges[$f] = ['from' => (string)($before[$f] ?? ''), 'to' => (string)$values[$f]];
                     }
@@ -261,13 +306,37 @@ function users_controller(): void
                 }
                 audit($id ? 'user_update' : 'user_create', 'User ' . $values['email'] . ($id ? ' updated' : ' created') . ' (' . role_label($values['role']) . ', ' . ($values['active'] ? 'active' : 'disabled') . ')' . ($password !== '' ? ', password set' : ''),
                     'users', $savedUserId, null, $userChanges ?: null);
-                flash('User saved.');
+                if ($welcome) {
+                    $sent = send_temporary_password($savedUserId, true);
+                    audit('user_welcome', 'Welcome email with a temporary password ' . ($sent['emailed'] ? 'sent to ' : 'could not be sent to ') . $values['email'], 'users', $savedUserId);
+                    flash($sent['emailed']
+                        ? "User added. A welcome email with a temporary password has been sent to {$values['email']}."
+                        : "User added, but the welcome email couldn't be sent ({$sent['error']}). Their temporary password is {$sent['password']}. Pass it on securely: it isn't shown again.",
+                        $sent['emailed'] ? 'success' : 'warning');
+                } else {
+                    flash('User saved.');
+                }
                 redirect(url('users'));
             }
         }
         $groupIds = is_post() ? array_map('intval', is_array($_POST['groups'] ?? null) ? $_POST['groups'] : []) : ($id ? user_group_ids($id, true) : []);
         page('user_form', ['values' => $values, 'errors' => $errors, 'id' => $id, 'groups' => ticket_groups(), 'groupIds' => $groupIds], $id ? 'Edit user' : 'New user');
         return;
+    }
+
+    if ($action === 'send_password' && is_post() && $id) {
+        verify_csrf();
+        if ($id === (int)current_user()['id']) {
+            flash('Change your own password from your profile.', 'error');
+            redirect(url('users'));
+        }
+        $sent = send_temporary_password($id, !db_value('SELECT last_login_at FROM users WHERE id = ?', [$id]));
+        audit('user_password_reset', 'New temporary password ' . ($sent['emailed'] ? 'emailed to ' : 'set (email failed) for ') . $values['email'], 'users', $id);
+        flash($sent['emailed']
+            ? "A new temporary password has been emailed to {$values['email']}. They'll choose their own when they sign in."
+            : "The email couldn't be sent ({$sent['error']}). Their new temporary password is {$sent['password']}. Pass it on securely: it isn't shown again.",
+            $sent['emailed'] ? 'success' : 'warning');
+        redirect(url('users'));
     }
 
     if ($action === 'reset_2fa' && is_post() && $id) {
@@ -280,7 +349,7 @@ function users_controller(): void
         flash('Two-factor sign-in reset for ' . $values['name'] . '. They can set it up again from their profile.');
         redirect(url('users'));
     }
-    $users = db_all('SELECT id, name, email, role, active, created_at, totp_enabled, last_login_at FROM users ORDER BY name');
+    $users = db_all('SELECT id, name, email, role, active, created_at, totp_enabled, last_login_at, must_change_password, temp_password_expires_at, ip_anywhere FROM users ORDER BY name');
     page('users', ['users' => $users], 'Users');
 }
 

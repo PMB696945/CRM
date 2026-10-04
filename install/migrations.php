@@ -839,4 +839,16 @@ return [
         // Products can be one-off (installation, hardware bought outright) as well as recurring.
         db()->exec("ALTER TABLE products MODIFY billing_frequency VARCHAR(20) NOT NULL DEFAULT 'monthly'");
     },
+    23 => function (): void {
+        // Temporary passwords for new users (changed at first sign-in), and who may sign in from any IP address.
+        foreach ([
+            'must_change_password'    => 'TINYINT(1) NOT NULL DEFAULT 0',
+            'temp_password_expires_at' => 'DATETIME NULL',
+            'ip_anywhere'             => 'TINYINT(1) NOT NULL DEFAULT 0',
+        ] as $col => $def) {
+            if (!column_exists('users', $col)) {
+                db()->exec("ALTER TABLE users ADD COLUMN $col $def");
+            }
+        }
+    },
 ];

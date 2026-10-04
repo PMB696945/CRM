@@ -415,7 +415,7 @@ function contract_merge_field_help(): array
 function settings_controller(): void
 {
     require_permission('settings.manage');
-    $keys = ['company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
+    $keys = ['ip_restrict', 'allowed_ips', 'company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
         'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https',
         'marketing_topics', 'campaign_batch_size',
@@ -460,13 +460,31 @@ function settings_controller(): void
             }
             redirect(url('settings'));
         }
+        // The IP allow-list must be valid and include where you are now, so you can't lock yourself out.
+        $ipLines = array_filter(array_map(fn($l) => trim(preg_replace('/#.*$/', '', $l)), preg_split('/\R/u', (string)($_POST['allowed_ips'] ?? ''))), fn($l) => $l !== '');
+        foreach ($ipLines as $entry) {
+            if ($problem = ip_entry_problem($entry)) {
+                flash('Settings not saved. ' . $problem, 'error');
+                redirect(url('settings'));
+            }
+        }
+        if (!empty($_POST['ip_restrict'])) {
+            $here = array_filter($ipLines, fn($e) => ip_matches(client_ip(), $e));
+            if (!$ipLines || (!$here && empty(current_user()['ip_anywhere']))) {
+                flash('Settings not saved. Your current IP address (' . client_ip() . ') isn\'t in the allowed list, so you\'d be locked out. Add it first.', 'error');
+                redirect(url('settings'));
+            }
+        }
         foreach ($keys as $key) {
             $value = trim((string)($_POST[$key] ?? ''));
             if ($key === 'company_address') {
                 // One tidy line per line typed: no carriage returns, stray spaces or blank lines.
                 $value = implode("\n", array_filter(array_map('trim', preg_split('/\R/u', $value)), fn($l) => $l !== ''));
             }
-            if (in_array($key, ['contracts_auto_on_accept', 'require_2fa', 'force_https'], true)) {
+            if ($key === 'allowed_ips') {
+                $value = implode("\n", array_filter(array_map('trim', preg_split('/\R/u', $value)), fn($l) => $l !== ''));
+            }
+            if (in_array($key, ['contracts_auto_on_accept', 'require_2fa', 'force_https', 'ip_restrict'], true)) {
                 $value = empty($_POST[$key]) ? '0' : '1';
             }
             if ($key === 'force_https' && $value === '1' && !is_https()) {

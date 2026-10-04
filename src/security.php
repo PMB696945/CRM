@@ -70,6 +70,86 @@ function client_ip(): string
     return substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45);
 }
 
+/* ------------------------------------------------------ IP allow-list --- */
+
+/** The allowed IP addresses and ranges from Settings, one per line ("# notes" ignored). */
+function ip_allowlist(): array
+{
+    $out = [];
+    foreach (preg_split('/\R/', (string)setting('allowed_ips')) as $line) {
+        $line = trim(preg_replace('/#.*$/', '', $line));
+        if ($line !== '') {
+            $out[] = $line;
+        }
+    }
+    return $out;
+}
+
+/** Whether the CRM is limited to the allowed IP addresses (config.php 'ip_allowlist_off' => true switches it off in an emergency). */
+function ip_restriction_on(): bool
+{
+    return setting('ip_restrict') === '1' && ip_allowlist() && !config('ip_allowlist_off');
+}
+
+/** A single IP (v4 or v6) or a CIDR range, e.g. 81.2.69.160 or 81.2.69.0/24. Null if valid, else why not. */
+function ip_entry_problem(string $entry): ?string
+{
+    [$ip, $bits] = array_pad(explode('/', $entry, 2), 2, null);
+    $bin = @inet_pton(trim($ip));
+    if ($bin === false) {
+        return "\"$entry\" isn't an IP address.";
+    }
+    if ($bits !== null && (!ctype_digit(trim($bits)) || (int)$bits > strlen($bin) * 8)) {
+        return "\"$entry\" has an invalid range size (the number after /).";
+    }
+    return null;
+}
+
+/** Does this IP fall within the entry (an address or CIDR range)? */
+function ip_matches(string $ip, string $entry): bool
+{
+    [$net, $bits] = array_pad(explode('/', $entry, 2), 2, null);
+    $a = @inet_pton($ip);
+    $b = @inet_pton(trim($net));
+    if ($a === false || $b === false) {
+        return false;
+    }
+    // An IPv4 address seen as IPv6 (::ffff:1.2.3.4) compares as IPv4.
+    if (strlen($a) === 16 && strlen($b) === 4 && str_starts_with($a, str_repeat("\0", 10) . "\xFF\xFF")) {
+        $a = substr($a, 12);
+    }
+    if (strlen($a) !== strlen($b)) {
+        return false;
+    }
+    $bits = $bits === null ? strlen($a) * 8 : (int)$bits;
+    $bytes = intdiv($bits, 8);
+    if (substr($a, 0, $bytes) !== substr($b, 0, $bytes)) {
+        return false;
+    }
+    $rest = $bits % 8;
+    if ($rest === 0) {
+        return true;
+    }
+    $mask = (0xFF << (8 - $rest)) & 0xFF;
+    return (ord($a[$bytes]) & $mask) === (ord($b[$bytes]) & $mask);
+}
+
+function ip_allowed(string $ip): bool
+{
+    foreach (ip_allowlist() as $entry) {
+        if (ip_matches($ip, $entry)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** May this user use the CRM from where they are now? */
+function ip_allowed_for_user(?array $user): bool
+{
+    return !ip_restriction_on() || !empty($user['ip_anywhere']) || ip_allowed(client_ip());
+}
+
 /** Minutes until sign-in is allowed again for this email/IP (0 = allowed). */
 function login_locked_minutes(string $email): int
 {

@@ -263,6 +263,24 @@ When a supplier invoice is approved to pay (with **Send approved supplier invoic
 
 If you switch on something that needs a new Xero permission, Admin → Xero shows **Press Reconnect to finish** until you've reconnected and approved it.
 
+## Adding users
+
+Under **Admin → Users → + New user**, enter their name, email and role. Leave **Email them a welcome email with a temporary password** ticked.
+- **The welcome email:** they get an email with a sign-in link and a temporary password, which stops working after 7 days.
+- **First sign-in:** before they can do anything else, they must choose their own password.
+- **If the email can't be sent:** you're shown the temporary password once, to pass on yourself.
+- **Later on:** the Users list has **Send new password** (or **Resend welcome email** if they haven't signed in yet) to email a fresh temporary password.
+
+## Limiting the CRM to your office (IP addresses)
+
+**Settings → Security → Only allow the CRM to be used from these IP addresses** limits who can use the CRM by location.
+- **The list:** one IP address or range per line, e.g. `81.2.69.0/24`, with notes after a `#`.
+- **Who it affects:** anyone signing in from elsewhere is refused, and anyone already signed in who moves somewhere else is signed out.
+- **People who work remotely:** tick **Can use the CRM from any location** on their user.
+- **What isn't affected:** customer quote and order pages, and links from Xero, GoCardless and Signable.
+- **Lock-out protection:** the CRM won't save a list that doesn't include the address you're using.
+- **Emergency override:** if you're ever locked out, add `'ip_allowlist_off' => true,` to config.php.
+
 ## Branding
 
 **Settings → Branding** is where you upload your logo and choose a brand colour.

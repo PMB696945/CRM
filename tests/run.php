@@ -1878,6 +1878,58 @@ test('sign-in locks after repeated failures and unlocks on success', function ()
     ok((int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'login_failed'") >= 6, 'failures audited');
     ok((int)db_value("SELECT COUNT(*) FROM audit_log WHERE action = 'login_locked'") >= 1, 'lockout audited');
 });
+test('new users get a welcome email with a temporary password, and must choose their own', function () {
+    $pw = temporary_password();
+    ok(preg_match('/^[A-Za-z2-9]{4}-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}$/', $pw) === 1 && password_problem($pw) === null, 'readable and passes the rules');
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Welcome Tester', 'welcome@example.com', 'x', 'staff')");
+    $id = (int)db()->lastInsertId();
+    $before = count(sent_mails());
+    $sent = send_temporary_password($id, true);
+    ok($sent['emailed'], 'emailed');
+    $mail = mail_body(sent_mails()[$before] ?? '');
+    ok(str_contains($mail, $sent['password']) && str_contains($mail, 'welcome@example.com') && str_contains($mail, 'page=login'), 'email has the sign-in details and link');
+    $u = db_one('SELECT * FROM users WHERE id = ?', [$id]);
+    eq(1, (int)$u['must_change_password']);
+    ok(strtotime($u['temp_password_expires_at']) > time() + 6 * 86400, 'expires in a week');
+
+    db_exec('DELETE FROM login_attempts');
+    eq('ok', attempt_login('welcome@example.com', $sent['password'])['status']);
+    eq(1, (int)current_user(true)['must_change_password'], 'has to choose a password first');
+    logout();
+    db_exec('UPDATE users SET temp_password_expires_at = NOW() - INTERVAL 1 DAY WHERE id = ?', [$id]);
+    eq('temp_expired', attempt_login('welcome@example.com', $sent['password'])['status'], 'an old temporary password stops working');
+    db_exec('DELETE FROM users WHERE id = ?', [$id]);
+});
+
+test('the CRM can be limited to approved IP addresses, with people allowed anywhere', function () {
+    ok(ip_matches('81.2.69.160', '81.2.69.160') && ip_matches('81.2.69.77', '81.2.69.0/24') && !ip_matches('81.2.70.1', '81.2.69.0/24'));
+    ok(ip_matches('::ffff:81.2.69.5', '81.2.69.0/28') && ip_matches('2001:db8::1', '2001:db8::/32') && !ip_matches('2001:db9::1', '2001:db8::/32'));
+    ok(ip_matches('10.1.2.3', '10.0.0.0/8') && !ip_matches('11.1.2.3', '10.0.0.0/8') && ip_matches('172.16.5.4', '172.16.0.0/12'));
+    eq(null, ip_entry_problem('81.2.69.0/24'));
+    ok(ip_entry_problem('81.2.69/24') !== null && ip_entry_problem('81.2.69.0/33') !== null, 'bad entries are explained');
+
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('IP Tester', 'iptest@example.com', ?, 'staff')", [password_hash('Correct-horse-9', PASSWORD_DEFAULT)]);
+    $id = (int)db()->lastInsertId();
+    db_exec('DELETE FROM login_attempts');
+    $_SERVER['REMOTE_ADDR'] = '198.51.100.7';
+    set_setting('allowed_ips', "81.2.69.0/24  # office\n203.0.113.9");
+    set_setting('ip_restrict', '1');
+    ok(ip_restriction_on());
+    eq('ip', attempt_login('iptest@example.com', 'Correct-horse-9')['status'], 'refused from elsewhere');
+    $_SERVER['REMOTE_ADDR'] = '81.2.69.40';
+    eq('ok', attempt_login('iptest@example.com', 'Correct-horse-9')['status'], 'allowed from the office');
+    logout();
+    $_SERVER['REMOTE_ADDR'] = '198.51.100.7';
+    db_exec('UPDATE users SET ip_anywhere = 1 WHERE id = ?', [$id]);
+    eq('ok', attempt_login('iptest@example.com', 'Correct-horse-9')['status'], 'remote worker allowed anywhere');
+    logout();
+    set_setting('ip_restrict', null);
+    set_setting('allowed_ips', null);
+    unset($_SERVER['REMOTE_ADDR']);
+    db_exec('DELETE FROM users WHERE id = ?', [$id]);
+    db_exec('DELETE FROM login_attempts');
+});
+
 test('two-factor sign-in: password then code', function () {
     $secret = base32_encode(random_bytes(20));
     db_exec("UPDATE users SET totp_secret = ?, totp_enabled = 1, totp_last_step = 0 WHERE email = 'lock@example.com'", [encrypt_secret($secret)]);

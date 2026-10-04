@@ -48,7 +48,7 @@ function current_user(bool $refresh = false): ?array
     static $user = false;
     if ($user === false || $refresh) {
         $id = $_SESSION['user_id'] ?? null;
-        $user = $id ? db_one('SELECT id, name, email, role, totp_enabled FROM users WHERE id = ? AND active = 1', [$id]) : null;
+        $user = $id ? db_one('SELECT id, name, email, role, totp_enabled, must_change_password, ip_anywhere FROM users WHERE id = ? AND active = 1', [$id]) : null;
         if ($id) {
             $_SESSION['is_admin'] = in_array($user['role'] ?? null, ['admin', 'super_admin'], true);
         }
@@ -68,7 +68,62 @@ function require_login(): array
     if (!$user) {
         redirect(url('login'));
     }
+    // Signed in, but now somewhere not allowed (e.g. left the office network).
+    if (!ip_allowed_for_user($user)) {
+        audit('ip_blocked', 'Signed out: not on an allowed IP address (' . client_ip() . ')', 'users', (int)$user['id'], (int)$user['id']);
+        logout();
+        flash('The CRM can only be used from approved locations. Ask your administrator if you need access from here.', 'error');
+        redirect(url('login'));
+    }
     return $user;
+}
+
+/** A readable temporary password that passes the password rules, e.g. "Kp7m-Qx3a-Z9tw". */
+function temporary_password(): string
+{
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    do {
+        $parts = [];
+        for ($p = 0; $p < 3; $p++) {
+            $s = '';
+            for ($i = 0; $i < 4; $i++) {
+                $s .= $chars[random_int(0, strlen($chars) - 1)];
+            }
+            $parts[] = $s;
+        }
+        $pw = implode('-', $parts);
+    } while (password_problem($pw) !== null);
+    return $pw;
+}
+
+const TEMP_PASSWORD_DAYS = 7;
+
+/**
+ * Give a user a new temporary password (which they must change at first sign-in) and email it to them.
+ * Returns ['password' => ..., 'emailed' => bool, 'error' => ?string].
+ */
+function send_temporary_password(int $userId, bool $welcome): array
+{
+    $u = db_one('SELECT id, name, email FROM users WHERE id = ?', [$userId]);
+    $pw = temporary_password();
+    db_exec('UPDATE users SET password_hash = ?, must_change_password = 1, temp_password_expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ?',
+        [password_hash($pw, PASSWORD_DEFAULT), TEMP_PASSWORD_DAYS, $userId]);
+    $company = company('name', config('app_name'));
+    $link = app_url() . '/index.php?page=login';
+    $first = h(explode(' ', trim($u['name']))[0] ?: $u['name']);
+    $body = '<p>Hi ' . $first . ',</p>'
+        . ($welcome ? '<p>An account has been set up for you on the ' . h($company) . ' CRM.</p>' : '<p>Your password for the ' . h($company) . ' CRM has been reset.</p>')
+        . '<p>Sign in with:</p><p style="font-size:15px;line-height:1.7">Email: <b>' . h($u['email']) . '</b><br>Temporary password: <b style="font-family:monospace;font-size:16px">' . h($pw) . '</b></p>'
+        . '<p><a href="' . h($link) . '" style="display:inline-block;background:#465fff;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Sign in</a></p>'
+        . '<p>You\'ll be asked to choose your own password when you first sign in. The temporary password stops working after ' . TEMP_PASSWORD_DAYS . ' days.</p>'
+        . '<p style="color:#667085">If you weren\'t expecting this, you can ignore it.</p>';
+    try {
+        send_mail($u['email'], $u['name'], $welcome ? "Your $company CRM account" : "Your $company CRM password has been reset",
+            email_layout($welcome ? 'Welcome' : 'Password reset', $body));
+        return ['password' => $pw, 'emailed' => true, 'error' => null];
+    } catch (Throwable $e) {
+        return ['password' => $pw, 'emailed' => false, 'error' => $e->getMessage()];
+    }
 }
 
 function require_admin(): void
@@ -96,13 +151,21 @@ function attempt_login(string $email, string $password): array
         audit('login_locked', "Sign-in blocked for $email (too many attempts)");
         return ['status' => 'locked', 'minutes' => $minutes];
     }
-    $user = db_one('SELECT id, password_hash, totp_enabled FROM users WHERE email = ? AND active = 1', [$email]);
+    $user = db_one('SELECT id, password_hash, totp_enabled, must_change_password, temp_password_expires_at, ip_anywhere FROM users WHERE email = ? AND active = 1', [$email]);
     // For unknown emails, spend the same time hashing so timing doesn't reveal which emails exist.
     $valid = $user ? password_verify($password, $user['password_hash']) : (password_hash($password, PASSWORD_DEFAULT) && false);
     if (!$valid) {
         record_login_attempt($email, false);
         audit('login_failed', "Failed sign-in for $email");
         return ['status' => 'invalid', 'minutes' => 0];
+    }
+    if (!ip_allowed_for_user($user)) {
+        audit('login_blocked_ip', "Sign-in for $email refused: not from an allowed IP address (" . client_ip() . ')', 'users', (int)$user['id'], (int)$user['id']);
+        return ['status' => 'ip', 'minutes' => 0];
+    }
+    if ($user['must_change_password'] && $user['temp_password_expires_at'] && strtotime($user['temp_password_expires_at']) < time()) {
+        audit('login_failed', "Sign-in for $email refused: temporary password expired", 'users', (int)$user['id'], (int)$user['id']);
+        return ['status' => 'temp_expired', 'minutes' => 0];
     }
     if ($user['totp_enabled']) {
         if (session_status() === PHP_SESSION_ACTIVE) {

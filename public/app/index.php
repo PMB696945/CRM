@@ -64,6 +64,11 @@ register_shutdown_function(function () use ($page): void {
     }
 });
 
+// Signed in with a temporary password: choose a real one before anything else.
+if (!empty(current_user()['must_change_password']) && !in_array($page, ['password', 'logout'], true)) {
+    redirect(url('password'));
+}
+
 // Two-factor sign-in required but not set up yet: only the profile page is available.
 if (must_set_up_2fa() && !in_array($page, ['profile', 'logout'], true)) {
     flash('Your administrator requires two-factor sign-in. Please set it up to continue.', 'error');
@@ -81,6 +86,7 @@ match (true) {
     $page === 'xero'      => xero_controller(),
     $page === 'xero_customers' => xero_customers_controller(),
     $page === 'address_lookup' => address_lookup_controller(),
+    $page === 'password'  => password_controller(),
     $page === 'gocardless' => gocardless_controller(),
     $page === 'quotes'    => quotes_controller(),
     $page === 'contracts' => contracts_controller(),

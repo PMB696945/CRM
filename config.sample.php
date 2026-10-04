@@ -14,4 +14,6 @@ return [
     'renewal_window_days' => 90,
     // Ticket SLA targets in hours, by priority.
     'sla_hours' => ['P1' => 4, 'P2' => 8, 'P3' => 24, 'P4' => 72],
+    // Locked out by the IP address list (Settings → Security)? Uncomment to switch it off.
+    // 'ip_allowlist_off' => true,
 ];

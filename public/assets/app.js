@@ -27,6 +27,15 @@ document.querySelectorAll('form[data-entity]').forEach((form) => {
   });
 });
 
+// New user form: a typed password is only needed when not emailing a temporary one.
+document.querySelectorAll('[data-toggle-password]').forEach((box) => {
+  const field = box.form.querySelector('[data-password-field]');
+  if (!field) return;
+  const sync = () => { field.hidden = box.checked; };
+  box.addEventListener('change', sync);
+  sync();
+});
+
 // Products: a one-off billing cycle means no minimum term.
 document.querySelectorAll('form[data-entity="products"], form[data-entity="supplier_products"]').forEach((form) => {
   const cycle = form.querySelector('[name="billing_frequency"]');

@@ -111,6 +111,13 @@
       <div class="help">Users without it are asked to set it up when they next sign in. Set it up on your own profile first.</div></div>
     <div class="field field-check"><label><input type="checkbox" name="force_https" value="1" <?= setting('force_https') === '1' ? 'checked' : '' ?> <?= is_https() ? '' : 'disabled' ?>> Always use a secure connection (HTTPS)</label>
       <div class="help"><?= is_https() ? 'Visitors on http:// are redirected to https://.' : 'Open the CRM over https:// to switch this on. Enable SSL (e.g. AutoSSL) in your hosting first.' ?></div></div>
+    <div class="field wide field-check"><label><input type="checkbox" name="ip_restrict" value="1" <?= setting('ip_restrict') === '1' ? 'checked' : '' ?>> Only allow the CRM to be used from these IP addresses</label>
+      <?php if (config('ip_allowlist_off')): ?><div class="error">Switched off in config.php ('ip_allowlist_off'), so it isn't being applied.</div><?php endif; ?></div>
+    <div class="field wide"><label for="s_ips">Allowed IP addresses</label>
+      <textarea id="s_ips" name="allowed_ips" rows="4" spellcheck="false" placeholder="81.2.69.160  # office&#10;203.0.113.0/24  # head office range"><?= $v('allowed_ips') ?></textarea>
+      <div class="help">One per line: a single address, or a range such as 81.2.69.0/24. Add notes after a #. You're on <b><?= h(client_ip()) ?></b> now, and it must be in the list.
+        People marked <i>Can use the CRM from any location</i> (under Users) aren't limited. Customer quote and order pages, and links from Xero, GoCardless and Signable, keep working from anywhere.
+        If you're ever locked out, add <code>'ip_allowlist_off' =&gt; true,</code> to config.php.</div></div>
     <div class="field"><label>Stored passwords &amp; API keys</label><p class="text-sm">Encrypted (AES-256). The key is in <code><?= config('app_key') ? 'config.php' : 'app.key' ?></code>. Keep a copy with your backups, because without it the saved API keys can't be read.</p></div>
   </section>
 
