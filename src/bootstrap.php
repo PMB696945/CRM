@@ -50,3 +50,4 @@ require_once __DIR__ . '/orders.php';
 require_once __DIR__ . '/pdf_text.php';
 require_once __DIR__ . '/invoices.php';
 require_once __DIR__ . '/abillity.php';
+require_once __DIR__ . '/billing_diary.php';

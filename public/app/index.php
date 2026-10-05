@@ -107,6 +107,7 @@ match (true) {
     $page === 'purchase_orders' => purchase_orders_controller(),
     $page === 'price_import' => price_import_controller(),
     $page === 'abillity'  => abillity_controller(),
+    $page === 'billing_diary' => billing_diary_controller(),
     $page === 'abillity_send' => abillity_send_controller(),
     $page === 'giacom_settings' => (function () { $_GET['action'] = 'settings'; giacom_controller(); })(),
     entity($page) !== null => entity_controller($page),

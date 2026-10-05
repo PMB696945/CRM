@@ -634,6 +634,9 @@ function entity_controller(string $name): void
                                 $type = 'error';
                             }
                         }
+                        if ($name === 'services') {
+                            service_diary_record($savedId, $existing ?: null); // the billing diary
+                        }
                         [$extra, $ok] = abillity_after_save($name, $savedId, $changes, !$existing);
                         $message .= $extra;
                         $type = $ok ? $type : 'error';
@@ -668,6 +671,9 @@ function entity_controller(string $name): void
                 $snapshot = record_snapshot($name, $entity, $id);
                 $accountId = isset($row['account_id']) ? (int)$row['account_id'] : null;
                 try {
+                    if ($name === 'services') {
+                        service_diary_removed($row);
+                    }
                     delete_row($name, $id);
                 } catch (PDOException $e) {
                     if ((int)($e->errorInfo[1] ?? 0) !== 1451) {

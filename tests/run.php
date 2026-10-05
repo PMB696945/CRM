@@ -2913,6 +2913,78 @@ array_map('unlink', glob("$smtpDir/*") ?: []);
 exec('rm -rf ' . escapeshellarg($cfg['storage_path']));
 @rmdir($smtpDir);
 
+echo "Billing diary\n";
+test('billing diary: every service change is recorded with its effect on billing, to tick off', function () {
+    as_role('super_admin');
+    $acct = create('accounts', ['name' => 'Diary Test Ltd', 'type' => 'business', 'status' => 'active']);
+    $product = create('products', ['sku' => 'DIARY-FTTP', 'name' => 'Diary Fibre', 'category' => 'broadband', 'monthly_price' => '90', 'billing_frequency' => 'quarterly', 'term_months' => '24']);
+    $types = fn() => array_column(db_all('SELECT change_type FROM service_changes WHERE account_id = ? ORDER BY id', [$acct]), 'change_type');
+    $last = fn() => db_one('SELECT * FROM service_changes WHERE account_id = ? ORDER BY id DESC LIMIT 1', [$acct]);
+    $before = fn($id) => db_one('SELECT * FROM services WHERE id = ?', [$id]);
+
+    // Added while pending: noted, but not billed yet.
+    $id = create('services', ['account_id' => $acct, 'product_id' => $product, 'service_type' => 'broadband', 'identifier' => 'TBC', 'status' => 'pending', 'setup_fee' => '99']);
+    service_changed($id, null);
+    $e = $last();
+    eq(['added', null, null], [$e['change_type'], $e['monthly_change'], $e['one_off']]);
+    ok(str_contains($e['summary'], 'Diary Fibre') && str_contains($e['summary'], 'billed once live'));
+
+    // Goes live with its number: billing starts (product price per month, as it has none of its own) plus the setup fee.
+    $b = $before($id);
+    db_exec("UPDATE services SET status = 'active', identifier = 'BB-12345', start_date = '2026-10-03' WHERE id = ?", [$id]);
+    service_changed($id, $b);
+    eq(['added', 'live', 'number'], $types());
+    $live = db_one("SELECT * FROM service_changes WHERE account_id = ? AND change_type = 'live'", [$acct]);
+    eq([30.0, 99.0, '2026-10-03'], [(float)$live['monthly_change'], (float)$live['one_off'], $live['effective_date']]);
+    eq(['TBC', 'BB-12345'], [db_value("SELECT from_value FROM service_changes WHERE account_id = ? AND change_type = 'number'", [$acct]), db_value("SELECT to_value FROM service_changes WHERE account_id = ? AND change_type = 'number'", [$acct])]);
+
+    // Repriced: the difference.
+    $b = $before($id);
+    db_exec("UPDATE services SET monthly_price = 35 WHERE id = ?", [$id]);
+    service_changed($id, $b);
+    $e = $last();
+    eq(['price', 5.0, '£30.00/mo', '£35.00/mo'], [$e['change_type'], (float)$e['monthly_change'], $e['from_value'], $e['to_value']]);
+
+    // Nothing billing-related changed: nothing recorded.
+    $b = $before($id);
+    db_exec("UPDATE services SET notes = 'just a note' WHERE id = ?", [$id]);
+    eq(0, service_diary_record($id, $b));
+
+    // Ceased: billing stops.
+    $b = $before($id);
+    db_exec("UPDATE services SET status = 'ceased' WHERE id = ?", [$id]);
+    service_changed($id, $b);
+    eq(['ceased', -35.0], [$last()['change_type'], (float)$last()['monthly_change']]);
+
+    // Cancelled before going live, and deleted.
+    $p = create('services', ['account_id' => $acct, 'service_type' => 'mobile', 'identifier' => '07700 900555', 'status' => 'pending', 'monthly_price' => '12']);
+    service_changed($p, null);
+    $b = $before($p);
+    db_exec("UPDATE services SET status = 'ceased' WHERE id = ?", [$p]);
+    service_changed($p, $b);
+    eq(['cancelled', null], [$last()['change_type'], $last()['monthly_change']]);
+    $gone = create('services', ['account_id' => $acct, 'service_type' => 'mobile', 'identifier' => '07700 900556', 'status' => 'active', 'monthly_price' => '10']);
+    service_changed($gone, null);
+    service_diary_removed($before($gone));
+    db_exec('DELETE FROM services WHERE id = ?', [$gone]);
+    eq(['removed', -10.0, null, '07700 900556'], [$last()['change_type'], (float)$last()['monthly_change'], $last()['service_id'], $last()['identifier']], 'kept after the service is deleted');
+
+    // The month: totals, what's left to check, and ticking off.
+    $month = date('Y-m');
+    $rows = billing_diary_rows($month, ['account_id' => $acct]);
+    eq(9, count($rows)); // added, live, number, price, ceased; added, cancelled; added, removed
+    $sum = array_sum(array_map(fn($r) => (float)$r['monthly_change'], $rows));
+    eq(30.0 + 5 - 35 + 10 - 10, $sum, 'net change in monthly billing');
+    $summary = billing_diary_summary($month);
+    ok($summary['unchecked'] >= 9 && $summary['by_type']['live'] >= 1);
+    db_exec('UPDATE service_changes SET checked_at = NOW(), checked_by = 1 WHERE id = ?', [$rows[0]['id']]);
+    eq(8, count(billing_diary_rows($month, ['account_id' => $acct, 'checked' => 'no'])));
+    eq(1, count(billing_diary_rows($month, ['account_id' => $acct, 'checked' => 'yes'])));
+    eq(1, count(billing_diary_rows($month, ['account_id' => $acct, 'type' => 'price'])));
+    eq([], billing_diary_rows(date('Y-m', strtotime('-2 months')), ['account_id' => $acct]), 'other months are separate');
+    eq(date('Y-m'), billing_diary_month('2026-13'));
+});
+
 echo "Demo data\n";
 test('demo data loads', function () {
     require_once APP_ROOT . '/install/demo_data.php';

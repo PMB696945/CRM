@@ -903,4 +903,28 @@ return [
             }
         }
     },
+    26 => function (): void {
+        // Billing diary: every change to a service, to tick off when checking the month's billing.
+        db()->exec("CREATE TABLE IF NOT EXISTS service_changes (
+            id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            service_id     INT UNSIGNED NULL,
+            account_id     INT UNSIGNED NOT NULL,
+            change_type    VARCHAR(20) NOT NULL,
+            summary        VARCHAR(255) NOT NULL,
+            from_value     VARCHAR(255) NULL,
+            to_value       VARCHAR(255) NULL,
+            monthly_change DECIMAL(10,2) NULL,
+            one_off        DECIMAL(10,2) NULL,
+            effective_date DATE NULL,
+            identifier     VARCHAR(190) NULL,
+            user_id        INT UNSIGNED NULL,
+            created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            checked_at     DATETIME NULL,
+            checked_by     INT UNSIGNED NULL,
+            check_note     VARCHAR(500) NULL,
+            KEY idx_sc_created (created_at),
+            KEY idx_sc_service (service_id),
+            KEY idx_sc_account (account_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];

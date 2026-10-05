@@ -423,6 +423,23 @@ Customers, products and services are set up in the CRM and sent to aBILLity (Gia
 - **Problems:** anything that can't be sent is listed under Admin → aBILLity and retried by the cron job. It's also shown on the customer, product or service.
 - **Ceased before billing started:** if a service is cancelled before it goes live, or ceased before its start date, the CRM can't remove the charge through the API. It's flagged, so remove that charge in aBILLity.
 
+## Billing diary
+
+**Customers → Billing diary** lists every change made to a service, month by month, so the billing can be checked against it.
+- **What's recorded:** a change is noted whichever way it was made: editing a service, a signed agreement adding services, a Giacom order completing or being cancelled, a customer being closed, or a service being deleted. The changes recorded are:
+  - new services
+  - going live
+  - price and setup-fee changes
+  - product, number, start-date and term changes
+  - suspensions and reactivations
+  - ceases and cancellations
+  - deletions
+- **Each entry shows** what changed (from → to), the effect on monthly billing (e.g. +£30.00 when a service goes live, −£35.00 when one is ceased), any one-off setup charge, the effective date, who made the change, and whether it's in aBILLity.
+- **Checking:** work through **To check**, and tick each change with **Check** (or tick several and press **Mark selected as checked**, with an optional note such as the invoice it was matched to). Who checked it and when is kept; **Undo** reverses a tick.
+- **Totals:** the month's net change in monthly billing and its one-off charges are shown at the top. Filter by type of change or by customer, and use **Export CSV** for a spreadsheet.
+- **Starting point:** the diary starts from when this update is installed; earlier changes are in each service's history.
+- **Who sees it:** anyone with the "See balances, credit and Direct Debit status" permission.
+
 ## Ticket groups and the queue
 
 - **Groups** (Admin → Ticket groups): Sales, Faults, Billing and General are created for you. For each group choose which ticket categories go to it (e.g. Fault and Porting → Faults), its members, and optionally a shared email address for new-ticket alerts (otherwise each member is emailed, when email is set up). Staff can be in several groups; you can also tick groups on each user's page.
@@ -521,6 +538,7 @@ src/
   campaigns.php    service alerts and marketing: audiences, sending, unsubscribes
   mailchimp.php    Mailchimp Marketing API
   abillity.php     aBILLity billing: customers, products and services sent from the CRM
+  billing_diary.php  billing diary: every service change, to check the month's billing
   giacom.php       Giacom comms API: availability checks, orders and tracking
   entities.php     field definitions + business rules (SLA, contract dates, numbering…)
   repository.php   generic validation, CRUD, listing, formatting

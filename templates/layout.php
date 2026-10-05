@@ -10,7 +10,7 @@ $nav = [
         'contacts'      => ['user', 'Contacts'],
         'sites'         => ['map', 'Sites & addresses'],
         'services'      => ['signal', 'Services & lines'],
-    ],
+    ] + (can('finance.view') ? ['billing_diary' => ['clipboard', 'Billing diary']] : []),
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'customer_orders' => ['inbox', 'Orders'],

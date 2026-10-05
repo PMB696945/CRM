@@ -376,3 +376,9 @@ document.querySelectorAll('[data-order-step]').forEach((form) => {
   select.addEventListener('change', sync);
   sync();
 });
+
+// A "select all" box in a table header ticks the row boxes in the same form.
+document.addEventListener('change', (e) => {
+  if (!e.target.matches('[data-toggle-boxes]')) return;
+  e.target.form?.querySelectorAll('input[type="checkbox"][name="ids[]"]').forEach((b) => { b.checked = e.target.checked; });
+});

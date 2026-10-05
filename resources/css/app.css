@@ -335,6 +335,9 @@
   .table.compact th, .table.compact td { @apply px-4 py-2.5; }
   .row-link { @apply whitespace-nowrap font-medium text-gray-800 hover:text-brand-500 dark:text-white/90 dark:hover:text-brand-400; }
   .empty-row { @apply py-10! text-center; }
+  .row-done td { @apply opacity-60; }
+  .link-button { @apply cursor-pointer border-0 bg-transparent p-0 text-brand-500 underline; }
+  .nowrap { @apply whitespace-nowrap; }
 
   /* ---- Filters, tabs, paging ---- */
   .filters { @apply mb-5 flex flex-wrap gap-2; }

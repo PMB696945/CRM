@@ -279,7 +279,7 @@ function contract_create_services(array $contract): int
         log_activity((int)$contract['account_id'], 'note', "$created pending service(s) created from contract {$contract['reference']}");
     }
     foreach ($ids ?? [] as $serviceId) {
-        abillity_queue_service($serviceId);
+        service_changed($serviceId, null);
     }
     return $created;
 }
