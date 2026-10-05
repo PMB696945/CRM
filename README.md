@@ -271,6 +271,13 @@ Under **Admin → Users → + New user**, enter their name, email and role. Leav
 - **If the email can't be sent:** you're shown the temporary password once, to pass on yourself.
 - **Later on:** the Users list has **Send new password** (or **Resend welcome email** if they haven't signed in yet) to email a fresh temporary password.
 
+**When someone leaves:** use **Disable…** on the Users list.
+- **Effect:** they're signed out straight away and can't sign in.
+- **Their work:** you can hand their open tickets, customers, opportunities and orders to someone else in the same step.
+- **History:** their name stays on everything they did.
+- **Finding them:** disabled users move to the **Disabled** tab, where they can be enabled again.
+- **Deleting:** only possible for users who have never signed in, such as one added by mistake.
+
 ## Limiting the CRM to your office (IP addresses)
 
 **Settings → Security → Only allow the CRM to be used from these IP addresses** limits who can use the CRM by location.

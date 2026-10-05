@@ -324,6 +324,53 @@ function users_controller(): void
         return;
     }
 
+    if (in_array($action, ['disable', 'enable', 'delete'], true) && is_post() && $id) {
+        verify_csrf();
+        if ($id === (int)current_user()['id']) {
+            flash('You can\'t ' . $action . ' your own account. Ask another admin.', 'error');
+            redirect(url('users'));
+        }
+        if ($action === 'enable') {
+            db_exec('UPDATE users SET active = 1 WHERE id = ?', [$id]);
+            audit('user_update', 'User ' . $values['email'] . ' enabled', 'users', $id, null, ['active' => ['from' => '0', 'to' => '1']]);
+            flash($values['name'] . ' can sign in again.');
+            redirect(url('users'));
+        }
+        if ($action === 'delete') {
+            // Only for accounts never used: anyone who has signed in keeps their name on their history (disable them instead).
+            if (db_value('SELECT last_login_at FROM users WHERE id = ?', [$id])) {
+                flash($values['name'] . ' has used the CRM, so they can be disabled but not deleted. That keeps their name on the work they did.', 'error');
+                redirect(url('users'));
+            }
+            db_exec('DELETE FROM users WHERE id = ?', [$id]);
+            audit('user_delete', 'User ' . $values['email'] . ' (' . $values['name'] . ') deleted', 'users', $id);
+            flash($values['name'] . ' has been deleted.');
+            redirect(url('users'));
+        }
+        // Disable: signed out at once (sessions check the account on every page), and optionally hand their work over.
+        db_exec('UPDATE users SET active = 0 WHERE id = ?', [$id]);
+        $to = (int)($_POST['reassign_to'] ?? 0);
+        $moved = [];
+        if ($to && $to !== $id && db_value('SELECT 1 FROM users WHERE id = ? AND active = 1', [$to])) {
+            foreach ([
+                'open tickets' => "UPDATE tickets SET assigned_to = ? WHERE assigned_to = ? AND status NOT IN ('resolved','closed')",
+                'customers' => 'UPDATE accounts SET owner_id = ? WHERE owner_id = ?',
+                'open opportunities' => "UPDATE opportunities SET owner_id = ? WHERE owner_id = ? AND stage NOT IN ('won','lost')",
+                'open orders' => "UPDATE customer_orders SET assigned_to = ? WHERE assigned_to = ? AND status NOT IN ('completed','cancelled')",
+            ] as $what => $sql) {
+                $n = db()->prepare($sql);
+                $n->execute([$to, $id]);
+                if ($n->rowCount()) {
+                    $moved[] = $n->rowCount() . ' ' . $what;
+                }
+            }
+        }
+        $toName = $to ? (string)db_value('SELECT name FROM users WHERE id = ?', [$to]) : '';
+        audit('user_update', 'User ' . $values['email'] . ' disabled' . ($moved ? '; ' . implode(', ', $moved) . " passed to $toName" : ''), 'users', $id, null, ['active' => ['from' => '1', 'to' => '0']]);
+        flash($values['name'] . ' has been disabled and can no longer sign in.' . ($moved ? ' ' . ucfirst(implode(', ', $moved)) . " passed to $toName." : ''));
+        redirect(url('users'));
+    }
+
     if ($action === 'send_password' && is_post() && $id) {
         verify_csrf();
         if ($id === (int)current_user()['id']) {
@@ -349,8 +396,11 @@ function users_controller(): void
         flash('Two-factor sign-in reset for ' . $values['name'] . '. They can set it up again from their profile.');
         redirect(url('users'));
     }
-    $users = db_all('SELECT id, name, email, role, active, created_at, totp_enabled, last_login_at, must_change_password, temp_password_expires_at, ip_anywhere FROM users ORDER BY name');
-    page('users', ['users' => $users], 'Users');
+    // Disabled users are kept (their names stay on their history) but listed separately.
+    $showDisabled = query('show') === 'disabled';
+    $users = db_all('SELECT id, name, email, role, active, created_at, totp_enabled, last_login_at, must_change_password, temp_password_expires_at, ip_anywhere FROM users WHERE active = ? ORDER BY name', [$showDisabled ? 0 : 1]);
+    $disabledCount = (int)db_value('SELECT COUNT(*) FROM users WHERE active = 0');
+    page('users', ['users' => $users, 'showDisabled' => $showDisabled, 'disabledCount' => $disabledCount], 'Users');
 }
 
 function profile_controller(): void

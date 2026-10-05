@@ -427,6 +427,8 @@
   .brand-logo-preview { @apply mb-2 inline-flex rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800; }
   .brand-logo-preview img { @apply max-h-16 max-w-60; }
   .public-logo { @apply max-h-12 max-w-56; }
+  .user-actions { @apply min-w-56 text-right; }
+  .user-actions > form, .user-actions > details { @apply my-0.5 ml-1 inline-block align-middle; }
   .address-lookup { @apply rounded-lg border border-dashed border-gray-200 p-3 dark:border-gray-800; }
   .address-lookup .lookup-row { @apply flex gap-2; }
   .address-lookup .lookup-row input { @apply max-w-xs flex-1 uppercase; }
