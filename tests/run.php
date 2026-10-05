@@ -1138,7 +1138,8 @@ test('signing online: email code, typed signature, certificate, copies emailed, 
     ok((bool)array_filter($copies, fn($r) => str_contains($r, 'X-Rcpt: sales@example.co.uk') && str_contains($r, 'certificate.pdf')), 'we get a copy');
     try { esign_sign($c, 'Eve Echo', '', '1.1.1.1', 'x'); throw new Exception('expected failure'); }
     catch (IntegrationException $e) { ok(true); }
-    eq(3, contract_create_services($c), '1 broadband + 2 mobile');
+    eq(3, count(contract_services($c)), 'services added as pending on signing: 1 broadband + 2 mobile');
+    eq(0, contract_create_services($c), 'not added twice');
     eq(3, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status = 'pending'", [$flow['account']]));
 });
 
@@ -1213,9 +1214,10 @@ test('one-off quote lines (e.g. installation) have no term and don\'t become ser
     $before = (int)db_value('SELECT COUNT(*) FROM quote_lines WHERE quote_id = ?', [$qid]);
     db_exec("INSERT INTO quote_lines (quote_id, service_type, description, quantity, monthly_price, setup_fee, term_months, sort) VALUES (?, 'other', 'Installation', 1, 0, 150, 0, 99)", [$qid]);
     $c = db_one('SELECT * FROM contracts WHERE id = ?', [$flow['contract']]);
+    $made = array_column(contract_services($c), 'id');
+    db_exec('DELETE FROM services WHERE id IN (' . implode(',', array_map('intval', $made)) . ')');
     eq(3, contract_create_services($c), 'still just the 3 ongoing services');
     db_exec('DELETE FROM quote_lines WHERE quote_id = ? AND sort = 99', [$qid]);
-    db_exec("DELETE FROM services WHERE account_id = ? AND status = 'pending' AND id > (SELECT m FROM (SELECT MAX(id) - 3 AS m FROM services) x)", [$flow['account']]);
     ok($before > 0);
 
     // A one-off product: no term, nothing per month, its cost isn't spread over time.
@@ -2142,7 +2144,7 @@ test('accepting a quote emails the customer a confirmation with a PDF and the ac
     ok(str_contains(quote_pdf($q2row), 'on the customer\'s behalf'));
 });
 
-test('accepted quotes become orders: onboarding team alerted, customer updated at each step', function () use (&$docIds) {
+test('accepted quotes become orders that wait for the agreement; signing alerts the team and adds services; customer updated at each step', function () use (&$docIds) {
     as_role('super_admin');
     $acct = $docIds['acct'];
     $team = (int)db_value("SELECT id FROM ticket_groups WHERE name = 'Onboarding'");
@@ -2165,12 +2167,40 @@ test('accepted quotes become orders: onboarding team alerted, customer updated a
         [$order['reference'], $order['status'], $order['assigned_to'], $order['contact_email'], (float)$order['monthly_total'], (float)$order['setup_total']]);
     eq($order['id'], order_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]))['id'], 'only one order per quote');
     $mails = array_slice(sent_mails(), $before);
-    $teamMail = array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: olive@netcomm.example')));
-    eq(1, count($teamMail), 'onboarding team alerted');
-    ok(str_contains(mail_body($teamMail[0]), $order['reference']));
+    eq([], array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: olive@netcomm.example'))), 'onboarding team not alerted until the agreement is signed');
     $conf = array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: bea@files.example')));
     ok(str_contains(mail_body($conf[0]), 'Track your order') && str_contains(mail_body($conf[0]), $order['reference']), 'confirmation includes the order tracking link');
     ok(orders_waiting_count() >= 1);
+
+    // The agreement's progress shows between "accepted" and "processing"; the order can't go further until it's signed.
+    $contract = order_contract($order);
+    eq('sent', $contract['status']);
+    eq($contract['id'], order_unsigned_contract($order)['id']);
+    eq(['Quotation accepted', 'Agreement sent', 'Agreement signed', 'Order processing', 'Order confirmed', 'Order completed'], array_column(order_progress($order, $contract), 'label'));
+    eq(['current', 'done', 'waiting'], array_slice(array_column(order_progress($order, $contract), 'state'), 0, 3));
+    try { order_set_status($order, 'processing', '', false); throw new Exception('expected'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), "hasn't been signed"), $e->getMessage()); }
+    try { order_raise_purchase_orders($order); throw new Exception('expected'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), "hasn't been signed"), 'no purchase orders before signing'); }
+    eq('accepted', db_value('SELECT status FROM customer_orders WHERE id = ?', [$order['id']]));
+
+    // Signing (here by hand) moves it on, adds the services and alerts the team.
+    $before = count(sent_mails());
+    $signed = contract_mark_signed($contract, null, 'marked as signed by a test');
+    usleep(300000);
+    eq('signed', $signed['status']);
+    eq(null, order_unsigned_contract($order));
+    eq('done', order_progress($order, $signed)[2]['state']);
+    $last = array_slice(order_events((int)$order['id'], true), -1)[0];
+    eq(['contract_signed', 'Agreement signed'], [$last['status'], order_status_label($last['status'])]);
+    ok(str_contains((string)$last['message'], 'signed'), 'the customer sees it on their tracking page');
+    $teamMail = array_values(array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'X-Rcpt: olive@netcomm.example')));
+    eq(1, count($teamMail), 'onboarding team alerted once signed');
+    ok(str_contains(mail_body($teamMail[0]), $order['reference']) && str_contains(mail_body($teamMail[0]), 'agreement has been signed'));
+    $services = contract_services($signed);
+    eq(1, count($services), 'pending service added on signing');
+    eq('pending', $services[0]['status']);
+    eq(0, contract_create_services($signed), 'not added twice');
 
     // Picked up once only.
     ok(order_pick_up($order, $olive));
@@ -2196,20 +2226,8 @@ test('accepted quotes become orders: onboarding team alerted, customer updated a
     ok($order['confirmed_at'] !== null && $order['completed_at'] !== null);
     try { order_set_status($order, 'processing', '', false); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'completed')); }
     $public = order_events((int)$order['id'], true);
-    eq(['accepted', 'contract_sent', 'processing', 'confirmed', 'completed'], array_column($public, 'status'), 'customer sees the steps, including the agreement being sent');
-
-    // The agreement's progress shows between "accepted" and "processing"; signing it (here by hand) moves it on.
-    $contract = order_contract($order);
-    eq('sent', $contract['status']);
-    eq(['Quotation accepted', 'Agreement sent', 'Agreement signed', 'Order processing', 'Order confirmed', 'Order completed'], array_column(order_progress($order, $contract), 'label'));
-    eq(['done', 'done', 'waiting'], array_slice(array_column(order_progress($order, $contract), 'state'), 0, 3));
-    $signed = contract_mark_signed($contract, null, 'marked as signed by a test');
-    eq('signed', $signed['status']);
-    eq('done', order_progress($order, $signed)[2]['state']);
-    $last = array_slice(order_events((int)$order['id'], true), -1)[0];
-    eq(['contract_signed', 'Agreement signed'], [$last['status'], order_status_label($last['status'])]);
-    ok(str_contains((string)$last['message'], 'signed'), 'the customer sees it on their tracking page');
-    eq(7, count(order_events((int)$order['id'])), 'staff also see the pick-up (plus the agreement being sent and signed)');
+    eq(['accepted', 'contract_sent', 'contract_signed', 'processing', 'confirmed', 'completed'], array_column($public, 'status'), 'customer sees the steps, including the agreement');
+    eq(7, count(order_events((int)$order['id'])), 'staff also see the pick-up');
     // Without notifying the customer.
     db_exec("UPDATE customer_orders SET status = 'processing', completed_at = NULL WHERE id = ?", [$order['id']]);
     $before = count(sent_mails());

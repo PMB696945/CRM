@@ -326,7 +326,7 @@ function contracts_controller(): void
                 break;
             case 'services':
                 $n = contract_create_services($contract);
-                flash("$n pending service" . ($n === 1 ? '' : 's') . ' created. Fill in numbers/circuit IDs as they\'re provisioned.');
+                flash($n ? "$n pending service" . ($n === 1 ? '' : 's') . ' created. Fill in numbers/circuit IDs as they\'re provisioned.' : 'The services from this contract have already been added.');
                 redirect(url('accounts', ['action' => 'view', 'id' => $contract['account_id']]));
             default:
                 not_found();

@@ -55,30 +55,36 @@ $me = (int)current_user()['id'];
     <?php endif; ?>
     <?php if ($canEdit && $open): ?>
     <section class="card">
-      <div class="card-head"><h2><?= $next ? 'Move to the next step' : 'Update' ?></h2></div>
+      <div class="card-head"><h2><?= $unsigned ? 'Waiting for the agreement' : ($next ? 'Move to the next step' : 'Update') ?></h2></div>
       <?php if (!$order['assigned_to']): ?>
         <div class="flash flash-warning">Nobody has picked this order up yet.
           <form method="post" action="<?= h($act('pick_up')) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm btn-primary">Pick it up</button></form></div>
       <?php endif; ?>
-      <form method="post" action="<?= h($act('status')) ?>" class="stack" data-order-step <?= $unsigned ? 'data-unsigned="' . h($contract['reference']) . '"' : '' ?>>
+      <?php if ($unsigned): ?>
+        <p>The order goes on once agreement <a href="<?= h(url('contracts', ['action' => 'view', 'id' => $contract['id']])) ?>"><?= h($contract['reference']) ?></a> is signed. The services are then added to the customer as pending<?= $order['assigned_to'] ? '' : ', and the onboarding team is alerted' ?>.</p>
+        <p class="help">Signed on paper or by email? Use <b>Mark as signed</b> on the agreement.</p>
+        <details class="mt-3"><summary class="cursor-pointer text-sm font-medium">Cancel the order instead</summary>
+      <?php endif; ?>
+      <form method="post" action="<?= h($act('status')) ?>" class="stack<?= $unsigned ? ' mt-3' : '' ?>" data-order-step<?= $unsigned ? ' data-confirm="Cancel order ' . h($order['reference']) . '?"' : '' ?>>
         <?= csrf_field() ?>
         <label>Step
           <select name="status" data-step-select>
-            <?php foreach (ORDER_STATUSES as $key => $label): if ($key === $order['status'] || $key === 'accepted') continue; ?>
+            <?php foreach (ORDER_STATUSES as $key => $label): if ($key === $order['status'] || $key === 'accepted' || ($unsigned && $key !== 'cancelled')) continue; ?>
               <option value="<?= h($key) ?>" data-message="<?= h(order_default_message($key)) ?>" <?= $key === $next ? 'selected' : '' ?>><?= h($label) ?></option>
             <?php endforeach; ?>
           </select></label>
         <label>Message to the customer
-          <textarea name="message" rows="4" data-step-message><?= h(order_default_message($next ?? 'cancelled')) ?></textarea></label>
+          <textarea name="message" rows="4" data-step-message><?= h(order_default_message($unsigned ? 'cancelled' : ($next ?? 'cancelled'))) ?></textarea></label>
         <label class="check"><input type="checkbox" name="notify" value="1" <?= $order['contact_email'] ? 'checked' : 'disabled' ?>>
           Email <?= $order['contact_email'] ? h($order['contact_name'] ?: 'the customer') . ' at ' . h($order['contact_email']) : 'the customer (add their email below first)' ?></label>
-        <?php if ($poPlan['suppliers'] && can('purchasing.edit') && $order['status'] === 'accepted'): ?>
+        <?php if ($poPlan['suppliers'] && can('purchasing.edit') && $order['status'] === 'accepted' && !$unsigned): ?>
           <label class="check" data-when-step="processing"><input type="checkbox" name="raise_pos" value="1" checked>
             Raise and email purchase orders to <?= h(implode(', ', array_map(fn($p) => $p['supplier']['name'], $poPlan['suppliers']))) ?></label>
         <?php endif; ?>
         <label>Internal note (optional)<input name="note" placeholder="Only staff see this"></label>
-        <div><button class="btn btn-primary">Update the order</button></div>
+        <div><button class="btn <?= $unsigned ? 'btn-danger' : 'btn-primary' ?>"><?= $unsigned ? 'Cancel the order' : 'Update the order' ?></button></div>
       </form>
+      <?php if ($unsigned): ?></details><?php endif; ?>
     </section>
     <?php endif; ?>
 
@@ -96,7 +102,9 @@ $me = (int)current_user()['id'];
           <?php endforeach; ?></tbody>
         </table></div>
       <?php endif; ?>
-      <?php if ($poPlan['suppliers']): ?>
+      <?php if ($poPlan['suppliers'] && $unsigned): ?>
+        <p class="help mt-4">Purchase orders can be raised once the agreement is signed.</p>
+      <?php elseif ($poPlan['suppliers']): ?>
         <form method="post" action="<?= h($act('raise_pos')) ?>" class="stack mt-4">
           <?= csrf_field() ?>
           <p class="small muted"><?= $purchaseOrders ? 'Still to order:' : 'From the products on this order and their preferred suppliers:' ?></p>

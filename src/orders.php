@@ -2,8 +2,9 @@
 declare(strict_types=1);
 
 /*
- * Customer orders. Accepting a quote creates an order and alerts the
- * onboarding team (a group, set in Settings). Someone picks it up and moves it
+ * Customer orders. Accepting a quote creates an order. When the quote has an
+ * agreement to sign, the order waits until it's signed; then the onboarding team
+ * (a group, set in Settings) is alerted. Someone picks it up and moves it
  * through the steps; at each step the customer can be emailed, and they can
  * follow progress on a tracking page.
  */
@@ -76,6 +77,22 @@ function order_is_open(array $order): bool
     return !in_array($order['status'], ['completed', 'cancelled'], true);
 }
 
+/** The order's agreement, if it has one that still needs signing (the order can't go further until it's signed). */
+function order_unsigned_contract(array $order): ?array
+{
+    $contract = order_contract($order);
+    return $contract && $contract['status'] !== 'signed' ? $contract : null;
+}
+
+/** Stop work on an order whose agreement hasn't been signed. */
+function order_require_signed(array $order): void
+{
+    if ($c = order_unsigned_contract($order)) {
+        throw new IntegrationException("Agreement {$c['reference']} hasn't been signed yet, so the order can't go any further. "
+            . 'If it was signed another way, use "Mark as signed" on the agreement.');
+    }
+}
+
 function order_tracking_url(array $order): string
 {
     return app_url() . '/order.php?t=' . rawurlencode((string)$order['token']);
@@ -119,8 +136,8 @@ function order_add_event(int $orderId, ?string $status, ?string $message, ?strin
         [$orderId, $status, $message !== '' ? $message : null, $note !== '' ? $note : null, $emailedTo, current_user()['id'] ?? null]);
 }
 
-/** Create the order for an accepted quote (once) and alert the onboarding team. */
-function order_create_from_quote(array $quote): array
+/** Create the order for an accepted quote (once), and alert the onboarding team unless told not to (it waits for the agreement). */
+function order_create_from_quote(array $quote, bool $notify = true): array
 {
     if ($existing = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$quote['id']])) {
         return $existing;
@@ -139,7 +156,9 @@ function order_create_from_quote(array $quote): array
     audit('create', "Order $ref created from quote {$quote['reference']}", 'customer_orders', $id, null, null, (int)$quote['account_id']);
     log_activity((int)$quote['account_id'], 'note', "Order $ref created from quote {$quote['reference']}");
     $order = db_one('SELECT * FROM customer_orders WHERE id = ?', [$id]);
-    order_notify_team($order);
+    if ($notify) {
+        order_notify_team($order);
+    }
     return $order;
 }
 
@@ -153,7 +172,8 @@ function order_notify_team(array $order): void
     $to = $team['email'] ? [['email' => $team['email'], 'name' => $team['name']]] : order_team_members();
     $account = db_one('SELECT name FROM accounts WHERE id = ?', [$order['account_id']]);
     $subject = "New order {$order['reference']} for {$account['name']}";
-    $body = '<p>A quote has been accepted and order <b>' . h($order['reference']) . '</b> is waiting to be picked up.</p>'
+    $contract = order_contract($order);
+    $body = '<p>' . ($contract && $contract['status'] === 'signed' ? 'The agreement has been signed' : 'A quote has been accepted') . ' and order <b>' . h($order['reference']) . '</b> is waiting to be picked up.</p>'
         . '<p><b>' . h($account['name']) . '</b> – ' . h($order['title']) . '<br>' . h(money($order['monthly_total'])) . ' a month, ' . h(money($order['setup_total'])) . ' one-off</p>'
         . email_button(app_url() . '/' . url('customer_orders', ['action' => 'view', 'id' => $order['id']]), 'Open the order');
     foreach ($to as $u) {
@@ -222,6 +242,9 @@ function order_set_status(array $order, string $status, string $message, bool $n
     }
     if (!order_is_open($order)) {
         throw new IntegrationException('This order is ' . strtolower(order_status_label($order['status'])) . '.');
+    }
+    if ($status !== 'cancelled') {
+        order_require_signed($order);
     }
     $user = current_user();
     $old = $order['status'];
@@ -432,6 +455,7 @@ function order_po_plan(array $order): array
  */
 function order_raise_purchase_orders(array $order, ?array $supplierIds = null, bool $send = true): array
 {
+    order_require_signed($order);
     $plan = order_po_plan($order);
     $account = db_one('SELECT * FROM accounts WHERE id = ?', [$order['account_id']]);
     $out = [];

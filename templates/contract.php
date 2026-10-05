@@ -61,11 +61,18 @@ $status = $contract['status'];
     </section>
     <?php endif; ?>
 
-    <?php if ($status === 'signed' && $quote): ?>
+    <?php if ($status === 'signed' && $quote): $services = contract_services($contract); ?>
     <section class="card">
-      <div class="card-head"><h2>Next step</h2></div>
-      <p>Add the contracted services to the customer as <b>pending</b>, ready to fill in numbers and circuit IDs as they're provisioned.</p>
-      <form method="post" action="<?= h($act('services')) ?>"><?= csrf_field() ?><button class="btn btn-primary">Create pending services</button></form>
+      <div class="card-head"><h2>Services</h2><?php if ($services): ?><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $account['id']])) ?>">Open the customer →</a><?php endif; ?></div>
+      <?php if ($services): ?>
+        <p class="help">Added to the customer as <b>pending</b> when the agreement was signed. Fill in numbers and circuit IDs as they're provisioned.</p>
+        <ul class="feed">
+          <?php foreach ($services as $sv): ?><li class="flex items-center justify-between gap-3"><a href="<?= h(url('services', ['action' => 'view', 'id' => $sv['id']])) ?>"><?= h($sv['identifier']) ?></a> <?= badge($sv['status']) ?></li><?php endforeach; ?>
+        </ul>
+      <?php else: ?>
+        <p>Add the contracted services to the customer as <b>pending</b>, ready to fill in numbers and circuit IDs as they're provisioned.</p>
+        <form method="post" action="<?= h($act('services')) ?>"><?= csrf_field() ?><button class="btn btn-primary">Create pending services</button></form>
+      <?php endif; ?>
     </section>
     <?php endif; ?>
   </div>

@@ -271,8 +271,9 @@ When a customer accepts a quote, the CRM creates the order. It also builds the a
 
 Orders show **Agreement sent** and **Agreement signed** as steps between *Quotation accepted* and *Order processing*. These steps show on the order page and on the customer's tracking page, and the customer sees an update at each one.
 - **Agreement card:** the order page says what's needed next (create, send, waiting, signed).
-- **Signed:** when the agreement is signed, the person handling the order is emailed.
-- **Unsigned:** moving an order to *confirmed* or *completed* while its agreement is unsigned asks you to check first.
+- **Waiting:** until the agreement is signed, the order can't move on and purchase orders can't be raised. It can still be picked up or cancelled.
+- **Signed:** the services are added to the customer as *pending*. If nobody has picked the order up, the onboarding team is alerted then; otherwise the person handling it is emailed.
+- **No agreement:** if none could be made (for example there's no template), the team is alerted when the quote is accepted and the order isn't held.
 
 ## Adding users
 
@@ -350,7 +351,7 @@ The CRM won't let a customer be its own dealer, sit under a customer that isn't 
 1. Open a customer → **New quote** and add lines from your products. Save, then **Email quote** to a contact (the dealer's contacts are offered too).
 2. The customer clicks the link and sees a branded quote page. To accept, they type their name and email and tick to confirm; they can also decline with a reason. Email security scanners that "click" links can't accept a quote by accident, because accepting needs that deliberate form.
 3. On acceptance you're emailed. The contract is generated (one document per template, each with only its own services) and emailed to the person who accepted to sign online. Both steps can be switched off under Settings → Quotes & contracts, and you can do them by hand from the quote.
-4. When they sign, the contract is marked signed and the signature certificate saved. Click **Create pending services** to add the services to the customer.
+4. When they sign, the contract is marked signed and the signature certificate saved. The services are added to the customer as pending.
 
 ## Signing agreements online
 

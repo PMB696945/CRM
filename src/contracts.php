@@ -182,12 +182,19 @@ function order_contract(array $order): ?array
 
 /**
  * Record a contract as signed (online, or by hand for one signed another way), and move its order on:
- * the customer's tracking page shows it, and the order's owner and the sales team are told.
+ * the customer's tracking page shows it, the services are added as pending, and the order's owner
+ * (or, if nobody has it yet, the onboarding team) and the sales team are told.
  */
 function contract_mark_signed(array $contract, ?string $signedFile, string $how): array
 {
     db_exec("UPDATE contracts SET status = 'signed', signed_at = NOW(), signed_file = COALESCE(?, signed_file), last_error = NULL WHERE id = ?", [$signedFile, $contract['id']]);
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} signed by {$contract['signer_name']} ($how)");
+    try {
+        contract_create_services(db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]));
+    } catch (Throwable $e) {
+        error_log('Pending services after signing failed: ' . $e->getMessage());
+        log_activity((int)$contract['account_id'], 'task', "Pending services for contract {$contract['reference']} weren't created", $e->getMessage());
+    }
     if ($order = contract_order($contract)) {
         order_add_event((int)$order['id'], 'contract_signed', 'Thank you, your agreement has been signed. We\'re now getting your order under way.',
             "Contract {$contract['reference']} signed by {$contract['signer_name']} ($how)");
@@ -199,6 +206,8 @@ function contract_mark_signed(array $contract, ?string $signedFile, string $how)
             } catch (Throwable $e) {
                 error_log('Contract signed email failed: ' . $e->getMessage());
             }
+        } elseif (order_is_open($order)) {
+            order_notify_team(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]));
         }
     }
     if ($contract['quote_id'] && ($quote = db_one('SELECT * FROM quotes WHERE id = ?', [$contract['quote_id']]))) {
@@ -214,9 +223,18 @@ function contract_cancel(array $contract): void
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} cancelled");
 }
 
-/** Create pending services from a signed contract's quote lines. Returns the number created. */
+/** The services made from a contract (as pending, when it was signed). */
+function contract_services(array $contract): array
+{
+    return db_all('SELECT * FROM services WHERE account_id = ? AND notes = ? ORDER BY id', [$contract['account_id'], "From contract {$contract['reference']}"]);
+}
+
+/** Create pending services from a signed contract's quote lines (once). Returns the number created. */
 function contract_create_services(array $contract): int
 {
+    if (contract_services($contract)) {
+        return 0;
+    }
     $lines = $contract['quote_id'] ? quote_lines((int)$contract['quote_id']) : [];
     $created = 0;
     foreach ($lines as $l) {
@@ -235,6 +253,8 @@ function contract_create_services(array $contract): int
             $created++;
         }
     }
-    log_activity((int)$contract['account_id'], 'note', "$created pending service(s) created from contract {$contract['reference']}");
+    if ($created) {
+        log_activity((int)$contract['account_id'], 'note', "$created pending service(s) created from contract {$contract['reference']}");
+    }
     return $created;
 }

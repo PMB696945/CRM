@@ -162,8 +162,10 @@ function quote_accept(array $quote, string $name, string $ip, bool $byStaff = fa
         db_exec("UPDATE opportunities SET stage = 'won', probability = 100 WHERE id = ?", [$quote['opportunity_id']]);
     }
     quote_notify_staff($quote, "Quote {$quote['reference']} accepted", "$name accepted quote {$quote['reference']} – " . $quote['title'] . '.');
+    $order = null;
     try {
-        order_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$quote['id']]));
+        // The onboarding team is alerted once the agreement is signed (or below, if there isn't one to sign).
+        $order = order_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$quote['id']]), false);
     } catch (Throwable $e) {
         error_log('Order after quote acceptance failed: ' . $e->getMessage());
         log_activity((int)$quote['account_id'], 'task', "Order for quote {$quote['reference']} wasn't created", $e->getMessage());
@@ -193,6 +195,9 @@ function quote_accept(array $quote, string $name, string $ip, bool $byStaff = fa
                 db_exec('UPDATE contracts SET last_error = ? WHERE id = ?', [$e->getMessage(), $contract['id']]);
             }
         }
+    }
+    if ($order && !order_unsigned_contract($order)) {
+        order_notify_team($order);
     }
     return $contract;
 }
