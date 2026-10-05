@@ -2239,6 +2239,67 @@ test('accepted quotes become orders that wait for the agreement; signing alerts 
     db_exec('UPDATE users SET active = 0 WHERE id = ?', [$olive]);
 });
 
+test('cancelling the agreement on an order releases it and alerts the onboarding team (or whoever has it)', function () use (&$docIds) {
+    as_role('super_admin');
+    $acct = $docIds['acct'];
+    $team = (int)setting('order_group_id');
+    db_exec("INSERT INTO users (name, email, password_hash, role) VALUES ('Ollie Onboard', 'ollie@netcomm.example', 'x', 'staff')");
+    $ollie = (int)db()->lastInsertId();
+    db_exec('INSERT INTO ticket_group_members (group_id, user_id) VALUES (?, ?)', [$team, $ollie]);
+    $teamMails = fn(int $from) => array_values(array_filter(array_slice(sent_mails(), $from), fn($m) => str_contains($m, 'X-Rcpt: ollie@netcomm.example')));
+    $newOrder = function () use ($acct): array {
+        db_exec('INSERT INTO quotes (account_id, title, created_by, status, recipient_name, recipient_email) VALUES (?, ?, 1, ?, ?, ?)', [$acct, 'Extra lines', 'sent', 'Bea Boss', 'bea@files.example']);
+        $qid = (int)db()->lastInsertId();
+        db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
+        quote_save_lines($qid, [['product_id' => null, 'service_type' => 'broadband', 'description' => 'FTTP 500', 'quantity' => 1, 'monthly_price' => 40, 'setup_fee' => 0, 'term_months' => 24]]);
+        quote_accept(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'Bea Boss', '198.51.100.7', false, 'bea@files.example', 'Firefox');
+        return db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$qid]);
+    };
+
+    // Unassigned: the team is told it can go ahead.
+    $order = $newOrder();
+    $contract = order_unsigned_contract($order);
+    ok($contract !== null, 'held by its agreement');
+    usleep(300000);
+    $before = count(sent_mails());
+    contract_cancel($contract);
+    usleep(300000);
+    eq(null, order_unsigned_contract($order), 'no longer held');
+    $m = $teamMails($before);
+    eq(1, count($m), 'onboarding team alerted');
+    ok(str_contains(mail_body($m[0]), "Agreement {$contract['reference']} was cancelled") && str_contains(mail_body($m[0]), $order['reference']));
+    ok(str_contains((string)array_slice(order_events((int)$order['id']), -1)[0]['note'], 'no longer waiting'), 'noted on the order');
+    order_set_status($order, 'processing', '', false);
+    eq('processing', db_value('SELECT status FROM customer_orders WHERE id = ?', [$order['id']]));
+
+    // Picked up: the person who has it is told instead.
+    $order = $newOrder();
+    order_pick_up($order, 1);
+    $contract = order_unsigned_contract($order);
+    usleep(300000);
+    $before = count(sent_mails());
+    contract_cancel($contract);
+    usleep(300000);
+    eq([], $teamMails($before), 'team not alerted when someone has it');
+    $admin = db_value('SELECT email FROM users WHERE id = 1');
+    ok((bool)array_filter(array_slice(sent_mails(), $before), fn($r) => str_contains($r, "X-Rcpt: $admin") && str_contains(mail_body($r), 'can go ahead')), 'owner told');
+
+    // Replaced by another agreement: still held, nobody alerted yet.
+    $order = $newOrder();
+    $first = order_unsigned_contract($order);
+    db_exec("UPDATE contracts SET status = 'draft' WHERE id = ?", [$first['id']]);
+    db_exec("INSERT INTO contracts (account_id, quote_id, kind, title, status, signer_name, signer_email, reference) VALUES (?, ?, 'services', 'Replacement', 'draft', 'Bea', 'bea@files.example', 'CON-REPL')", [$order['account_id'], $order['quote_id']]);
+    usleep(300000);
+    $before = count(sent_mails());
+    contract_cancel($first);
+    usleep(300000);
+    eq([], $teamMails($before), 'not alerted while a replacement agreement is unsigned');
+    eq('CON-REPL', order_unsigned_contract($order)['reference']);
+
+    db_exec('DELETE FROM ticket_group_members WHERE user_id = ?', [$ollie]);
+    db_exec('UPDATE users SET active = 0 WHERE id = ?', [$ollie]);
+});
+
 test('supplier prices: the preferred supplier sets the product cost, per the product billing cycle', function () {
     as_role('super_admin');
     $supplier = create('suppliers', ['name' => 'Kit Distribution Ltd', 'category' => 'hardware', 'active' => '1', 'email' => 'orders@kit.example']);

@@ -16,7 +16,7 @@ $status = $contract['status'];
       <form method="post" action="<?= h($act('send')) ?>" class="inline"><?= csrf_field() ?><button class="btn">Email the signing link again</button></form>
     <?php endif; ?>
     <?php if (in_array($status, ['draft', 'sent', 'failed'], true)): ?>
-      <form method="post" action="<?= h($act('cancel')) ?>" class="inline" data-confirm="Cancel this contract?<?= $status === 'sent' ? ' Its signing link will stop working.' : '' ?>"><?= csrf_field() ?><button class="btn btn-danger">Cancel</button></form>
+      <form method="post" action="<?= h($act('cancel')) ?>" class="inline" data-confirm="Cancel this contract?<?= $status === 'sent' ? ' Its signing link will stop working.' : '' ?><?= contract_order($contract) ? ' Its order will no longer wait for it, and the onboarding team will be told.' : '' ?>"><?= csrf_field() ?><button class="btn btn-danger">Cancel</button></form>
     <?php endif; ?>
   </div>
 </div>

@@ -273,6 +273,7 @@ Orders show **Agreement sent** and **Agreement signed** as steps between *Quotat
 - **Agreement card:** the order page says what's needed next (create, send, waiting, signed).
 - **Waiting:** until the agreement is signed, the order can't move on and purchase orders can't be raised. It can still be picked up or cancelled.
 - **Signed:** the services are added to the customer as *pending*. If nobody has picked the order up, the onboarding team is alerted then; otherwise the person handling it is emailed.
+- **Cancelled:** cancelling the agreement releases the order. The onboarding team is alerted (or the person handling it, if someone has picked it up), unless another unsigned agreement for the same quote is still holding it.
 - **No agreement:** if none could be made (for example there's no template), the team is alerted when the quote is accepted and the order isn't held.
 
 ## Adding users

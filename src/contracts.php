@@ -221,6 +221,28 @@ function contract_cancel(array $contract): void
     // The signing link stops working once the contract is cancelled.
     db_exec("UPDATE contracts SET status = 'cancelled' WHERE id = ?", [$contract['id']]);
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} cancelled");
+    $order = contract_order($contract);
+    if (!$order || !order_is_open($order)) {
+        return;
+    }
+    $held = order_unsigned_contract($order);
+    order_add_event((int)$order['id'], null, null, "Contract {$contract['reference']} cancelled" . ($held ? ". The order is waiting for {$held['reference']} instead." : '. The order is no longer waiting for an agreement.'));
+    if ($held) {
+        return; // a replacement agreement holds the order; the team hears when that's signed
+    }
+    // Whoever has the order (or, if nobody, the onboarding team) needs to know it can go ahead.
+    $why = "Agreement {$contract['reference']} was cancelled, so the order is no longer waiting for it to be signed";
+    if ($order['assigned_to'] && ($owner = db_one('SELECT name, email FROM users WHERE id = ? AND active = 1', [$order['assigned_to']]))) {
+        try {
+            send_mail($owner['email'], $owner['name'], "Agreement cancelled: order {$order['reference']}",
+                email_layout('Agreement cancelled', '<p>' . h($why) . ': order <b>' . h($order['reference']) . '</b> (' . h($order['title']) . ') can go ahead.</p>'
+                    . '<p><a href="' . h(app_url() . '/index.php?page=customer_orders&action=view&id=' . $order['id']) . '">Open the order</a></p>'));
+        } catch (Throwable $e) {
+            error_log('Contract cancelled email failed: ' . $e->getMessage());
+        }
+    } else {
+        order_notify_team($order, $why);
+    }
 }
 
 /** The services made from a contract (as pending, when it was signed). */

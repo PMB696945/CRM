@@ -162,8 +162,8 @@ function order_create_from_quote(array $quote, bool $notify = true): array
     return $order;
 }
 
-/** Email the onboarding team about a new order (the group's shared email, or each member). */
-function order_notify_team(array $order): void
+/** Email the onboarding team about an order ready to pick up (the group's shared email, or each member). $why says what happened. */
+function order_notify_team(array $order, ?string $why = null): void
 {
     $team = order_team();
     if (!$team || !mail_configured()) {
@@ -173,7 +173,8 @@ function order_notify_team(array $order): void
     $account = db_one('SELECT name FROM accounts WHERE id = ?', [$order['account_id']]);
     $subject = "New order {$order['reference']} for {$account['name']}";
     $contract = order_contract($order);
-    $body = '<p>' . ($contract && $contract['status'] === 'signed' ? 'The agreement has been signed' : 'A quote has been accepted') . ' and order <b>' . h($order['reference']) . '</b> is waiting to be picked up.</p>'
+    $why ??= $contract && $contract['status'] === 'signed' ? 'The agreement has been signed' : 'A quote has been accepted';
+    $body = '<p>' . h($why) . ' and order <b>' . h($order['reference']) . '</b> is waiting to be picked up.</p>'
         . '<p><b>' . h($account['name']) . '</b> – ' . h($order['title']) . '<br>' . h(money($order['monthly_total'])) . ' a month, ' . h(money($order['setup_total'])) . ' one-off</p>'
         . email_button(app_url() . '/' . url('customer_orders', ['action' => 'view', 'id' => $order['id']]), 'Open the order');
     foreach ($to as $u) {
