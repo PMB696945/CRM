@@ -16,16 +16,16 @@
 <?php if (!$order): ?>
   <div class="card empty"><h1 class="justify-center">We couldn't find that order</h1>
     <p class="muted mt-2">Please check the link, or contact <?= h($company) ?><?= company('email') ? ' at <a href="mailto:' . h(company('email')) . '">' . h(company('email')) . '</a>' : '' ?>.</p></div>
-<?php else: $steps = array_keys(ORDER_STEPS); $at = array_search($order['status'], $steps, true); ?>
+<?php else: ?>
   <section class="card">
     <h1><?= h($order['title']) ?></h1>
     <p class="muted mt-1">For <b class="text-gray-800 dark:text-white/90"><?= h($account['name']) ?></b> · ordered <?= h(fmt_date($order['created_at'])) ?></p>
     <?php if ($order['status'] === 'cancelled'): ?>
       <div class="flash flash-error mt-4">This order has been cancelled.</div>
     <?php else: ?>
-      <ol class="order-steps mt-4">
-        <?php foreach (ORDER_STEPS as $key => $label): $i = array_search($key, $steps, true); ?>
-          <li class="<?= $i < $at ? 'done' : ($i === $at ? 'current' : '') ?>"><span><?= $i <= $at ? '✓' : $i + 1 ?></span><?= h($label) ?></li>
+      <ol class="order-steps mt-4 <?= count($progress) > 4 ? 'order-steps-6' : '' ?>">
+        <?php foreach ($progress as $n => $s): ?>
+          <li class="<?= h($s['state']) ?>"><span><?= in_array($s['state'], ['done', 'current'], true) ? '✓' : $n + 1 ?></span><?= h($s['label']) ?></li>
         <?php endforeach; ?>
       </ol>
     <?php endif; ?>

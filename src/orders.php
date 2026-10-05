@@ -24,9 +24,38 @@ const ORDER_DEFAULT_MESSAGES = [
     'cancelled'  => "Your order has been cancelled. If you weren't expecting this, please get in touch.",
 ];
 
+/** Milestones recorded on an order's timeline that aren't steps staff move it to. */
+const ORDER_CONTRACT_EVENTS = ['contract_sent' => 'Agreement sent to sign', 'contract_signed' => 'Agreement signed'];
+
 function order_status_label(?string $status): string
 {
-    return ORDER_STATUSES[$status] ?? humanize((string)$status);
+    return ORDER_STATUSES[$status] ?? ORDER_CONTRACT_EVENTS[$status] ?? humanize((string)$status);
+}
+
+/**
+ * The steps to show for an order, with the contract's progress between "accepted" and "processing" when there
+ * is one (or contracts are made automatically): [['label', 'state' => done|current|waiting|todo]].
+ */
+function order_progress(array $order, ?array $contract): array
+{
+    $steps = array_keys(ORDER_STEPS);
+    $at = array_search($order['status'], $steps, true);
+    $out = [];
+    foreach (ORDER_STEPS as $key => $label) {
+        $i = array_search($key, $steps, true);
+        $out[$key] = ['label' => $label, 'state' => $order['status'] === 'cancelled' ? 'todo' : ($i < $at ? 'done' : ($i === $at ? 'current' : 'todo'))];
+    }
+    if (!$contract && setting('contracts_auto_on_accept', '1') !== '1') {
+        return array_values($out);
+    }
+    $cs = $contract['status'] ?? null;
+    $sent = in_array($cs, ['sent', 'signed'], true);
+    $signed = $cs === 'signed';
+    $contractSteps = [
+        'contract_sent' => ['label' => 'Agreement sent', 'state' => $sent ? 'done' : 'todo'],
+        'contract_signed' => ['label' => 'Agreement signed', 'state' => $signed ? 'done' : ($sent ? 'waiting' : 'todo')],
+    ];
+    return array_values(['accepted' => $out['accepted']] + $contractSteps + array_slice($out, 1, null, true));
 }
 
 function order_default_message(string $status): string
@@ -250,13 +279,15 @@ function customer_orders_controller(): void
         $quote = $order['quote_id'] ? db_one('SELECT * FROM quotes WHERE id = ?', [$order['quote_id']]) : null;
         $lines = $quote ? quote_lines((int)$quote['id']) : [];
         $contracts = $quote ? db_all('SELECT * FROM contracts WHERE quote_id = ? ORDER BY id DESC', [$quote['id']]) : [];
+        $contract = order_contract($order);
+        $hasTemplates = (bool)db_value('SELECT 1 FROM contract_templates WHERE active = 1 LIMIT 1');
         $events = order_events((int)$order['id']);
         $assignee = $order['assigned_to'] ? db_one('SELECT id, name FROM users WHERE id = ?', [$order['assigned_to']]) : null;
         $users = db_all('SELECT id, name FROM users WHERE active = 1 ORDER BY name');
         $purchaseOrders = can('suppliers.view') ? order_purchase_orders((int)$order['id']) : [];
         $poPlan = can('purchasing.edit') && order_is_open($order) ? order_po_plan($order) : ['suppliers' => [], 'skipped' => []];
         $giacomOrders = can('orders.check') ? db_all('SELECT * FROM giacom_orders WHERE account_id = ? AND created_at >= ? ORDER BY id DESC', [$order['account_id'], $order['created_at']]) : [];
-        page('customer_order', compact('order', 'account', 'quote', 'lines', 'contracts', 'events', 'assignee', 'users', 'purchaseOrders', 'giacomOrders', 'poPlan'),
+        page('customer_order', compact('order', 'account', 'quote', 'lines', 'contracts', 'contract', 'hasTemplates', 'events', 'assignee', 'users', 'purchaseOrders', 'giacomOrders', 'poPlan'),
             $order['reference'] . ' ' . $order['title']);
         return;
     }

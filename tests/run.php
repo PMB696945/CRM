@@ -2133,8 +2133,20 @@ test('accepted quotes become orders: onboarding team alerted, customer updated a
     ok($order['confirmed_at'] !== null && $order['completed_at'] !== null);
     try { order_set_status($order, 'processing', '', false); throw new Exception('expected'); } catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'completed')); }
     $public = order_events((int)$order['id'], true);
-    eq(['accepted', 'processing', 'confirmed', 'completed'], array_column($public, 'status'), 'customer sees the steps');
-    eq(5, count(order_events((int)$order['id'])), 'staff also see the pick-up');
+    eq(['accepted', 'contract_sent', 'processing', 'confirmed', 'completed'], array_column($public, 'status'), 'customer sees the steps, including the agreement being sent');
+
+    // The agreement's progress shows between "accepted" and "processing"; signing it (here by hand) moves it on.
+    $contract = order_contract($order);
+    eq('sent', $contract['status']);
+    eq(['Quotation accepted', 'Agreement sent', 'Agreement signed', 'Order processing', 'Order confirmed', 'Order completed'], array_column(order_progress($order, $contract), 'label'));
+    eq(['done', 'done', 'waiting'], array_slice(array_column(order_progress($order, $contract), 'state'), 0, 3));
+    $signed = contract_mark_signed($contract, null, 'marked as signed by a test');
+    eq('signed', $signed['status']);
+    eq('done', order_progress($order, $signed)[2]['state']);
+    $last = array_slice(order_events((int)$order['id'], true), -1)[0];
+    eq(['contract_signed', 'Agreement signed'], [$last['status'], order_status_label($last['status'])]);
+    ok(str_contains((string)$last['message'], 'signed'), 'the customer sees it on their tracking page');
+    eq(7, count(order_events((int)$order['id'])), 'staff also see the pick-up (plus the agreement being sent and signed)');
     // Without notifying the customer.
     db_exec("UPDATE customer_orders SET status = 'processing', completed_at = NULL WHERE id = ?", [$order['id']]);
     $before = count(sent_mails());

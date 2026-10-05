@@ -259,6 +259,10 @@ function contract_send(array $contract): array
     }
     db_exec("UPDATE contracts SET status = 'sent', signable_fingerprint = ?, sent_at = NOW(), last_error = NULL WHERE id = ?", [$fingerprint, $contract['id']]);
     log_activity((int)$contract['account_id'], 'email', "Contract {$contract['reference']} sent for signature to {$contract['signer_name']} <{$contract['signer_email']}>");
+    if ($order = contract_order($contract)) {
+        order_add_event((int)$order['id'], 'contract_sent', "We've emailed your agreement to {$contract['signer_name']} ({$contract['signer_email']}) to sign online. We'll carry on with your order once it's signed.",
+            "Contract {$contract['reference']} sent via Signable");
+    }
     return db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]);
 }
 
@@ -279,17 +283,49 @@ function contract_sync(array $contract): array
     if ($new === 'signed' && !empty($env['envelope_signed_pdf'])) {
         $signedFile = contract_download_signed($contract, (string)$env['envelope_signed_pdf']);
     }
-    db_exec('UPDATE contracts SET status = ?, signed_at = IF(? = \'signed\', NOW(), signed_at), signed_file = COALESCE(?, signed_file) WHERE id = ?',
-        [$new, $new, $signedFile, $contract['id']]);
-    log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} " . ($new === 'signed' ? "signed by {$contract['signer_name']}" : $new));
-    if ($new === 'signed' && $contract['quote_id'] && ($order = db_one('SELECT id FROM customer_orders WHERE quote_id = ?', [$contract['quote_id']]))) {
-        order_add_event((int)$order['id'], null, null, "Contract {$contract['reference']} signed by {$contract['signer_name']}");
+    if ($new === 'signed') {
+        return contract_mark_signed($contract, $signedFile, 'in Signable');
     }
-    if ($new === 'signed' && $contract['quote_id']) {
-        $quote = db_one('SELECT * FROM quotes WHERE id = ?', [$contract['quote_id']]);
-        if ($quote) {
-            quote_notify_staff($quote, "Contract {$contract['reference']} signed", "{$contract['signer_name']} signed contract {$contract['reference']} for quote {$quote['reference']}.");
+    db_exec('UPDATE contracts SET status = ? WHERE id = ?', [$new, $contract['id']]);
+    log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} $new");
+    return db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]);
+}
+
+/** The customer order a contract belongs to (through its quote), if any. */
+function contract_order(array $contract): ?array
+{
+    return $contract['quote_id'] ? db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$contract['quote_id']]) : null;
+}
+
+/** The contract for an order: its quote's latest one that isn't cancelled. */
+function order_contract(array $order): ?array
+{
+    return $order['quote_id'] ? db_one("SELECT * FROM contracts WHERE quote_id = ? AND status NOT IN ('cancelled') ORDER BY id DESC LIMIT 1", [$order['quote_id']]) : null;
+}
+
+/**
+ * Record a contract as signed (by Signable, or by hand for one signed another way), and move its order on:
+ * the customer's tracking page shows it, and the order's owner and the sales team are told.
+ */
+function contract_mark_signed(array $contract, ?string $signedFile, string $how): array
+{
+    db_exec("UPDATE contracts SET status = 'signed', signed_at = NOW(), signed_file = COALESCE(?, signed_file), last_error = NULL WHERE id = ?", [$signedFile, $contract['id']]);
+    log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} signed by {$contract['signer_name']} ($how)");
+    if ($order = contract_order($contract)) {
+        order_add_event((int)$order['id'], 'contract_signed', 'Thank you, your agreement has been signed. We\'re now getting your order under way.',
+            "Contract {$contract['reference']} signed by {$contract['signer_name']} ($how)");
+        if ($order['assigned_to'] && ($owner = db_one('SELECT name, email FROM users WHERE id = ? AND active = 1', [$order['assigned_to']]))) {
+            try {
+                send_mail($owner['email'], $owner['name'], "Contract signed: order {$order['reference']}",
+                    email_layout('Contract signed', '<p>' . h($contract['signer_name']) . ' has signed contract ' . h($contract['reference']) . ' for order <b>' . h($order['reference']) . '</b> (' . h($order['title']) . ').</p>'
+                        . '<p><a href="' . h(app_url() . '/index.php?page=customer_orders&action=view&id=' . $order['id']) . '">Open the order</a></p>'));
+            } catch (Throwable $e) {
+                error_log('Contract signed email failed: ' . $e->getMessage());
+            }
         }
+    }
+    if ($contract['quote_id'] && ($quote = db_one('SELECT * FROM quotes WHERE id = ?', [$contract['quote_id']]))) {
+        quote_notify_staff($quote, "Contract {$contract['reference']} signed", "{$contract['signer_name']} signed contract {$contract['reference']} for quote {$quote['reference']}.");
     }
     return db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]);
 }

@@ -4,8 +4,8 @@ $act = fn(string $a) => url('customer_orders', ['action' => $a, 'id' => $id]);
 $canEdit = can('onboarding.edit');
 $open = order_is_open($order);
 $next = $open ? order_next_step($order['status']) : null;
-$steps = array_keys(ORDER_STEPS);
-$at = array_search($order['status'], $steps, true);
+$progress = order_progress($order, $contract);
+$unsigned = $contract && $contract['status'] !== 'signed';
 $me = (int)current_user()['id'];
 ?>
 <div class="page-head">
@@ -21,9 +21,9 @@ $me = (int)current_user()['id'];
 </div>
 
 <div class="card">
-  <ol class="order-steps">
-    <?php foreach (ORDER_STEPS as $key => $label): $i = array_search($key, $steps, true); ?>
-      <li class="<?= $order['status'] === 'cancelled' ? '' : ($i < $at ? 'done' : ($i === $at ? 'current' : '')) ?>"><span><?= $i + 1 ?></span><?= h($label) ?></li>
+  <ol class="order-steps <?= count($progress) > 4 ? 'order-steps-6' : '' ?>">
+    <?php foreach ($progress as $n => $s): ?>
+      <li class="<?= h($s['state']) ?>"><span><?= $s['state'] === 'done' ? '✓' : $n + 1 ?></span><?= h($s['label']) ?></li>
     <?php endforeach; ?>
   </ol>
   <?php if ($order['status'] === 'cancelled'): ?><p class="text-danger mt-2">This order was cancelled.</p><?php endif; ?>
@@ -31,6 +31,28 @@ $me = (int)current_user()['id'];
 
 <div class="grid-side">
   <div>
+    <?php if ($open && ($contract || setting('contracts_auto_on_accept', '1') === '1')): $cs = $contract['status'] ?? null; ?>
+    <section class="card contract-status contract-<?= h($cs ?? 'none') ?>">
+      <div class="card-head"><h2>Agreement</h2><?php if ($contract): ?><a href="<?= h(url('contracts', ['action' => 'view', 'id' => $contract['id']])) ?>"><?= h($contract['reference']) ?> →</a><?php endif; ?></div>
+      <?php if (!$contract): ?>
+        <p><b>No agreement yet.</b> <?= $hasTemplates ? 'One couldn\'t be made automatically when the quote was accepted (see the customer\'s activity for why).' : 'There are no contract templates yet, so one couldn\'t be made when the quote was accepted.' ?></p>
+        <?php if (!$hasTemplates): ?><p class="help">Upload your Word agreement under <a href="<?= h(url('contract_templates')) ?>">Admin → Contract templates</a> (a "General" one covers everything).</p><?php endif; ?>
+        <?php if ($quote && can('sales.edit') && $hasTemplates): ?><form method="post" action="<?= h(url('quotes', ['action' => 'contract', 'id' => $quote['id']])) ?>"><?= csrf_field() ?><button class="btn btn-sm btn-primary">Create the agreement</button></form><?php endif; ?>
+      <?php elseif (in_array($cs, ['draft', 'failed'], true)): ?>
+        <p><b>Ready, but not sent yet.</b> <?= signable_configured() ? 'Send it to ' . h($contract['signer_name']) . ' to sign online from the agreement page.' : 'Signable isn\'t set up, so it hasn\'t been emailed. Download it and get it signed, then mark it as signed, or set up Signable to send it for e-signature.' ?></p>
+        <?php if ($contract['last_error']): ?><p class="small text-danger"><?= h($contract['last_error']) ?></p><?php endif; ?>
+        <a class="btn btn-sm btn-primary" href="<?= h(url('contracts', ['action' => 'view', 'id' => $contract['id']])) ?>"><?= signable_configured() ? 'Send for signature' : 'Open the agreement' ?></a>
+      <?php elseif ($cs === 'sent'): ?>
+        <p><b>Waiting for <?= h($contract['signer_name']) ?> to sign.</b> Sent <?= h(fmt_datetime($contract['sent_at'])) ?> to <?= h($contract['signer_email']) ?>.</p>
+        <form method="post" action="<?= h(url('contracts', ['action' => 'check', 'id' => $contract['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm">↻ Check now</button></form>
+        <form method="post" action="<?= h(url('contracts', ['action' => 'remind', 'id' => $contract['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm">Send a reminder</button></form>
+      <?php elseif ($cs === 'signed'): ?>
+        <p class="text-ok"><b>✔ Signed</b> by <?= h($contract['signer_name']) ?> on <?= h(fmt_datetime($contract['signed_at'])) ?>.</p>
+      <?php else: ?>
+        <p><b>The agreement was <?= h($cs) ?>.</b> Open it to see what happened.</p>
+      <?php endif; ?>
+    </section>
+    <?php endif; ?>
     <?php if ($canEdit && $open): ?>
     <section class="card">
       <div class="card-head"><h2><?= $next ? 'Move to the next step' : 'Update' ?></h2></div>
@@ -38,7 +60,7 @@ $me = (int)current_user()['id'];
         <div class="flash flash-warning">Nobody has picked this order up yet.
           <form method="post" action="<?= h($act('pick_up')) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm btn-primary">Pick it up</button></form></div>
       <?php endif; ?>
-      <form method="post" action="<?= h($act('status')) ?>" class="stack" data-order-step>
+      <form method="post" action="<?= h($act('status')) ?>" class="stack" data-order-step <?= $unsigned ? 'data-unsigned="' . h($contract['reference']) . '"' : '' ?>>
         <?= csrf_field() ?>
         <label>Step
           <select name="status" data-step-select>

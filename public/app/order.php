@@ -18,4 +18,5 @@ render('public_order', [
     'order'   => $order,
     'account' => $order ? db_one('SELECT name FROM accounts WHERE id = ?', [$order['account_id']]) : null,
     'events'  => $order ? order_events((int)$order['id'], true) : [],
+    'progress' => $order ? order_progress($order, order_contract($order)) : [],
 ]);

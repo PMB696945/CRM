@@ -263,6 +263,17 @@ When a supplier invoice is approved to pay (with **Send approved supplier invoic
 
 If you switch on something that needs a new Xero permission, Admin → Xero shows **Press Reconnect to finish** until you've reconnected and approved it.
 
+## Agreements on orders
+
+When a customer accepts a quote, the CRM creates the order. It also builds the agreement from your **Contract templates**, if there's one for the services quoted or a "General" one.
+- **With Signable set up:** the agreement is emailed to the customer to sign online straight away. When they sign, the signed PDF is saved.
+- **Without Signable:** the agreement is left ready to download. Get it signed your own way, then use **Mark as signed** on the agreement, optionally attaching the signed PDF.
+
+Orders show **Agreement sent** and **Agreement signed** as steps between *Quotation accepted* and *Order processing*. These steps show on the order page and on the customer's tracking page, and the customer sees an update at each one.
+- **Agreement card:** the order page says what's needed next (create, send, waiting, signed).
+- **Signed:** when the agreement is signed, the person handling the order is emailed.
+- **Unsigned:** moving an order to *confirmed* or *completed* while its agreement is unsigned asks you to check first.
+
 ## Adding users
 
 Under **Admin → Users → + New user**, enter their name, email and role. Leave **Email them a welcome email with a temporary password** ticked.

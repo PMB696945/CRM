@@ -358,6 +358,15 @@ document.querySelectorAll('[data-order-step]').forEach((form) => {
   });
 });
 
+// Confirming or completing an order whose agreement isn't signed yet: check first.
+document.querySelectorAll('[data-order-step][data-unsigned]').forEach((form) => {
+  form.addEventListener('submit', (e) => {
+    const step = form.querySelector('[data-step-select]').value;
+    if (['confirmed', 'completed'].includes(step)
+      && !window.confirm(`Agreement ${form.dataset.unsigned} hasn't been signed yet. Carry on anyway?`)) e.preventDefault();
+  });
+});
+
 // Show options that only apply to one order step (e.g. raising purchase orders when processing).
 document.querySelectorAll('[data-order-step]').forEach((form) => {
   const select = form.querySelector('[data-step-select]');

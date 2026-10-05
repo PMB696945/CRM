@@ -67,6 +67,18 @@ $status = $contract['status'];
       </form>
     </section>
     <?php endif; ?>
+    <?php if (in_array($status, ['draft', 'sent', 'failed'], true) && can('sales.edit')): ?>
+    <section class="card">
+      <div class="card-head"><h2>Signed another way?</h2></div>
+      <p class="help">If the customer signed on paper or returned it by email, record it here. The order moves on, and their tracking page shows it.</p>
+      <form method="post" action="<?= h($act('mark_signed')) ?>" enctype="multipart/form-data" class="stack" data-confirm="Mark <?= h($contract['reference']) ?> as signed?">
+        <?= csrf_field() ?>
+        <label>Signed by<input name="signer_name" value="<?= h($contract['signer_name']) ?>"></label>
+        <label>Signed copy (PDF, optional)<input type="file" name="signed_copy" accept="application/pdf"></label>
+        <button class="btn">Mark as signed</button>
+      </form>
+    </section>
+    <?php endif; ?>
     <section class="card">
       <dl class="details details-stack">
         <dt>Signer</dt><dd><?= h($contract['signer_name']) ?><br><span class="muted"><?= h($contract['signer_email']) ?></span></dd>

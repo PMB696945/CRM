@@ -293,6 +293,39 @@ function contracts_controller(): void
                 contract_send($contract);
                 flash('Contract sent for signature via Signable.');
                 break;
+            case 'mark_signed':
+                // Signed another way (on paper, or by email): record it, with a copy of the signed document if there is one.
+                if (!in_array($contract['status'], ['draft', 'sent', 'failed'], true)) {
+                    throw new IntegrationException('Only a contract waiting to be signed can be marked as signed.');
+                }
+                $file = null;
+                $up = $_FILES['signed_copy'] ?? null;
+                if ($up && ($up['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                    if ($up['error'] !== UPLOAD_ERR_OK || $up['size'] > 20 * 1024 * 1024) {
+                        throw new IntegrationException('The signed copy couldn\'t be uploaded (it must be under 20 MB).');
+                    }
+                    $bytes = (string)file_get_contents($up['tmp_name']);
+                    if (!str_starts_with($bytes, '%PDF')) {
+                        throw new IntegrationException('The signed copy must be a PDF.');
+                    }
+                    $file = preg_replace('/[^A-Za-z0-9-]/', '', $contract['reference']) . '-signed-' . bin2hex(random_bytes(4)) . '.pdf';
+                    file_put_contents(storage_path('contracts') . '/' . $file, $bytes);
+                }
+                $signer = trim((string)($_POST['signer_name'] ?? ''));
+                if ($signer !== '' && $signer !== $contract['signer_name']) {
+                    db_exec('UPDATE contracts SET signer_name = ? WHERE id = ?', [mb_substr($signer, 0, 150), $contract['id']]);
+                    $contract['signer_name'] = $signer;
+                }
+                if ($contract['status'] === 'sent' && $contract['signable_fingerprint']) {
+                    try {
+                        signable_request('PUT', 'envelopes/' . rawurlencode($contract['signable_fingerprint']) . '/cancel');
+                    } catch (IntegrationException) {
+                        // Signed another way: the open Signable request is no longer needed either way.
+                    }
+                }
+                contract_mark_signed($contract, $file, 'marked as signed by ' . current_user()['name']);
+                flash('Contract marked as signed.' . (contract_order($contract) ? ' The order has been updated.' : ''));
+                break;
             case 'check':
                 $after = contract_sync($contract);
                 flash($after['status'] === $contract['status'] ? 'Still awaiting signature.' : 'Contract is now ' . $after['status'] . '.');
