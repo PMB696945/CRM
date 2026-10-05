@@ -35,7 +35,7 @@ if ($quote) {
             if (mb_strlen($name) < 2 || empty($_POST['agree'])) {
                 $error = 'Please type your full name and tick the box to accept.';
             } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $error = 'Please enter a valid email address' . (signable_configured() ? ' – we\'ll send the contract there for you to sign.' : '.');
+                $error = 'Please enter a valid email address' . (esign_auto_send() ? ' – we\'ll send the agreement there for you to sign.' : '.');
             } else {
                 quote_accept($quote, mb_substr($name, 0, 150), $ip, false, $email, (string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
                 $done = 'accepted';

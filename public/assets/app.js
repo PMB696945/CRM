@@ -358,6 +358,13 @@ document.querySelectorAll('[data-order-step]').forEach((form) => {
   });
 });
 
+// Signing page: show the typed name as a signature.
+document.querySelectorAll('[data-signature-source]').forEach((input) => {
+  const preview = document.querySelector('[data-signature-preview]');
+  if (!preview) return;
+  input.addEventListener('input', () => { preview.textContent = input.value; });
+});
+
 // Confirming or completing an order whose agreement isn't signed yet: check first.
 document.querySelectorAll('[data-order-step][data-unsigned]').forEach((form) => {
   form.addEventListener('submit', (e) => {

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /*
- * Sync every connected integration (Xero balances, GoCardless mandates, Signable,
+ * Sync every connected integration (Xero balances, GoCardless mandates, signing reminders,
  * Mailchimp unsubscribes) and carry on sending queued service alert / marketing emails.
  * Schedule as a cron job, e.g. hourly:
  *   php /home/youraccount/crm/cron/sync.php
@@ -39,12 +39,13 @@ if (gc_configured()) {
     }
 }
 
-if (signable_configured()) {
+// Agreements still waiting to be signed get a reminder every few days (up to three).
+if (mail_configured()) {
     try {
-        $r = contracts_sync_open();
-        echo date('c') . " Signable OK: {$r['checked']} contracts awaiting signature, {$r['changed']} changed\n";
+        $n = esign_send_reminders();
+        echo date('c') . " Signing reminders: $n sent\n";
     } catch (Throwable $e) {
-        fwrite(STDERR, date('c') . ' Signable check failed: ' . $e->getMessage() . "\n");
+        fwrite(STDERR, date('c') . ' Signing reminders failed: ' . $e->getMessage() . "\n");
         $failed = true;
     }
 }

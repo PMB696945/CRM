@@ -957,7 +957,7 @@ test('removing the dealer clears relationship and MSA flag', function () use (&$
 });
 
 echo "Word templates\n";
-test('merges fields split across runs, escapes XML, keeps Signable tags, builds table', function () {
+test('merges fields split across runs, escapes XML, leaves other braces alone, builds table', function () {
     $xml = '<w:document><w:body>'
         . '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Agreement with {{cust</w:t></w:r><w:r><w:t>omer_name}} ({{account_number}})</w:t></w:r></w:p>'
         . '<w:p><w:r><w:t>{{services_table}}</w:t></w:r></w:p>'
@@ -970,7 +970,7 @@ test('merges fields split across runs, escapes XML, keeps Signable tags, builds 
     ok(str_contains($out, '<w:pStyle w:val="Heading1"/>') && str_contains($out, '<w:rPr><w:b/></w:rPr>'), 'paragraph and run formatting kept');
     ok(str_contains($out, '<w:tbl>') && str_contains($out, '>Broadband<'), 'services table inserted');
     ok(str_contains($out, '1 High St</w:t><w:br/><w:t xml:space="preserve">York'), 'multi-line value uses line breaks');
-    ok(str_contains($out, '{signature:signer1:Customer+Signature}'), 'Signable tag untouched');
+    ok(str_contains($out, '{signature:signer1:Customer+Signature}'), 'single-brace text untouched');
     ok(str_contains($out, '{{unknown_field}}'), 'unknown fields left as-is');
     ok(str_contains($out, '<w:p><w:r><w:t>Untouched text</w:t></w:r></w:p>'), 'other paragraphs unchanged');
     $dom = new DOMDocument();
@@ -1013,14 +1013,10 @@ test('quote line parsing and totals', function () {
 $smtpDir = sys_get_temp_dir() . '/crm_smtp_' . getmypid();
 $smtpPort = 16000 + getmypid() % 1000;
 $sinkProc = proc_open(['python3', APP_ROOT . '/tests/smtp_sink.py', (string)$smtpPort, $smtpDir], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p1);
-$sgState = sys_get_temp_dir() . '/crm_sg_' . getmypid() . '.json';
-$sgPort = 15000 + getmypid() % 1000;
-$sgProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$sgPort", APP_ROOT . '/tests/signable_mock.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p2, null, ['MOCK_STATE' => $sgState] + getenv());
-for ($i = 0; $i < 50 && (!@fsockopen('127.0.0.1', $smtpPort) || !@fsockopen('127.0.0.1', $sgPort)); $i++) {
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $smtpPort); $i++) {
     usleep(100000);
 }
 $cfg = &config_ref();
-$cfg['signable_url'] = "http://127.0.0.1:$sgPort/v1";
 $cfg['storage_path'] = sys_get_temp_dir() . '/crm_storage_' . getmypid();
 $anthState = sys_get_temp_dir() . '/crm_anth_' . getmypid() . '.json';
 $anthPort = 17000 + getmypid() % 1000;
@@ -1030,7 +1026,6 @@ for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $anthPort); $i++) {
 }
 function sent_mails(): array { global $smtpDir; $files = glob("$smtpDir/*.eml") ?: []; sort($files); return array_map('file_get_contents', $files); }
 function mail_body(string $raw): string { preg_match_all('/Content-Transfer-Encoding: base64\r?\n\r?\n([A-Za-z0-9+\/=\r\n]+)/', $raw, $m); return implode("\n", array_map(fn($b) => base64_decode(preg_replace('/\s+/', '', $b)), $m[1])); }
-function sg_state(): array { global $sgState; return json_decode(file_get_contents($sgState), true); }
 
 $flow = [];
 test('SMTP: email sent with login, encoded subject and both text and HTML parts', function () use ($smtpPort) {
@@ -1050,8 +1045,7 @@ test('SMTP: email sent with login, encoded subject and both text and HTML parts'
     try { send_mail('not-an-email', '', 's', 'b'); throw new Exception('expected failure'); } catch (IntegrationException) {}
 });
 
-test('quote is emailed with a working link, accepted, and the contract goes to Signable', function () use (&$flow, &$dealerIds) {
-    set_setting('signable_api_key', 'signable-test-key');
+test('quote is emailed with a working link, accepted, and the contract is emailed to sign online', function () use (&$flow, &$dealerIds) {
     // Templates: broadband + general
     foreach (['broadband' => 'Broadband agreement', 'general' => 'General terms'] as $type => $name) {
         $stored = bin2hex(random_bytes(6)) . '.docx';
@@ -1080,34 +1074,70 @@ test('quote is emailed with a working link, accepted, and the contract goes to S
     ok($quote['valid_until'] > date('Y-m-d'), 'validity set');
     eq(null, quote_by_token(str_repeat('0', 48)));
 
+    $before = count(sent_mails());
     $contract = quote_accept($quote, 'Eve Echo', '203.0.113.9', false, 'Eve@Echo.example');
+    usleep(300000);
     eq('accepted', db_value('SELECT status FROM quotes WHERE id = ?', [$qid]));
     ok($contract !== null, 'contract created');
-    eq('sent', $contract['status'], 'sent to Signable automatically');
+    eq('sent', $contract['status'], 'emailed to sign automatically');
+    eq('Eve Echo', $contract['signer_name'], 'the person who accepted signs');
+    eq('eve@echo.example', $contract['signer_email'], 'at the email they gave');
+    ok(preg_match('/^[a-f0-9]{48}$/', (string)$contract['sign_token']) === 1, 'signing token made');
+    $signMail = array_values(array_filter(array_slice(sent_mails(), $before), fn($r) => str_contains($r, 'X-Rcpt: eve@echo.example')));
+    ok(str_contains(implode('', array_map('mail_body', $signMail)), 'https://crm.example.co.uk/crm/sign.php?t=' . $contract['sign_token']), 'signing link emailed to the signer');
+    eq($contract['id'], contract_by_sign_token($contract['sign_token'])['id']);
+    eq(null, contract_by_sign_token(str_repeat('0', 48)));
     $docs = contract_documents($contract);
     eq(['Broadband agreement', 'General terms'], array_column($docs, 'title'), 'one document per template (mobile uses General)');
-    $env = sg_state()['envelopes'][$contract['signable_fingerprint']];
-    eq('Eve Echo', $env['parties'][0]['party_name'], 'the person who accepted signs');
-    eq('eve@echo.example', $env['parties'][0]['party_email'], 'at the email they gave');
-    $zip = sys_get_temp_dir() . '/crm_sent_' . getmypid() . '.docx';
-    file_put_contents($zip, base64_decode($env['documents'][0]['document_file_content']));
-    $z = new ZipArchive(); $z->open($zip); $xml = $z->getFromName('word/document.xml'); $z->close(); @unlink($zip);
+    $z = new ZipArchive(); $z->open(storage_path('contracts') . '/' . $docs[0]['file']); $xml = $z->getFromName('word/document.xml'); $z->close();
     ok(str_contains($xml, 'Echo Logistics Ltd') && str_contains($xml, 'FTTP 900') && !str_contains($xml, '5G SIM'), 'broadband doc has only broadband lines');
-    ok(str_contains($xml, '{signature:signer1:Customer+Signature}'), 'Signable tag present');
     ok(str_contains($xml, 'HU1 1AA'), 'address merged');
-    eq(1, json_decode($env['meta'], true)['crm_contract_id'] === (int)$contract['id'] ? 1 : 0, 'contract id in envelope meta');
-    $flow = ['quote' => $qid, 'contract' => (int)$contract['id'], 'fp' => $contract['signable_fingerprint'], 'account' => $acct];
-    // Staff notification email
-    ok(str_contains(implode('', array_map('mail_body', array_slice(sent_mails(), -1))), 'accepted'), 'staff notified');
+    $html = docx_to_html(storage_path('contracts') . '/' . $docs[0]['file']);
+    ok(str_contains($html, 'Echo Logistics Ltd') && str_contains($html, '<table') && !str_contains($html, '{{'), 'agreement previews as HTML');
+    $flow = ['quote' => $qid, 'contract' => (int)$contract['id'], 'account' => $acct];
+    ok(str_contains(implode('', array_map('mail_body', array_slice(sent_mails(), $before))), 'accepted'), 'staff notified');
 });
 
-test('signing is picked up, signed PDF saved, pending services created', function () use (&$flow, $sgPort) {
+test('signing online: email code, typed signature, certificate, copies emailed, pending services created', function () use (&$flow) {
     $c = db_one('SELECT * FROM contracts WHERE id = ?', [$flow['contract']]);
-    eq('sent', contract_sync($c)['status'], 'still sent before signing');
-    http_request('POST', "http://127.0.0.1:$sgPort/__sign/{$flow['fp']}");
-    $c = contract_sync($c);
+    try { esign_sign($c, 'Eve Echo', '', '203.0.113.9', 'Test'); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'code'), 'must confirm email first'); }
+    esign_viewed($c, '203.0.113.9', 'Test browser');
+    $before = count(sent_mails());
+    esign_send_code($c);
+    usleep(300000);
+    $raw = array_slice(sent_mails(), $before)[0] ?? '';
+    ok(str_contains($raw, 'X-Rcpt: eve@echo.example'), 'code sent to the signer');
+    ok(preg_match('/letter-spacing:6px[^>]*>(\d{6})</', mail_body($raw), $m) === 1, 'email contains the code');
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    ok($c['viewed_at'] && $c['code_hash'] && !str_contains($c['code_hash'], $m[1]), 'code stored hashed');
+    try { esign_send_code($c); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'just sent'), 'can\'t ask again straight away'); }
+    $wrong = $m[1] === '000000' ? '111111' : '000000';
+    eq(false, esign_verify_code($c, $wrong));
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    eq(1, (int)$c['code_attempts']);
+    eq(true, esign_verify_code($c, substr($m[1], 0, 3) . ' ' . substr($m[1], 3)));
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    ok(esign_is_verified($c) && $c['verified_at'] && !$c['code_hash'], 'verified, code used up');
+
+    $before = count(sent_mails());
+    $c = esign_sign($c, 'Eve Echo', 'Director', '203.0.113.9', 'Mozilla/5.0 Test');
+    usleep(500000);
     eq('signed', $c['status']);
-    ok($c['signed_file'] && str_starts_with((string)file_get_contents(storage_path('contracts') . '/' . $c['signed_file']), '%PDF'), 'signed PDF stored');
+    eq(['Eve Echo', 'Director', '203.0.113.9'], [$c['signed_name'], $c['signed_position'], $c['signed_ip']]);
+    ok(str_contains((string)$c['signed_statement'], 'Echo Logistics Ltd'), 'statement recorded');
+    $hashes = json_decode((string)$c['document_hashes'], true);
+    eq(hash_file('sha256', storage_path('contracts') . '/' . contract_documents($c)[0]['file']), $hashes['Broadband agreement'], 'document fingerprint recorded');
+    $pdf = (string)file_get_contents(storage_path('contracts') . '/' . $c['signed_file']);
+    ok(str_starts_with($pdf, '%PDF'), 'certificate PDF stored');
+    ok(str_contains($pdf, '203.0.113.9') && str_contains($pdf, substr($hashes['General terms'], 0, 32)), 'certificate shows IP and fingerprints');
+    $copies = array_slice(sent_mails(), $before);
+    $toSigner = array_values(array_filter($copies, fn($r) => str_contains($r, 'X-Rcpt: eve@echo.example')));
+    ok($toSigner && str_contains($toSigner[0], 'signature certificate.pdf') && str_contains($toSigner[0], '.docx'), 'signer gets the certificate and documents');
+    ok((bool)array_filter($copies, fn($r) => str_contains($r, 'X-Rcpt: sales@example.co.uk') && str_contains($r, 'certificate.pdf')), 'we get a copy');
+    try { esign_sign($c, 'Eve Echo', '', '1.1.1.1', 'x'); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(true); }
     eq(3, contract_create_services($c), '1 broadband + 2 mobile');
     eq(3, (int)db_value("SELECT COUNT(*) FROM services WHERE account_id = ? AND status = 'pending'", [$flow['account']]));
 });
@@ -1211,15 +1241,48 @@ test('MSA-covered customer gets one service schedule; missing templates are expl
     eq('msa_schedule', $groups[0][0]['service_type']);
 });
 
-test('bad Signable key is reported; contract marked failed', function () use (&$flow) {
-    set_setting('signable_api_key', 'wrong');
+test('e-sign: failed email marks the contract failed; wrong codes lock out; decline; reminders', function () use (&$flow) {
     $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$flow['account']]);
     $tpl = db_one("SELECT * FROM contract_templates WHERE service_type = 'broadband'");
     $c = contract_generate($acct, [[$tpl, []]], 'Test', 'services', 'Erin', 'erin@echo.example');
+    $port = setting('smtp_port');
+    set_setting('smtp_port', '1');
     try { contract_send($c); throw new Exception('expected failure'); }
-    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'API key'), $e->getMessage()); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'signing email'), $e->getMessage()); }
+    set_setting('smtp_port', $port);
     eq('failed', db_value('SELECT status FROM contracts WHERE id = ?', [$c['id']]));
-    set_setting('signable_api_key', 'signable-test-key');
+
+    $c = contract_send(db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]));
+    eq('sent', $c['status']);
+    $token = $c['sign_token'];
+    eq($token, contract_send($c)['sign_token'], 'resending keeps the same link');
+    esign_send_code($c);
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    for ($i = 0; $i < ESIGN_CODE_ATTEMPTS; $i++) {
+        eq(false, esign_verify_code($c, 'abc'));
+        $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    }
+    try { esign_verify_code($c, '123456'); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Too many'), $e->getMessage()); }
+    db_exec('UPDATE contracts SET code_expires_at = NOW() - INTERVAL 1 MINUTE, code_attempts = 0 WHERE id = ?', [$c['id']]);
+    try { esign_verify_code(db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]), '123456'); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'expired'), $e->getMessage()); }
+
+    // Reminders: due after the set number of days, up to 3.
+    set_setting('esign_remind_days', '3');
+    db_exec('UPDATE contracts SET sent_at = NOW() - INTERVAL 4 DAY WHERE id = ?', [$c['id']]);
+    ok(esign_send_reminders() >= 1);
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    eq(1, (int)$c['reminders_sent']);
+    eq(0, (int)db_value('SELECT COUNT(*) FROM contracts WHERE id = ? AND last_reminded_at < NOW() - INTERVAL 3 DAY', [$c['id']]), 'not reminded again straight away');
+    set_setting('esign_remind_days', '0');
+    eq(0, esign_send_reminders(), 'reminders off');
+
+    esign_decline($c, 'Price too high');
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    eq(['rejected', 'Price too high'], [$c['status'], $c['declined_reason']]);
+    try { esign_send_code($c); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(true); }
 });
 
 
@@ -2585,8 +2648,6 @@ test('supplier invoices are read and matched to their purchase order, with warni
 proc_terminate($sinkProc);
 proc_terminate($anthProc);
 @unlink($anthState);
-proc_terminate($sgProc);
-@unlink($sgState);
 array_map('unlink', glob("$smtpDir/*") ?: []);
 exec('rm -rf ' . escapeshellarg($cfg['storage_path']));
 @rmdir($smtpDir);

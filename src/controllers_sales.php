@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/* Quotes, contracts, contract templates, settings and Signable pages. */
+/* Quotes, contracts, contract templates and settings pages. */
 
 function quotes_controller(): void
 {
@@ -290,8 +290,9 @@ function contracts_controller(): void
                     db_exec("UPDATE contracts SET status = 'draft' WHERE id = ?", [$contract['id']]);
                     $contract['status'] = 'draft';
                 }
-                contract_send($contract);
-                flash('Contract sent for signature via Signable.');
+                $wasSent = $contract['status'] === 'sent';
+                $contract = contract_send($contract);
+                flash($wasSent ? "Signing link emailed again to {$contract['signer_email']}." : "Sent to {$contract['signer_name']} ({$contract['signer_email']}) to sign online.");
                 break;
             case 'mark_signed':
                 // Signed another way (on paper, or by email): record it, with a copy of the signed document if there is one.
@@ -316,23 +317,8 @@ function contracts_controller(): void
                     db_exec('UPDATE contracts SET signer_name = ? WHERE id = ?', [mb_substr($signer, 0, 150), $contract['id']]);
                     $contract['signer_name'] = $signer;
                 }
-                if ($contract['status'] === 'sent' && $contract['signable_fingerprint']) {
-                    try {
-                        signable_request('PUT', 'envelopes/' . rawurlencode($contract['signable_fingerprint']) . '/cancel');
-                    } catch (IntegrationException) {
-                        // Signed another way: the open Signable request is no longer needed either way.
-                    }
-                }
                 contract_mark_signed($contract, $file, 'marked as signed by ' . current_user()['name']);
                 flash('Contract marked as signed.' . (contract_order($contract) ? ' The order has been updated.' : ''));
-                break;
-            case 'check':
-                $after = contract_sync($contract);
-                flash($after['status'] === $contract['status'] ? 'Still awaiting signature.' : 'Contract is now ' . $after['status'] . '.');
-                break;
-            case 'remind':
-                signable_request('PUT', 'envelopes/' . rawurlencode((string)$contract['signable_fingerprint']) . '/remind');
-                flash('Reminder sent to ' . $contract['signer_name'] . '.');
                 break;
             case 'cancel':
                 contract_cancel($contract);
@@ -450,7 +436,7 @@ function settings_controller(): void
     require_permission('settings.manage');
     $keys = ['ip_restrict', 'allowed_ips', 'company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
-        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'session_idle_minutes', 'require_2fa', 'force_https',
+        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'contracts_auto_send', 'esign_remind_days', 'session_idle_minutes', 'require_2fa', 'force_https',
         'marketing_topics', 'campaign_batch_size',
         'invoice_reader', 'invoice_model', 'invoice_tolerance', 'invoice_alert_email',
         'order_group_id', 'order_message_processing', 'order_message_confirmed', 'order_message_completed', 'order_message_cancelled'];
@@ -517,7 +503,7 @@ function settings_controller(): void
             if ($key === 'allowed_ips') {
                 $value = implode("\n", array_filter(array_map('trim', preg_split('/\R/u', $value)), fn($l) => $l !== ''));
             }
-            if (in_array($key, ['contracts_auto_on_accept', 'require_2fa', 'force_https', 'ip_restrict'], true)) {
+            if (in_array($key, ['contracts_auto_on_accept', 'contracts_auto_send', 'require_2fa', 'force_https', 'ip_restrict'], true)) {
                 $value = empty($_POST[$key]) ? '0' : '1';
             }
             if ($key === 'force_https' && $value === '1' && !is_https()) {
@@ -526,6 +512,9 @@ function settings_controller(): void
             if ($key === 'require_2fa' && $value === '1' && !current_user()['totp_enabled']) {
                 $value = '0'; // set it up yourself first
                 flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
+            }
+            if ($key === 'esign_remind_days') {
+                $value = ctype_digit($value) ? (string)min(30, (int)$value) : '3';
             }
             if ($key === 'invoice_reader' && !in_array($value, ['builtin', 'claude'], true)) {
                 $value = 'builtin';
@@ -584,47 +573,3 @@ function settings_controller(): void
     page('settings', ['detectedUrl' => detected_app_url()], 'Settings');
 }
 
-function signable_controller(): void
-{
-    require_permission('settings.manage');
-    $action = query('action');
-    if (is_post()) {
-        verify_csrf();
-        try {
-            if ($action === 'save') {
-                if (($key = trim((string)($_POST['api_key'] ?? ''))) !== '') {
-                    set_setting('signable_api_key', $key);
-                }
-                set_setting('signable_auto_send', empty($_POST['auto_send']) ? '0' : '1');
-                set_setting('signable_remind_hours', ctype_digit((string)($_POST['remind_hours'] ?? '')) ? $_POST['remind_hours'] : null);
-                set_setting('signable_redirect_url', trim((string)($_POST['redirect_url'] ?? '')) ?: null);
-                set_setting('signable_message', trim((string)($_POST['message'] ?? '')) ?: null);
-                if (!setting('signable_webhook_secret')) {
-                    set_setting('signable_webhook_secret', bin2hex(random_bytes(16)));
-                }
-                signable_request('GET', 'envelopes', ['offset' => 0, 'limit' => 1]); // test the key
-                audit('settings', 'Signable settings saved');
-                flash('Signable connected.');
-            } elseif ($action === 'webhook') {
-                signable_request('POST', 'webhooks', ['webhook_type' => 'signed-envelope', 'webhook_url' => signable_webhook_url()]);
-                set_setting('signable_webhook_registered', date('Y-m-d H:i:s'));
-                flash('Webhook added in Signable: signed contracts will update here straight away.');
-            } elseif ($action === 'sync') {
-                $r = contracts_sync_open();
-                flash("Checked {$r['checked']} contract(s) awaiting signature; {$r['changed']} changed.");
-            }
-        } catch (IntegrationException $e) {
-            flash($e->getMessage(), 'error');
-        }
-        redirect(url('signable'));
-    }
-    page('signable', ['webhookUrl' => signable_configured() ? signable_webhook_url() : null], 'Signable');
-}
-
-function signable_webhook_url(): string
-{
-    if (!setting('signable_webhook_secret')) {
-        set_setting('signable_webhook_secret', bin2hex(random_bytes(16)));
-    }
-    return app_url() . '/signable-webhook.php?key=' . setting('signable_webhook_secret');
-}

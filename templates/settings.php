@@ -60,7 +60,11 @@
     <h2 class="wide">Quotes &amp; contracts</h2>
     <div class="field"><label for="s_qv">Quotes valid for (days)</label><input id="s_qv" name="quote_validity_days" value="<?= $v('quote_validity_days', '30') ?>" inputmode="numeric"></div>
     <div class="field field-check"><label><input type="checkbox" name="contracts_auto_on_accept" value="1" <?= setting('contracts_auto_on_accept', '1') === '1' ? 'checked' : '' ?>> Create the contract automatically when a quote is accepted</label>
-      <div class="help">It's also sent for signature straight away if that's switched on under Signable.</div></div>
+      <div class="help">Switch this off to create contracts by hand from the quote.</div></div>
+    <div class="field field-check"><label><input type="checkbox" name="contracts_auto_send" value="1" <?= setting('contracts_auto_send', '1') === '1' ? 'checked' : '' ?>> Email the contract to the customer to sign straight away</label>
+      <div class="help">Otherwise it waits on the contract page for you to check and send.</div></div>
+    <div class="field"><label for="s_rd">Remind unsigned contracts every (days)</label><input id="s_rd" name="esign_remind_days" value="<?= $v('esign_remind_days', '3') ?>" inputmode="numeric">
+      <div class="help">Up to 3 reminders. 0 turns reminders off.</div></div>
     <div class="field wide"><label for="s_qt">Terms shown on quotes</label><textarea id="s_qt" name="quote_terms" rows="4" placeholder="e.g. All prices exclude VAT. Services are subject to survey and our standard terms and conditions."><?= $v('quote_terms') ?></textarea></div>
   </section>
 
@@ -116,7 +120,7 @@
     <div class="field wide"><label for="s_ips">Allowed IP addresses</label>
       <textarea id="s_ips" name="allowed_ips" rows="4" spellcheck="false" placeholder="81.2.69.160  # office&#10;203.0.113.0/24  # head office range"><?= $v('allowed_ips') ?></textarea>
       <div class="help">One per line: a single address, or a range such as 81.2.69.0/24. Add notes after a #. You're on <b><?= h(client_ip()) ?></b> now, and it must be in the list.
-        People marked <i>Can use the CRM from any location</i> (under Users) aren't limited. Customer quote and order pages, and links from Xero, GoCardless and Signable, keep working from anywhere.
+        People marked <i>Can use the CRM from any location</i> (under Users) aren't limited. Customer quote and order pages, and contract signing pages and links from Xero and GoCardless keep working from anywhere.
         If you're ever locked out, add <code>'ip_allowlist_off' =&gt; true,</code> to config.php.</div></div>
     <div class="field"><label>Stored passwords &amp; API keys</label><p class="text-sm">Encrypted (AES-256). The key is in <code><?= config('app_key') ? 'config.php' : 'app.key' ?></code>. Keep a copy with your backups, because without it the saved API keys can't be read.</p></div>
   </section>

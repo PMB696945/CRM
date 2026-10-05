@@ -851,4 +851,37 @@ return [
             }
         }
     },
+    24 => function (): void {
+        // Built-in e-signature (replacing Signable): the signing link, email code, and the evidence recorded.
+        foreach ([
+            'sign_token'        => 'CHAR(48) NULL',
+            'viewed_at'         => 'DATETIME NULL',
+            'viewed_ip'         => 'VARCHAR(45) NULL',
+            'code_hash'         => 'VARCHAR(255) NULL',
+            'code_expires_at'   => 'DATETIME NULL',
+            'code_attempts'     => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+            'code_sent_at'      => 'DATETIME NULL',
+            'code_sends'        => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+            'verified_at'       => 'DATETIME NULL',
+            'signed_name'       => 'VARCHAR(150) NULL',
+            'signed_position'   => 'VARCHAR(150) NULL',
+            'signed_ip'         => 'VARCHAR(45) NULL',
+            'signed_user_agent' => 'VARCHAR(255) NULL',
+            'signed_statement'  => 'TEXT NULL',
+            'document_hashes'   => 'TEXT NULL',
+            'declined_reason'   => 'TEXT NULL',
+            'reminders_sent'    => 'TINYINT UNSIGNED NOT NULL DEFAULT 0',
+            'last_reminded_at'  => 'DATETIME NULL',
+        ] as $col => $def) {
+            if (!column_exists('contracts', $col)) {
+                db()->exec("ALTER TABLE contracts ADD COLUMN $col $def");
+            }
+        }
+        $indexes = db_all("SHOW INDEX FROM contracts WHERE Key_name = 'uq_contracts_sign_token'");
+        if (!$indexes) {
+            db()->exec('ALTER TABLE contracts ADD UNIQUE KEY uq_contracts_sign_token (sign_token)');
+        }
+        // Signable's settings aren't used any more. Its contract history (envelope references) is kept.
+        db_exec("DELETE FROM settings WHERE name LIKE 'signable\\_%'");
+    },
 ];

@@ -25,7 +25,7 @@ A lightweight CRM for telecoms resellers and service providers, built with **PHP
 | **One company, several roles** | Like Xero contacts: a company can be a customer, a supplier and a dealer at once. Its page has tabs: Overview (head office, contacts, address book, files, activity), Customer, Supplier and Dealer. Tick **This company is also a supplier** on the customer, or use **Also a customer / Also a dealer** on a supplier. The name, address and phone are shared |
 | **Dealers** | Mark any customer as a dealer and put other customers under it: referred by the dealer, or billed via the dealer, optionally covered by the dealer's master services agreement (MSA). Dealer pages show their customers, the group's combined MRR and commission |
 | **Quotes** | Build quotes from your product catalogue and email them. The customer accepts (name, email and a tick box) or declines on a branded web page. You're emailed when they respond |
-| **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and sent for signature via Signable. The signed PDF is saved, and the services can be added to the customer as pending |
+| **Contracts & e-signature** | Upload a Word template for each service type. When a quote is accepted, the contract is filled in (customer details, a table of the quoted services, totals) and emailed to the customer to sign online with the built-in e-signature. A signature certificate is saved, and the services can be added to the customer as pending |
 | **Giacom broadband ordering** | Check broadband availability at a customer's head office or any site (products, speeds, earliest dates, what's on the line), place provide or migrate orders with Giacom, and follow them to completion. Completed orders make the customer's service live |
 | **Roles & approvals** | Eight roles (super admin, admin, manager, staff, sales, support, finance, read only). A super admin decides what each role can see and do. Staff can ask to close or delete a customer; an approver has to agree before anything happens |
 | **Audit trail** | Who did what and when, with before-and-after values for every change, on one page (filter by person, customer, record, action or date, and export) and on each customer's page |
@@ -109,7 +109,7 @@ For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM
 - **Closing and deleting customers:** people with "Close/Delete without approval" do it straight away. Anyone else who can edit customers gets **Request closure / Request deletion** instead. Approvers (Admin → Approvals, with a count in the menu) see the request, the reason and what it affects, and approve or reject it. They're emailed when a request comes in and the requester is emailed the outcome. You can't approve your own request unless you're a super admin. Staff also can't mark a customer as closed by editing it.
 
 **Data**
-- **Encrypted credentials:** the SMTP password, Xero, GoCardless and Signable credentials are encrypted in the database (AES-256-GCM). Two-factor secrets are too.
+- **Encrypted credentials:** the SMTP password, Xero and GoCardless credentials are encrypted in the database (AES-256-GCM). Two-factor secrets are too.
 - **The key:** it's in `app.key`, next to `config.php`, created automatically. You can instead set `'app_key' => '…'` in `config.php`. **Back up the key separately from the database**: without it, saved API keys can't be read, and you'd need to enter them again.
 - **Storage:** contracts and templates are kept in `storage/`, and the web can't access that folder, `config.php`, `app.key`, logs or the source code.
 
@@ -266,8 +266,8 @@ If you switch on something that needs a new Xero permission, Admin → Xero show
 ## Agreements on orders
 
 When a customer accepts a quote, the CRM creates the order. It also builds the agreement from your **Contract templates**, if there's one for the services quoted or a "General" one.
-- **With Signable set up:** the agreement is emailed to the customer to sign online straight away. When they sign, the signed PDF is saved.
-- **Without Signable:** the agreement is left ready to download. Get it signed your own way, then use **Mark as signed** on the agreement, optionally attaching the signed PDF.
+- **Signed online:** the agreement is emailed to the customer to sign online straight away (see *Signing agreements online* below). You can switch this off in Settings, and send it from the order or contract page instead.
+- **Signed another way:** if it's signed on paper or returned by email, use **Mark as signed** on the agreement, optionally attaching the signed PDF.
 
 Orders show **Agreement sent** and **Agreement signed** as steps between *Quotation accepted* and *Order processing*. These steps show on the order page and on the customer's tracking page, and the customer sees an update at each one.
 - **Agreement card:** the order page says what's needed next (create, send, waiting, signed).
@@ -295,7 +295,7 @@ Under **Admin → Users → + New user**, enter their name, email and role. Leav
 - **The list:** one IP address or range per line, e.g. `81.2.69.0/24`, with notes after a `#`.
 - **Who it affects:** anyone signing in from elsewhere is refused, and anyone already signed in who moves somewhere else is signed out.
 - **People who work remotely:** tick **Can use the CRM from any location** on their user.
-- **What isn't affected:** customer quote and order pages, and links from Xero, GoCardless and Signable.
+- **What isn't affected:** customer quote and order pages, contract signing pages, and links from Xero and GoCardless.
 - **Lock-out protection:** the CRM won't save a list that doesn't include the address you're using.
 - **Emergency override:** if you're ever locked out, add `'ip_allowlist_off' => true,` to config.php.
 
@@ -339,19 +339,33 @@ Tick **Covered by the dealer's MSA** when the dealer's master services agreement
 
 The CRM won't let a customer be its own dealer, sit under a customer that isn't a dealer, or form a loop.
 
-## Quotes, contracts and Signable
+## Quotes and contracts
 
 1. **Settings → Email:** set a "send from" address and, ideally, SMTP details (Microsoft 365, Google Workspace or your host). Use **Send me a test email** to check.
 2. **Settings → Your company:** your details appear on quotes, emails and contracts.
-3. **Contract templates:** upload a Word `.docx` for each service type (mobile, broadband, leased line and so on). Add a **General** template for anything else, and optionally a **Service schedule under a dealer MSA**. Start from **Download example template**. Use `{{merge_fields}}` (the full list is on that page) and put `{{services_table}}` on its own line. Mark where to sign with Signable tags, e.g. `{signature:signer1:Customer+Signature}` and `{date:signer1:Date+Signed}`.
-4. **Signable:** paste an API key (Signable → Company Settings → API & Webhooks), then click **Add webhook** so signatures show up instantly.
+3. **Contract templates:** upload a Word `.docx` for each service type (mobile, broadband, leased line and so on). Add a **General** template for anything else, and optionally a **Service schedule under a dealer MSA**. Start from **Download example template**. Use `{{merge_fields}}` (the full list is on that page) and put `{{services_table}}` on its own line. There's no need for signature boxes: customers sign online.
 
 **How a sale flows:**
 
 1. Open a customer → **New quote** and add lines from your products. Save, then **Email quote** to a contact (the dealer's contacts are offered too).
 2. The customer clicks the link and sees a branded quote page. To accept, they type their name and email and tick to confirm; they can also decline with a reason. Email security scanners that "click" links can't accept a quote by accident, because accepting needs that deliberate form.
-3. On acceptance you're emailed. The contract is generated (one document per template, each with only its own services) and sent through Signable to the person who accepted. Both steps can be switched off in Settings / Signable, and you can do them by hand from the quote.
-4. When they sign, the webhook (or the cron job, or **Check status**) marks the contract signed and saves the signed PDF. Click **Create pending services** to add the services to the customer.
+3. On acceptance you're emailed. The contract is generated (one document per template, each with only its own services) and emailed to the person who accepted to sign online. Both steps can be switched off under Settings → Quotes & contracts, and you can do them by hand from the quote.
+4. When they sign, the contract is marked signed and the signature certificate saved. Click **Create pending services** to add the services to the customer.
+
+## Signing agreements online
+
+Contracts are signed with the CRM's own e-signature. No outside service or subscription is needed.
+
+1. **Signing link:** the signer gets an email with a private link (it can't be guessed, and stops working if the contract is cancelled). Staff can copy it from the contract page or email it again.
+2. **Reading:** the page shows the agreement, with the exact Word documents to download.
+3. **Confirming who they are:** they ask for a 6-digit code, which is emailed to the signer's address. It lasts 15 minutes, allows 5 tries, and only 5 codes can be sent an hour.
+4. **Signing:** they type their name (and position), tick a statement that they agree, and press **Sign**. They can also decline, with a reason.
+5. **Record:** the CRM records their name, the time, IP address, browser/device, the email check, and a SHA-256 fingerprint of each document. A **signature certificate** (PDF) is made. The signer and your company email both get it, with the documents attached.
+6. **Afterwards:** the order moves to *Agreement signed*, and the person handling it and the sales team are told.
+
+Unsigned agreements get a reminder every 3 days (up to 3 times) from the cron job. Change or switch this off under Settings → Quotes & contracts.
+
+This is a "simple electronic signature", which is valid for business contracts in the UK under the Electronic Communications Act 2000 and UK eIDAS. The fingerprints on the certificate show whether a document has changed since it was signed: run `sha256sum` (or `Get-FileHash` on Windows) on the Word file and compare.
 
 Staff can also **Record acceptance** for quotes agreed by phone, **Revise** a sent quote (the old link stops working), and send reminders or cancel contracts.
 
@@ -489,7 +503,8 @@ src/
   xero.php         Xero OAuth, API client and balance sync
   gocardless.php   GoCardless mandates, setup links and sync
   quotes.php       quotes: totals, sending, acceptance
-  contracts.php    contracts: templates, generation, Signable
+  contracts.php    contracts: templates, generation, signing
+  esign.php        built-in e-signature: signing links, email codes, certificates
   docx.php         Word template merge
   mailer.php       email (PHP mail, SMTP or Mailchimp Transactional)
   http.php         shared HTTP client
@@ -500,7 +515,7 @@ templates/         PHP view templates
 install/           schema.sql, migrations.php (upgrades), installer, demo data
 cron/              scheduled jobs (sync.php: Xero, GoCardless, contracts awaiting signature, Mailchimp unsubscribes, Giacom orders, queued emails)
 storage/           uploaded templates and generated/signed contracts (created automatically; not web-accessible)
-tests/             integration tests, with local stand-ins for Xero, GoCardless, Signable, Mailchimp, Giacom and an SMTP server
+tests/             integration tests, with local stand-ins for Xero, GoCardless, Mailchimp, Giacom and an SMTP server
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

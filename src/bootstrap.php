@@ -39,6 +39,7 @@ require_once __DIR__ . '/docx.php';
 require_once __DIR__ . '/pdf.php';
 require_once __DIR__ . '/quotes.php';
 require_once __DIR__ . '/contracts.php';
+require_once __DIR__ . '/esign.php';
 require_once __DIR__ . '/approvals.php';
 require_once __DIR__ . '/campaigns.php';
 require_once __DIR__ . '/giacom.php';

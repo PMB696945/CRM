@@ -48,7 +48,6 @@ $admin = array_filter([
     'audit'      => can('audit.view') ? ['clipboard', 'Audit trail'] : null,
     'error_log'  => is_super_admin() ? ['shield', 'Error log'] : null,
     'contract_templates' => can('settings.manage') ? ['template', 'Contract templates'] : null,
-    'signable'   => can('settings.manage') ? ['signature', 'Signable'] : null,
     'xero'       => can('settings.manage') ? ['link', 'Xero'] : null,
     'gocardless' => can('settings.manage') ? ['bank', 'GoCardless'] : null,
     'mailchimp'  => can('settings.manage') ? ['megaphone', 'Mailchimp'] : null,

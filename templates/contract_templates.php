@@ -2,7 +2,7 @@
   <h1>Contract templates</h1>
   <a class="btn" href="<?= h(url('contract_templates', ['action' => 'example'])) ?>">⬇ Download example template</a>
 </div>
-<p class="lead">Upload a Word (.docx) contract for each service type. When a quote is accepted, the CRM fills in the customer's details and the quoted services, then sends it for signature through Signable. Services without their own template use the <b>General</b> template. Customers covered by their dealer's MSA get the <b>Service schedule under a dealer MSA</b> template, if you've uploaded one.</p>
+<p class="lead">Upload a Word (.docx) contract for each service type. When a quote is accepted, the CRM fills in the customer's details and the quoted services, then emails it to the customer to sign online. Services without their own template use the <b>General</b> template. Customers covered by their dealer's MSA get the <b>Service schedule under a dealer MSA</b> template, if you've uploaded one.</p>
 
 <div class="grid-side">
   <div>
@@ -55,11 +55,9 @@
       </dl>
     </section>
     <section class="card">
-      <div class="card-head"><h2>Signature boxes</h2></div>
-      <p class="help">Add <a href="https://help.signable.app/article/160-what-are-signable-tags" target="_blank" rel="noopener">Signable tags</a> where the customer should sign and date. Keep each tag on one line:</p>
-      <p><code>{signature:signer1:Customer+Signature}</code></p>
-      <p><code>{date:signer1:Date+Signed}</code></p>
-      <p class="help">Signable replaces them with signature and date fields.</p>
+      <div class="card-head"><h2>Signing</h2></div>
+      <p class="help">You don't need signature boxes. The customer reads the agreement online, confirms their email with a code and signs by typing their name. A signature certificate is issued with it, recording who signed, when, from where, and a fingerprint of each document.</p>
+      <p class="help">You might like to end the document with a line such as <i>"This agreement is signed electronically."</i></p>
     </section>
   </aside>
 </div>

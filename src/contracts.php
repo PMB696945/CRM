@@ -3,10 +3,7 @@ declare(strict_types=1);
 
 /*
  * Contracts: generated from uploaded Word templates (one per service type) and
- * a quote, then sent for e-signature with Signable.
- *
- * Signable API: https://api.signable.co.uk/v1, HTTP Basic auth (API key as the
- * username), form-encoded requests with JSON-encoded documents and parties.
+ * a quote, then signed online with the built-in e-signature (esign.php).
  */
 
 /** Template types: every service type plus agreement-level documents. */
@@ -171,126 +168,6 @@ function contract_documents(array $contract): array
     return json_decode((string)$contract['documents'], true) ?: [];
 }
 
-/* ------------------------------------------------------------- Signable --- */
-
-function signable_configured(): bool
-{
-    return (bool)setting('signable_api_key');
-}
-
-function signable_url(): string
-{
-    return rtrim(config('signable_url') ?: 'https://api.signable.co.uk/v1', '/');
-}
-
-/** Call the Signable API. Returns the decoded JSON body. */
-function signable_request(string $method, string $path, array $data = []): array
-{
-    $key = setting('signable_api_key');
-    if (!$key) {
-        throw new IntegrationException('Signable isn\'t set up. Add your API key under Signable.');
-    }
-    $url = signable_url() . '/' . ltrim($path, '/');
-    $headers = ['Authorization: Basic ' . base64_encode($key . ':x'), 'Accept: application/json'];
-    $body = null;
-    if ($method === 'GET') {
-        $url .= $data ? '?' . http_build_query($data) : '';
-    } else {
-        $headers[] = 'Content-Type: application/x-www-form-urlencoded';
-        $body = http_build_query($data);
-    }
-    try {
-        [$status, $response] = http_request($method, $url, $headers, $body);
-    } catch (IntegrationException $e) {
-        throw new IntegrationException('Could not reach Signable: ' . $e->getMessage());
-    }
-    if ($status >= 200 && $status < 300 && is_array($response)) {
-        return $response;
-    }
-    $message = is_array($response) ? ($response['message'] ?? json_encode($response)) : substr(strip_tags((string)$response), 0, 200);
-    if ($status === 401) {
-        $message = 'Signable rejected the API key. Check it under Signable.';
-    }
-    throw new IntegrationException("Signable error ($status): $message");
-}
-
-/** Send a draft contract to the signer via Signable. */
-function contract_send(array $contract): array
-{
-    if (!in_array($contract['status'], ['draft', 'failed'], true) || !contract_documents($contract)) {
-        throw new IntegrationException('Only draft contracts with documents can be sent.');
-    }
-    $documents = [];
-    foreach (contract_documents($contract) as $doc) {
-        $path = storage_path('contracts') . '/' . basename($doc['file']);
-        $documents[] = [
-            'document_title'        => $doc['title'],
-            'document_file_name'    => $contract['reference'] . ' ' . preg_replace('/[^A-Za-z0-9 _-]/', '', $doc['title']) . '.docx',
-            'document_file_content' => base64_encode((string)file_get_contents($path)),
-        ];
-    }
-    $message = setting('signable_message') ?: 'Please review and sign your agreement with ' . company('name', config('app_name')) . '.';
-    $data = [
-        'envelope_title'     => $contract['reference'] . ' – ' . $contract['title'],
-        'envelope_documents' => json_encode($documents),
-        'envelope_parties'   => json_encode([[
-            'party_name'    => $contract['signer_name'],
-            'party_email'   => $contract['signer_email'],
-            'party_role'    => 'signer1',
-            'party_message' => $message,
-        ]]),
-        'envelope_meta'      => json_encode(['crm_contract_id' => (int)$contract['id'], 'crm_reference' => $contract['reference']]),
-    ];
-    if ($hours = (int)setting('signable_remind_hours')) {
-        $data['envelope_auto_remind_hours'] = $hours;
-    }
-    if ($redirect = setting('signable_redirect_url')) {
-        $data['envelope_redirect_url'] = $redirect;
-    }
-    try {
-        $response = signable_request('POST', 'envelopes', $data);
-    } catch (IntegrationException $e) {
-        db_exec("UPDATE contracts SET status = 'failed', last_error = ? WHERE id = ?", [$e->getMessage(), $contract['id']]);
-        throw $e;
-    }
-    $fingerprint = $response['envelope_fingerprint'] ?? null;
-    if (!$fingerprint) {
-        throw new IntegrationException('Signable accepted the request but returned no envelope reference.');
-    }
-    db_exec("UPDATE contracts SET status = 'sent', signable_fingerprint = ?, sent_at = NOW(), last_error = NULL WHERE id = ?", [$fingerprint, $contract['id']]);
-    log_activity((int)$contract['account_id'], 'email', "Contract {$contract['reference']} sent for signature to {$contract['signer_name']} <{$contract['signer_email']}>");
-    if ($order = contract_order($contract)) {
-        order_add_event((int)$order['id'], 'contract_sent', "We've emailed your agreement to {$contract['signer_name']} ({$contract['signer_email']}) to sign online. We'll carry on with your order once it's signed.",
-            "Contract {$contract['reference']} sent via Signable");
-    }
-    return db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]);
-}
-
-/** Refresh a sent contract's status from Signable (and save the signed PDF). */
-function contract_sync(array $contract): array
-{
-    if (!$contract['signable_fingerprint'] || $contract['status'] !== 'sent') {
-        return $contract;
-    }
-    $env = signable_request('GET', 'envelopes/' . rawurlencode($contract['signable_fingerprint']));
-    $status = strtolower((string)($env['envelope_status'] ?? ''));
-    $map = ['signed' => 'signed', 'rejected' => 'rejected', 'cancelled' => 'cancelled', 'expired' => 'expired', 'failed' => 'failed'];
-    if (!isset($map[$status])) {
-        return $contract; // still sent / processing / draft
-    }
-    $new = $map[$status];
-    $signedFile = null;
-    if ($new === 'signed' && !empty($env['envelope_signed_pdf'])) {
-        $signedFile = contract_download_signed($contract, (string)$env['envelope_signed_pdf']);
-    }
-    if ($new === 'signed') {
-        return contract_mark_signed($contract, $signedFile, 'in Signable');
-    }
-    db_exec('UPDATE contracts SET status = ? WHERE id = ?', [$new, $contract['id']]);
-    log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} $new");
-    return db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]);
-}
-
 /** The customer order a contract belongs to (through its quote), if any. */
 function contract_order(array $contract): ?array
 {
@@ -304,7 +181,7 @@ function order_contract(array $order): ?array
 }
 
 /**
- * Record a contract as signed (by Signable, or by hand for one signed another way), and move its order on:
+ * Record a contract as signed (online, or by hand for one signed another way), and move its order on:
  * the customer's tracking page shows it, and the order's owner and the sales team are told.
  */
 function contract_mark_signed(array $contract, ?string $signedFile, string $how): array
@@ -330,51 +207,9 @@ function contract_mark_signed(array $contract, ?string $signedFile, string $how)
     return db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]);
 }
 
-function contract_download_signed(array $contract, string $url): ?string
-{
-    $signableHost = parse_url(signable_url(), PHP_URL_HOST);
-    $host = parse_url($url, PHP_URL_HOST);
-    if (!$host || (!str_starts_with($url, 'https://') && $host !== $signableHost)) {
-        return null;
-    }
-    // Pre-signed storage links reject extra auth headers, so try without first.
-    $attempts = [[]];
-    if ($host === $signableHost || str_ends_with((string)$host, '.signable.co.uk') || str_ends_with((string)$host, '.signable.app')) {
-        $attempts[] = ['Authorization: Basic ' . base64_encode(setting('signable_api_key') . ':x')];
-    }
-    foreach ($attempts as $headers) {
-        try {
-            [$status, $body] = http_request('GET', $url, $headers);
-        } catch (IntegrationException) {
-            continue;
-        }
-        if ($status === 200 && is_string($body) && str_starts_with($body, '%PDF')) {
-            $file = $contract['reference'] . '-signed-' . bin2hex(random_bytes(4)) . '.pdf';
-            file_put_contents(storage_path('contracts') . '/' . $file, $body);
-            return $file;
-        }
-    }
-    return null;
-}
-
-/** Sync every contract awaiting signature (cron / webhook fallback). */
-function contracts_sync_open(): array
-{
-    $result = ['checked' => 0, 'changed' => 0];
-    foreach (db_all("SELECT * FROM contracts WHERE status = 'sent' AND signable_fingerprint IS NOT NULL") as $c) {
-        $result['checked']++;
-        if (contract_sync($c)['status'] !== 'sent') {
-            $result['changed']++;
-        }
-    }
-    return $result;
-}
-
 function contract_cancel(array $contract): void
 {
-    if ($contract['status'] === 'sent' && $contract['signable_fingerprint']) {
-        signable_request('PUT', 'envelopes/' . rawurlencode($contract['signable_fingerprint']) . '/cancel');
-    }
+    // The signing link stops working once the contract is cancelled.
     db_exec("UPDATE contracts SET status = 'cancelled' WHERE id = ?", [$contract['id']]);
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} cancelled");
 }

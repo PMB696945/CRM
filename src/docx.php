@@ -3,8 +3,8 @@ declare(strict_types=1);
 
 /*
  * Word (.docx) contract templates: fill {{merge_fields}} and insert a table of
- * services where {{services_table}} appears. Signable tags such as
- * {signature:signer1:Customer+Signature} are left untouched for Signable.
+ * services where {{services_table}} appears. docx_to_html() turns a document
+ * into simple HTML for the online signing page.
  *
  * Word often splits "{{customer_name}}" across several formatting runs, so any
  * paragraph containing a placeholder is rebuilt as a single run (keeping the
@@ -151,7 +151,105 @@ function docx_create(string $outPath, array $paragraphs): void
     $zip->close();
 }
 
-/** Example contract template showing merge fields and Signable tags. */
+/**
+ * A Word document as simple, safe HTML for reading on screen: headings, paragraphs
+ * (bold, italic, underline), line breaks, bulleted/numbered paragraphs and tables.
+ * Formatting such as fonts, columns and images isn't reproduced.
+ */
+function docx_to_html(string $path): string
+{
+    docx_require_zip();
+    $zip = new ZipArchive();
+    if ($zip->open($path) !== true) {
+        return '';
+    }
+    $xml = (string)$zip->getFromName('word/document.xml');
+    $zip->close();
+    $doc = new DOMDocument();
+    if ($xml === '' || !@$doc->loadXML($xml, LIBXML_NONET)) {
+        return '';
+    }
+    $w = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    $xp = new DOMXPath($doc);
+    $xp->registerNamespace('w', $w);
+    $on = function (?DOMElement $el) use ($w): bool {
+        if (!$el) {
+            return false;
+        }
+        $val = $el->getAttributeNS($w, 'val');
+        return !in_array($val, ['0', 'false', 'none'], true);
+    };
+    $paragraph = function (DOMElement $p) use ($xp, $on, $w): string {
+        $style = strtolower((string)$xp->evaluate('string(w:pPr/w:pStyle/@w:val)', $p));
+        $list = $xp->query('w:pPr/w:numPr', $p)->length > 0;
+        $html = '';
+        foreach ($xp->query('.//w:r | .//w:hyperlink/w:r', $p) as $r) {
+            if ($r->parentNode->localName === 'hyperlink' && $r->parentNode->parentNode !== $p) {
+                continue;
+            }
+            $text = '';
+            foreach ($r->childNodes as $c) {
+                if (!$c instanceof DOMElement) {
+                    continue;
+                }
+                $text .= match ($c->localName) {
+                    't' => h($c->textContent),
+                    'tab' => ' ',
+                    'br', 'cr' => '<br>',
+                    default => '',
+                };
+            }
+            if ($text === '') {
+                continue;
+            }
+            $rpr = $xp->query('w:rPr', $r)->item(0);
+            if ($rpr) {
+                if ($on($xp->query('w:b', $rpr)->item(0))) { $text = "<b>$text</b>"; }
+                if ($on($xp->query('w:i', $rpr)->item(0))) { $text = "<i>$text</i>"; }
+                if ($on($xp->query('w:u', $rpr)->item(0))) { $text = "<u>$text</u>"; }
+            }
+            $html .= $text;
+        }
+        if (trim(strip_tags($html)) === '') {
+            return '';
+        }
+        $tag = match (true) {
+            $style === 'title' => 'h1',
+            (bool)preg_match('/^heading ?1$/', $style) => 'h2',
+            (bool)preg_match('/^heading ?[2-9]$/', $style) => 'h3',
+            default => 'p',
+        };
+        return $list ? "<p class=\"doc-li\">• $html</p>" : "<$tag>$html</$tag>";
+    };
+    $render = function (DOMElement $parent) use (&$render, $paragraph, $xp): string {
+        $out = '';
+        foreach ($parent->childNodes as $n) {
+            if (!$n instanceof DOMElement) {
+                continue;
+            }
+            if ($n->localName === 'p') {
+                $out .= $paragraph($n);
+            } elseif ($n->localName === 'tbl') {
+                $out .= '<div class="doc-table"><table>';
+                foreach ($xp->query('w:tr', $n) as $tr) {
+                    $out .= '<tr>';
+                    foreach ($xp->query('w:tc', $tr) as $tc) {
+                        $out .= '<td>' . $render($tc) . '</td>';
+                    }
+                    $out .= '</tr>';
+                }
+                $out .= '</table></div>';
+            } elseif (in_array($n->localName, ['sdt', 'sdtContent', 'customXml', 'smartTag'], true)) {
+                $out .= $render($n);
+            }
+        }
+        return $out;
+    };
+    $body = $xp->query('/w:document/w:body')->item(0);
+    return $body ? $render($body) : '';
+}
+
+/** Example contract template showing merge fields and where the customer signs. */
 function docx_example_template(string $outPath): void
 {
     docx_create($outPath, [
@@ -169,7 +267,6 @@ function docx_example_template(string $outPath): void
         'Replace this section with your standard terms and conditions for this service type.',
         ['Signed for and on behalf of {{customer_name}}', 'Heading1'],
         'Name: {{signer_name}}',
-        'Signature: {signature:signer1:Customer+Signature}',
-        'Date: {date:signer1:Date+Signed}',
+        'This agreement is signed electronically. The signature certificate issued with it records who signed, when, and how.',
     ]);
 }

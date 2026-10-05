@@ -92,7 +92,6 @@ match (true) {
     $page === 'contracts' => contracts_controller(),
     $page === 'contract_templates' => contract_templates_controller(),
     $page === 'settings'  => settings_controller(),
-    $page === 'signable'  => signable_controller(),
     $page === 'audit'     => audit_controller(),
     $page === 'roles'     => roles_controller(),
     $page === 'approvals' => approvals_controller(),

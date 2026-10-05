@@ -182,7 +182,7 @@ function quote_accept(array $quote, string $name, string $ip, bool $byStaff = fa
     if (setting('contracts_auto_on_accept', '1') === '1') {
         try {
             $contract = contract_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$quote['id']]));
-            if ($contract && signable_configured() && setting('signable_auto_send', '1') === '1') {
+            if ($contract && esign_auto_send()) {
                 $contract = contract_send($contract);
             }
         } catch (Throwable $e) {
@@ -200,7 +200,7 @@ function quote_accept(array $quote, string $name, string $ip, bool $byStaff = fa
 /** What the customer agrees to when they tick the box on the quote page. */
 function quote_acceptance_statement(array $account): string
 {
-    return 'I accept this quote on behalf of ' . $account['name'] . (signable_configured() ? ' and understand a contract will be sent for signature' : '') . '.';
+    return 'I accept this quote on behalf of ' . $account['name'] . (esign_auto_send() ? ' and understand an agreement will be sent for me to sign' : '') . '.';
 }
 
 /** A SHA-256 fingerprint of what was accepted: the quote's lines, totals, validity and terms. */
@@ -417,7 +417,7 @@ function quote_send_confirmation(array $quote): ?string
             . (($order = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$quote['id']]))
                 ? '<p>Your order reference is <b>' . h($order['reference']) . '</b>. We\'ll email you as it progresses, and you can follow it at any time:</p>' . email_button(order_tracking_url($order), 'Track your order')
                 : '')
-            . (signable_configured() && setting('signable_auto_send', '1') === '1' ? '<p>Your contract will arrive in a separate email for you to sign online.</p>' : '<p>We\'ll be in touch shortly about the next steps.</p>')
+            . (esign_auto_send() ? '<p>Your agreement will arrive in a separate email for you to sign online.</p>' : '<p>We\'ll be in touch shortly about the next steps.</p>')
             . '<p style="color:#667085;font-size:13px">If you didn\'t accept this quote, or anything looks wrong, please reply to this email straight away.</p>';
         send_mail($to, $name, 'Confirmation: quote ' . $quote['reference'] . ' accepted', email_layout('Thank you, your quote is accepted', $body), null, [],
             [['name' => $file, 'path' => $tmp, 'mime' => 'application/pdf']]);

@@ -39,13 +39,13 @@ $me = (int)current_user()['id'];
         <?php if (!$hasTemplates): ?><p class="help">Upload your Word agreement under <a href="<?= h(url('contract_templates')) ?>">Admin → Contract templates</a> (a "General" one covers everything).</p><?php endif; ?>
         <?php if ($quote && can('sales.edit') && $hasTemplates): ?><form method="post" action="<?= h(url('quotes', ['action' => 'contract', 'id' => $quote['id']])) ?>"><?= csrf_field() ?><button class="btn btn-sm btn-primary">Create the agreement</button></form><?php endif; ?>
       <?php elseif (in_array($cs, ['draft', 'failed'], true)): ?>
-        <p><b>Ready, but not sent yet.</b> <?= signable_configured() ? 'Send it to ' . h($contract['signer_name']) . ' to sign online from the agreement page.' : 'Signable isn\'t set up, so it hasn\'t been emailed. Download it and get it signed, then mark it as signed, or set up Signable to send it for e-signature.' ?></p>
+        <p><b>Ready, but not sent yet.</b> Send it to <?= h($contract['signer_name']) ?> to sign online.</p>
         <?php if ($contract['last_error']): ?><p class="small text-danger"><?= h($contract['last_error']) ?></p><?php endif; ?>
-        <a class="btn btn-sm btn-primary" href="<?= h(url('contracts', ['action' => 'view', 'id' => $contract['id']])) ?>"><?= signable_configured() ? 'Send for signature' : 'Open the agreement' ?></a>
+        <form method="post" action="<?= h(url('contracts', ['action' => 'send', 'id' => $contract['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm btn-primary">Email it to <?= h($contract['signer_email']) ?> to sign</button></form>
       <?php elseif ($cs === 'sent'): ?>
         <p><b>Waiting for <?= h($contract['signer_name']) ?> to sign.</b> Sent <?= h(fmt_datetime($contract['sent_at'])) ?> to <?= h($contract['signer_email']) ?>.</p>
-        <form method="post" action="<?= h(url('contracts', ['action' => 'check', 'id' => $contract['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm">↻ Check now</button></form>
-        <form method="post" action="<?= h(url('contracts', ['action' => 'remind', 'id' => $contract['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm">Send a reminder</button></form>
+        <?= $contract['viewed_at'] ? '<p class="small muted">They opened it ' . h(fmt_datetime($contract['viewed_at'])) . '.</p>' : '' ?>
+        <form method="post" action="<?= h(url('contracts', ['action' => 'send', 'id' => $contract['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-sm">Email the link again</button></form>
       <?php elseif ($cs === 'signed'): ?>
         <p class="text-ok"><b>✔ Signed</b> by <?= h($contract['signer_name']) ?> on <?= h(fmt_datetime($contract['signed_at'])) ?>.</p>
       <?php else: ?>
