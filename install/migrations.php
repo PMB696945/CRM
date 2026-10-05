@@ -884,4 +884,23 @@ return [
         // Signable's settings aren't used any more. Its contract history (envelope references) is kept.
         db_exec("DELETE FROM settings WHERE name LIKE 'signable\\_%'");
     },
+    25 => function (): void {
+        // aBILLity (Giacom's billing platform): customers, products and services sent from the CRM.
+        $add = [
+            'accounts' => ['abillity_company_id' => 'INT UNSIGNED NULL', 'abillity_site_id' => 'INT UNSIGNED NULL', 'abillity_pending' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'abillity_synced_at' => 'DATETIME NULL', 'abillity_error' => 'VARCHAR(500) NULL'],
+            'contacts' => ['abillity_contact_id' => 'INT UNSIGNED NULL'],
+            'products' => ['abillity_charge_type_id' => 'INT UNSIGNED NULL', 'abillity_synced_at' => 'DATETIME NULL', 'abillity_error' => 'VARCHAR(500) NULL'],
+            'services' => ['abillity_charge_id' => 'INT UNSIGNED NULL', 'abillity_setup_charge_id' => 'INT UNSIGNED NULL', 'abillity_first_payment' => 'DATE NULL',
+                'abillity_provisional' => 'TINYINT(1) NOT NULL DEFAULT 0', 'abillity_last_payment' => 'DATE NULL', 'abillity_pending' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'abillity_synced_at' => 'DATETIME NULL', 'abillity_error' => 'VARCHAR(500) NULL'],
+        ];
+        foreach ($add as $table => $cols) {
+            foreach ($cols as $col => $def) {
+                if (!column_exists($table, $col)) {
+                    db()->exec("ALTER TABLE $table ADD COLUMN $col $def");
+                }
+            }
+        }
+    },
 ];

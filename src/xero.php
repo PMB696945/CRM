@@ -984,6 +984,61 @@ function xero_push_billing_contact(int $accountId): string
 }
 
 
+/**
+ * Create a customer in Xero (or link the contact already there with its account number or name), so it's
+ * set up in the accounts at the same time as in billing. Returns the Xero ContactID.
+ */
+function xero_create_customer(int $accountId): string
+{
+    $a = db_one('SELECT a.*, x.contact_id AS xero_id FROM accounts a LEFT JOIN xero_contacts x ON x.id = a.xero_contact_id WHERE a.id = ?', [$accountId]);
+    if (!$a) {
+        throw new XeroException('Customer not found.');
+    }
+    if ($a['xero_id']) {
+        return $a['xero_id'];
+    }
+    // Already in Xero (e.g. added there by hand)? Link it rather than make a duplicate.
+    $existing = db_one("SELECT * FROM xero_contacts WHERE merged_to IS NULL AND (account_number = ? OR LOWER(name) = LOWER(?)) ORDER BY account_number = ? DESC LIMIT 1",
+        [$a['account_number'], $a['name'], $a['account_number']]);
+    if ($existing) {
+        db_exec('UPDATE accounts SET xero_contact_id = ? WHERE id = ?', [$existing['id'], $accountId]);
+        audit('xero_link', "Linked {$a['name']} to Xero contact {$existing['name']}", 'accounts', $accountId);
+        return $existing['contact_id'];
+    }
+    if (!xero_can_write_contacts()) {
+        throw new XeroException('The Xero connection can\'t create contacts. Under Admin → Xero, switch on updating contacts and press Reconnect.');
+    }
+    $billing = db_one('SELECT name, email, phone FROM contacts WHERE id = ?', [$a['billing_contact_id'] ?: $a['main_contact_id'] ?: 0]);
+    $parts = preg_split('/\s+/', trim((string)($billing['name'] ?? '')), 2);
+    $contact = array_filter([
+        'Name'          => mb_substr($a['name'], 0, 255),
+        'AccountNumber' => $a['account_number'],
+        'EmailAddress'  => ($billing['email'] ?? '') ?: $a['email'],
+        'FirstName'     => mb_substr($parts[0] ?? '', 0, 255),
+        'LastName'      => mb_substr($parts[1] ?? '', 0, 255),
+        'CompanyNumber' => $a['company_number'] ? mb_substr($a['company_number'], 0, 50) : null,
+        'IsCustomer'    => true,
+        'Phones'        => $a['phone'] ? [['PhoneType' => 'DEFAULT', 'PhoneNumber' => $a['phone']]] : null,
+        'Addresses'     => $a['address'] || $a['postcode'] ? [[
+            'AddressType' => 'POBOX', 'AddressLine1' => (string)$a['address'], 'AddressLine2' => (string)($a['address2'] ?? ''),
+            'City' => (string)$a['city'], 'Region' => (string)($a['county'] ?? ''), 'PostalCode' => (string)$a['postcode'], 'Country' => 'United Kingdom',
+        ]] : null,
+    ], fn($v) => $v !== null && $v !== '');
+    $r = xero_api('POST', xero_urls()['api'] . '/Contacts', [], true, ['Contacts' => [$contact]]);
+    $c = $r['Contacts'][0] ?? null;
+    if (!$c || empty($c['ContactID'])) {
+        throw new XeroException('Xero didn\'t return the new contact.');
+    }
+    db_exec('INSERT INTO xero_contacts (contact_id, name, account_number, email, status, is_customer, synced_at) VALUES (?, ?, ?, ?, ?, 1, NOW())
+        ON DUPLICATE KEY UPDATE name = VALUES(name), account_number = VALUES(account_number), email = VALUES(email)',
+        [$c['ContactID'], mb_substr($c['Name'] ?? $a['name'], 0, 255), $c['AccountNumber'] ?? $a['account_number'], $c['EmailAddress'] ?? null, $c['ContactStatus'] ?? 'ACTIVE']);
+    db_exec('UPDATE accounts SET xero_contact_id = (SELECT id FROM xero_contacts WHERE contact_id = ?) WHERE id = ?', [$c['ContactID'], $accountId]);
+    audit('xero_push', "Created {$a['name']} ({$a['account_number']}) in Xero", 'accounts', $accountId);
+    log_activity($accountId, 'note', "Customer created in Xero as {$a['account_number']}");
+    return $c['ContactID'];
+}
+
+
 /* ------------------------------------------------------ Products → items --- */
 
 /** Scopes with accounting.settings (write) added, which Xero needs to create and update items. */

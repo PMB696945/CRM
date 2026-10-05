@@ -634,6 +634,9 @@ function entity_controller(string $name): void
                                 $type = 'error';
                             }
                         }
+                        [$extra, $ok] = abillity_after_save($name, $savedId, $changes, !$existing);
+                        $message .= $extra;
+                        $type = $ok ? $type : 'error';
                         flash($message, $type);
                         redirect(safe_return($_POST['_return'] ?? null, url($name, ['action' => 'view', 'id' => $savedId])));
                     } catch (PDOException $e) {

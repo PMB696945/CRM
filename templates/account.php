@@ -228,6 +228,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
         <?php if (setting('xero_push_contacts') === '1'): ?><p class="help">Xero is updated automatically when the accounts contact changes.</p><?php endif; ?>
       <?php endif; ?>
     </section>
+    <?php render('_billing_link', ['account' => $account, 'canEdit' => $canEdit]); ?>
 
     <section class="card">
       <div class="card-head"><h2>Address book</h2><?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h($new('sites')) ?>">+ Add site</a><?php endif; ?></div>
@@ -367,6 +368,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
         <?php if (setting('xero_push_contacts') === '1'): ?><p class="help">Xero is updated automatically when the accounts contact changes.</p><?php endif; ?>
       <?php endif; ?>
     </section>
+    <?php render('_billing_link', ['account' => $account, 'canEdit' => $canEdit]); ?>
   </aside>
 </div>
 

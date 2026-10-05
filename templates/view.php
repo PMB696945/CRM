@@ -10,6 +10,10 @@
     <?php if ($name === 'products' && xero_connected() && can('products.edit')): ?>
       <form method="post" action="<?= h(url('products', ['action' => 'xero_push', 'id' => $row['id']])) ?>" class="inline"><?= csrf_field() ?><button class="btn"><?= $row['xero_synced_at'] ? 'Update in Xero' : 'Send to Xero' ?></button></form>
     <?php endif; ?>
+    <?php if (in_array($name, ['services', 'products'], true) && abillity_configured() && $canWrite && can('sales.edit')): ?>
+      <form method="post" action="<?= h(url('abillity_send', ['type' => $name === 'services' ? 'service' : 'product', 'id' => $row['id']])) ?>" class="inline"><?= csrf_field() ?>
+        <button class="btn"><?= ($name === 'services' ? $row['abillity_charge_id'] : $row['abillity_charge_type_id']) ? 'Update in aBILLity' : 'Send to aBILLity' ?></button></form>
+    <?php endif; ?>
     <?php if ($canWrite): ?><a class="btn" href="<?= h(url($name, ['action' => 'edit', 'id' => $row['id']])) ?>">Edit</a><?php endif; ?>
     <?php if ($canWrite && can('records.delete') && ($name !== 'products' || can('products.edit'))) render('_delete', ['name' => $name, 'id' => $row['id'], 'label' => $entity['label']]); ?>
   </div>

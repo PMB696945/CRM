@@ -52,6 +52,7 @@ $admin = array_filter([
     'gocardless' => can('settings.manage') ? ['bank', 'GoCardless'] : null,
     'mailchimp'  => can('settings.manage') ? ['megaphone', 'Mailchimp'] : null,
     'giacom_settings' => can('settings.manage') ? ['bolt', 'Giacom'] : null,
+    'abillity'   => can('settings.manage') ? ['bank', 'aBILLity'] : null,
 ]);
 if ($admin) {
     $nav['Admin'] = $admin;

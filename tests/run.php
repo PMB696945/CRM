@@ -690,6 +690,186 @@ test('accounts contact can be sent to Xero once contacts write access is granted
     set_setting('xero_push_contacts', null);
 });
 
+$abState = sys_get_temp_dir() . '/crm_abillity_' . getmypid() . '.json';
+$abPort = 19000 + getmypid() % 1000;
+$abProc = proc_open([PHP_BINARY, '-S', "127.0.0.1:$abPort", APP_ROOT . '/tests/abillity_mock.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $p8, null, ['MOCK_STATE' => $abState] + getenv());
+for ($i = 0; $i < 50 && !@fsockopen('127.0.0.1', $abPort); $i++) {
+    usleep(100000);
+}
+function ab_state(): array { global $abState; return json_decode((string)@file_get_contents($abState), true) ?: []; }
+function ab_set(array $changes): void { global $abState; file_put_contents($abState, json_encode($changes + ab_state())); }
+
+test('aBILLity: customers go to aBILLity and Xero together; products and services follow, with the real start date once live', function () use ($abPort) {
+    as_role('super_admin');
+    $cfg = &config_ref();
+    $cfg['abillity_url'] = "http://127.0.0.1:$abPort/api";
+    ok(!abillity_configured());
+    try { abillity_api('GET', 'common/frequencytype', null, [], ['system' => 'TESTSYS', 'username' => 'api-user', 'password' => 'wrong']); throw new Exception('expected failure'); }
+    catch (AbillityException $e) { ok(str_contains($e->getMessage(), '(401)') && str_contains($e->getMessage(), 'Admin → aBILLity'), $e->getMessage()); }
+    foreach (['abillity_system' => 'TESTSYS', 'abillity_username' => 'api-user', 'abillity_password' => 'api-pass', 'abillity_auto' => '1'] as $k => $v) {
+        set_setting($k, $v);
+    }
+    ok(abillity_configured() && abillity_auto());
+    set_setting('xero_scopes', xero_write_scopes(XERO_DEFAULT_SCOPES));
+    xero_mock_reconnect();
+
+    // A prospect isn't set up for billing; a customer is, in aBILLity and Xero together.
+    $acct = create('accounts', ['name' => 'Brook Farm Supplies Ltd', 'account_number' => 'BROO001', 'type' => 'business', 'status' => 'prospect',
+        'address' => 'Brook Farm', 'address2' => 'Mill Lane', 'city' => 'Ledbury', 'county' => 'Herefordshire', 'postcode' => 'HR8 1AA', 'phone' => '01531 000000', 'company_number' => '01234567']);
+    $contact = create('contacts', ['account_id' => $acct, 'name' => 'Bella Brook', 'email' => 'accounts@brookfarm.example', 'phone' => '01531 000001', 'is_billing' => '1']);
+    db_exec('UPDATE accounts SET billing_contact_id = ?, main_contact_id = ? WHERE id = ?', [$contact, $contact, $acct]);
+    eq(['', true], abillity_after_save('accounts', $acct, ['Status' => []], true));
+    eq([], ab_state()['companies'] ?? [], 'prospects aren\'t sent');
+    db_exec("UPDATE accounts SET status = 'active' WHERE id = ?", [$acct]);
+    [$msg, $okSave] = abillity_after_save('accounts', $acct, ['Status' => []], false);
+    ok($okSave && str_contains($msg, 'Sent to aBILLity'), $msg);
+    $a = db_one('SELECT * FROM accounts WHERE id = ?', [$acct]);
+    ok($a['abillity_company_id'] && $a['abillity_site_id'] && !$a['abillity_pending'] && !$a['abillity_error'], 'linked: ' . $a['abillity_error']);
+    $st = ab_state();
+    $site = $st['sites'][$a['abillity_site_id']];
+    eq(['Brook Farm Supplies Ltd', 'BROO001', 'BROO001', 'Brook Farm, Mill Lane', 'Ledbury', 'Herefordshire', 'HR8 1AA', true],
+        [$site['SiteName'], $site['ShortName'], $site['AccountRef'], $site['Address'], $site['Town'], $site['County'], $site['PostCode'], $site['MainSite']]);
+    ok($st['companies'][$a['abillity_company_id']]['IsCustomer'] && !$st['companies'][$a['abillity_company_id']]['IsProspect'], 'a customer, not a prospect');
+    $abContact = (int)db_value('SELECT abillity_contact_id FROM contacts WHERE id = ?', [$contact]);
+    eq(['Bella', 'Brook', 'accounts@brookfarm.example', true], [$st['contacts'][$abContact]['Christian'], $st['contacts'][$abContact]['Surname'], $st['contacts'][$abContact]['Email'], $st['contacts'][$abContact]['MainContact']]);
+    eq(['BillingContactId' => $abContact, 'Email' => 'accounts@brookfarm.example'], $st['billing'][$a['abillity_site_id']], 'invoices go to the accounts contact');
+    // ...and in Xero, with the same account number.
+    ok($a['xero_contact_id'] > 0, 'linked to Xero');
+    $x = end(mock_state()['created']);
+    eq(['Brook Farm Supplies Ltd', 'BROO001', 'accounts@brookfarm.example', 'Bella', 'Brook', '01234567', 'Ledbury', 'HR8 1AA'],
+        [$x['Name'], $x['AccountNumber'], $x['EmailAddress'], $x['FirstName'], $x['LastName'], $x['CompanyNumber'], $x['Addresses'][0]['City'], $x['Addresses'][0]['PostalCode']]);
+
+    // Changes are sent again, without making another company or Xero contact.
+    db_exec("UPDATE accounts SET name = 'Brook Farm Supplies Limited' WHERE id = ?", [$acct]);
+    db_exec("UPDATE contacts SET email = 'invoices@brookfarm.example' WHERE id = ?", [$contact]);
+    abillity_push_customer($acct);
+    $st = ab_state();
+    eq(1, count($st['companies']));
+    eq('Brook Farm Supplies Limited', $st['sites'][$a['abillity_site_id']]['SiteName']);
+    eq('invoices@brookfarm.example', $st['contacts'][$abContact]['Email'], 'the same contact updated');
+    eq(1, count(mock_state()['created']), 'not created in Xero twice');
+
+    // A customer already in aBILLity (by account reference) is linked, not duplicated.
+    $st = ab_state();
+    $st['companies'][9001] = ['Id' => 9001, 'Name' => 'Old Mill Bakery', 'IsCustomer' => true];
+    $st['sites'][9002] = ['Id' => 9002, 'CompanyId' => 9001, 'ShortName' => 'Old Mill', 'AccountRef' => 'OLDM001', 'MainSite' => true];
+    file_put_contents($GLOBALS['abState'], json_encode($st));
+    $old = create('accounts', ['name' => 'Old Mill Bakery', 'account_number' => 'OLDM001', 'type' => 'business', 'status' => 'active']);
+    eq(9002, abillity_push_customer($old));
+    eq([9001, 9002], array_map('intval', array_values(db_one('SELECT abillity_company_id, abillity_site_id FROM accounts WHERE id = ?', [$old]))));
+    eq(2, count(ab_state()['companies']));
+
+    // A user who can't set the account reference: everything else is sent, and it says what to do.
+    ab_set(['no_cp' => true]);
+    $nocp = create('accounts', ['name' => 'Cedar Joinery', 'account_number' => 'CEDA001', 'type' => 'business', 'status' => 'active']);
+    abillity_push_customer($nocp);
+    ok(str_contains((string)db_value('SELECT abillity_error FROM accounts WHERE id = ?', [$nocp]), 'CEDA001'), 'told to add the reference by hand');
+    ab_set(['no_cp' => false]);
+
+    // Products become service charge types; one already there with that name is linked.
+    $broadband = create('products', ['sku' => 'AB-FTTP', 'name' => 'Business Fibre 500', 'category' => 'broadband', 'monthly_price' => '120', 'cost_price' => '75',
+        'billing_frequency' => 'quarterly', 'term_months' => '24', 'sales_account_code' => '200']);
+    $typeId = abillity_push_product($broadband);
+    $t = ab_state()['types'][$typeId];
+    eq(['Business Fibre 500', 4, 120, 75, true, '200'], [$t['RecurringChargeType'], $t['FrequencyTypeId'], $t['DefaultSalePrice'], $t['DefaultCost'], $t['Rental'], $t['Nominal']], 'price per quarter');
+    $install = create('products', ['sku' => 'AB-INST', 'name' => 'Engineer installation', 'category' => 'other', 'monthly_price' => '150', 'billing_frequency' => 'one_off', 'term_months' => '0']);
+    $iid = abillity_push_product($install);
+    $t = ab_state()['types'][$iid];
+    eq([3, false], [$t['FrequencyTypeId'], $t['Rental']], 'one-off, not a rental');
+    $weekly = create('products', ['sku' => 'AB-WK', 'name' => 'Weekly thing', 'category' => 'other', 'monthly_price' => '12', 'billing_frequency' => 'weekly', 'term_months' => '1']);
+    $wid = abillity_push_product($weekly);
+    $t = ab_state()['types'][$wid];
+    eq([2, 52.0], [$t['FrequencyTypeId'], (float)$t['DefaultSalePrice']], 'weekly sent as monthly');
+    $st = ab_state(); $st['types'][7777] = ['Id' => 7777, 'RecurringChargeType' => 'SIP Trunk']; file_put_contents($GLOBALS['abState'], json_encode($st));
+    $sip = create('products', ['sku' => 'AB-SIP', 'name' => 'SIP Trunk', 'category' => 'voip', 'monthly_price' => '8', 'term_months' => '12']);
+    eq(7777, abillity_push_product($sip), 'linked to the existing charge type');
+    eq(8, (int)ab_state()['types'][7777]['DefaultSalePrice'], 'and brought up to date');
+
+    // A service goes in when added, with a provisional start date while it's pending.
+    $svc = create('services', ['account_id' => $acct, 'product_id' => $broadband, 'service_type' => 'broadband', 'identifier' => 'TBC – Business Fibre 500',
+        'status' => 'pending', 'monthly_price' => '40', 'setup_fee' => '99', 'term_months' => '24']);
+    [$msg, $okSave] = abillity_after_save('services', $svc, [], true);
+    ok($okSave, $msg);
+    $s = db_one('SELECT * FROM services WHERE id = ?', [$svc]);
+    ok($s['abillity_charge_id'] && $s['abillity_setup_charge_id'] && $s['abillity_provisional'] && !$s['abillity_pending'], 'sent: ' . $s['abillity_error']);
+    $provisional = date('Y-m-d', strtotime('+30 days'));
+    eq($provisional, $s['abillity_first_payment']);
+    $charges = ab_state()['charges'];
+    $c = $charges[$s['abillity_charge_id']];
+    eq([$a['abillity_site_id'], $typeId, 4, 120, 1, true, $provisional . 'T00:00:00', 'Business Fibre 500 – TBC – Business Fibre 500'],
+        [$c['SiteId'], $c['ChargeId'], $c['FrequencyTypeId'], (int)$c['SalesPrice'], $c['Quantity'], $c['Rental'], $c['FirstPayment'], $c['Description']], '£40 a month billed quarterly');
+    ok(str_starts_with($c['Notes'], "CRM service #$svc;") && str_contains($c['Notes'], '24 month term'));
+    $setup = $charges[$s['abillity_setup_charge_id']];
+    eq([3, 99, false], [$setup['FrequencyTypeId'], (int)$setup['SalesPrice'], $setup['Rental']], 'setup fee as a one-off');
+
+    // Live: the number and the real start date are sent.
+    db_exec("UPDATE services SET status = 'active', identifier = '01531 222333', start_date = '2026-09-14' WHERE id = ?", [$svc]);
+    abillity_after_save('services', $svc, ['Status' => []], false);
+    $s = db_one('SELECT * FROM services WHERE id = ?', [$svc]);
+    eq(['2026-09-14', 0], [$s['abillity_first_payment'], (int)$s['abillity_provisional']]);
+    $charges = ab_state()['charges'];
+    eq(['2026-09-14T00:00:00', '01531 222333'], [$charges[$s['abillity_charge_id']]['FirstPayment'], $charges[$s['abillity_charge_id']]['SerialNo']]);
+    eq('2026-09-14T00:00:00', $charges[$s['abillity_setup_charge_id']]['FirstPayment'], 'setup billed when it goes live too');
+    eq(2, count($charges), 'updated, not added again');
+
+    // Ceased: billing ends.
+    db_exec("UPDATE services SET status = 'ceased' WHERE id = ?", [$svc]);
+    abillity_push_service($svc);
+    eq(date('Y-m-d') . 'T00:00:00', ab_state()['charges'][$s['abillity_charge_id']]['LastPayment']);
+
+    // Cancelled before it went live: flagged, since aBILLity has a charge from the provisional date.
+    $early = create('services', ['account_id' => $acct, 'product_id' => $sip, 'service_type' => 'voip', 'identifier' => 'SIP-1', 'status' => 'pending', 'monthly_price' => '8']);
+    abillity_push_service($early);
+    db_exec("UPDATE services SET status = 'ceased' WHERE id = ?", [$early]);
+    abillity_queue_service($early);
+    ok(str_contains((string)db_value('SELECT abillity_error FROM services WHERE id = ?', [$early]), 'remove service charge'), 'told to remove it');
+
+    // Sent, but its ID can't be found afterwards: never sent again (that would bill twice), and it says so.
+    ab_set(['hide_charges' => true]);
+    $lost = create('services', ['account_id' => $acct, 'service_type' => 'mobile', 'identifier' => '07700 900199', 'status' => 'active', 'monthly_price' => '9', 'start_date' => '2026-09-01']);
+    abillity_push_service($lost);
+    $before = count(ab_state()['charges']);
+    abillity_push_service($lost);
+    eq($before, count(ab_state()['charges']), 'not added twice');
+    $l = db_one('SELECT abillity_charge_id, abillity_pending, abillity_error FROM services WHERE id = ?', [$lost]);
+    ok((int)$l['abillity_charge_id'] === 0 && !$l['abillity_pending'] && str_contains((string)$l['abillity_error'], 'by hand'), json_encode($l));
+    ab_set(['hide_charges' => false]);
+    // Active with no start date entered: billed from today, not a provisional date.
+    $nodate = create('services', ['account_id' => $acct, 'service_type' => 'mobile', 'identifier' => '07700 900198', 'status' => 'active', 'monthly_price' => '9']);
+    abillity_push_service($nodate);
+    eq([date('Y-m-d'), 0], array_values(array_map(fn($v) => is_numeric($v) ? (int)$v : $v, db_one('SELECT abillity_first_payment, abillity_provisional FROM services WHERE id = ?', [$nodate]))));
+
+    // Services already on the CRM before aBILLity was connected are billed there already: not sent automatically.
+    $older = create('services', ['account_id' => $acct, 'service_type' => 'mobile', 'identifier' => '07700 900100', 'status' => 'active', 'monthly_price' => '10', 'start_date' => '2025-01-01']);
+    db_exec("UPDATE services SET created_at = '2025-01-01' WHERE id = ?", [$older]);
+    set_setting('abillity_connected_at', '2026-01-01 00:00:00');
+    abillity_queue_service($older);
+    eq([null, 0], array_values(array_map(fn($v) => $v === null ? null : (int)$v, db_one('SELECT abillity_charge_id, abillity_pending FROM services WHERE id = ?', [$older]))), 'left alone');
+    abillity_push_service($older);
+    ok(db_value('SELECT abillity_charge_id FROM services WHERE id = ?', [$older]) > 0, 'but can be sent with the button');
+
+    // Not sending straight away: queued, then sent by the cron job. Problems are kept and listed.
+    set_setting('abillity_auto', '0');
+    $later = create('services', ['account_id' => $old, 'service_type' => 'mobile', 'identifier' => '07700 900123', 'status' => 'active', 'monthly_price' => '15', 'start_date' => '2026-09-01']);
+    abillity_queue_service($later);
+    eq(1, (int)db_value('SELECT abillity_pending FROM services WHERE id = ?', [$later]));
+    $bad = create('services', ['account_id' => $old, 'service_type' => 'mobile', 'identifier' => '07700 900124', 'status' => 'active', 'monthly_price' => '15', 'start_date' => '2026-09-01']);
+    db_exec('UPDATE services SET product_id = ? WHERE id = ?', [$sip, $bad]);
+    db_exec('UPDATE products SET abillity_charge_type_id = 424242 WHERE id = ?', [$sip]);
+    abillity_queue_service($bad);
+    $r = abillity_push_pending();
+    ok($r['sent'] >= 1);
+    ok(db_value('SELECT abillity_charge_id FROM services WHERE id = ?', [$later]) > 0, 'sent by the sync');
+    ok(isset($r['failed']['07700 900124']) && str_contains($r['failed']['07700 900124'], 'ChargeId'), json_encode($r['failed']));
+    eq(1, (int)db_value('SELECT abillity_pending FROM services WHERE id = ?', [$bad]), 'kept to try again');
+    ok(in_array($bad, array_map('intval', array_column(abillity_problems()['services'], 'id')), true), 'listed under Admin → aBILLity');
+
+    foreach (['abillity_system', 'abillity_username', 'abillity_password', 'abillity_auto', 'abillity_connected_at', 'xero_scopes'] as $k) {
+        set_setting($k, null);
+    }
+    db_exec('UPDATE accounts SET xero_contact_id = NULL WHERE id IN (?, ?, ?)', [$acct, $old, $nocp]);
+});
+
 test('products are sent to Xero as items: one, several, validation problems, updates', function () {
     ok(!xero_can_write_items(), 'not allowed by default');
     try { xero_push_products([1]); throw new Exception('expected failure'); } catch (XeroException $e) { ok(str_contains($e->getMessage(), 'Reconnect')); }
@@ -766,6 +946,8 @@ test('revoked connection gives a clear error and is marked disconnected', functi
 
 proc_terminate($mock);
 @unlink($mockState);
+proc_terminate($abProc);
+@unlink($abState);
 
 echo "GoCardless\n";
 test('mandate states and best mandate per customer', function () {

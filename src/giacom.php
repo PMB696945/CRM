@@ -549,6 +549,7 @@ function giacom_place_order(array $check, array $product, array $o): int
     audit('giacom_order', "Giacom $type order $orderId placed: {$product['name']} at {$check['address_label']}" . ($o['cli'] ? " (CLI {$o['cli']})" : ''),
         'accounts', (int)$account['id'], null, ['Product' => ['from' => '', 'to' => $product['name']], 'Required by' => ['from' => '', 'to' => (string)$o['crd']]]);
     log_activity((int)$account['id'], 'note', "Giacom $type order $orderId placed: {$product['name']}");
+    abillity_queue_service($serviceId);
     return $id;
 }
 
@@ -613,13 +614,16 @@ function giacom_set_status(array $order, string $status, ?string $crd = null, ?s
             $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
             if ($svc && $svc['status'] === 'pending') {
                 db_exec("UPDATE services SET status = 'active', start_date = COALESCE(start_date, CURDATE()) WHERE id = ?", [$svc['id']]);
+                abillity_queue_service((int)$svc['id']); // live: billing starts from the real date
             }
         }
         if ($order['account_id']) {
             log_activity((int)$order['account_id'], 'note', "Giacom order {$order['giacom_order_id']} completed: {$order['product_name']}");
         }
     } elseif (giacom_is_cancelled($status) && $order['service_id']) {
-        db_exec("UPDATE services SET status = 'ceased' WHERE id = ? AND status = 'pending'", [$order['service_id']]);
+        if (db_exec("UPDATE services SET status = 'ceased' WHERE id = ? AND status = 'pending'", [$order['service_id']])) {
+            abillity_queue_service((int)$order['service_id']);
+        }
     }
 }
 

@@ -401,6 +401,28 @@ The SKU becomes the Xero item code (Xero allows up to 30 characters), the name i
 
 **Tracking:** the hourly cron job (`cron/sync.php`) and **Check for updates** on the Broadband orders page fetch status changes from Giacom. Each order's page shows its history and has **Refresh from Giacom**. When Giacom completes an order its service becomes **active**; a cancelled order's pending service is marked ceased. People who can place orders can also ask Giacom to cancel one in progress (Giacom confirms whether it could).
 
+## aBILLity billing
+
+Customers, products and services are set up in the CRM and sent to aBILLity (Giacom's billing platform) for billing. New customers are created in Xero at the same time.
+
+**Setting up:**
+1. Under **Admin → aBILLity**, enter the system name, username and password Giacom gave you for the API, then press **Save and test**. The password is stored encrypted.
+2. **Customers you already had:** those created before you connected aren't sent automatically, since they're probably already in aBILLity. Use **Send all active customers** (or **Set up in aBILLity** on a customer). Any already in aBILLity with the CRM account number as their account reference are linked rather than duplicated. To link one under a different reference, enter its aBILLity company and site IDs on the customer.
+3. **Services you already had** aren't sent automatically either, since they're presumably already billed. Send one with **Send to aBILLity** on the service if needed.
+
+**What happens:**
+- **Customers:** when a customer becomes active (or their first service is sent), it's created in aBILLity and Xero together.
+  - In aBILLity: a company and site, with the account number as the account reference. The address, phone and accounts contact are added, and invoices go to the accounts contact's email.
+  - In Xero: a contact with the same account number.
+  - Later changes to the customer or their accounts contact are sent to aBILLity.
+- **Products:** saving a product creates or updates a service charge type in aBILLity, with its price, cost, billing cycle and sales nominal code. Weekly and bi-annual products are sent as monthly.
+- **Services:** adding a service creates a service charge on the customer, plus a one-off charge for any setup fee. This covers services added by hand, from a signed agreement, or by a Giacom order.
+  - **While pending:** the start date is provisional, 30 days ahead by default (you can change this in the settings), so nothing is billed early.
+  - **When it goes live** (set to active with its start date, or Giacom completes the order): the real start date and number are sent.
+  - **When it's ceased:** billing ends that day.
+- **Problems:** anything that can't be sent is listed under Admin → aBILLity and retried by the cron job. It's also shown on the customer, product or service.
+- **Ceased before billing started:** if a service is cancelled before it goes live, or ceased before its start date, the CRM can't remove the charge through the API. It's flagged, so remove that charge in aBILLity.
+
 ## Ticket groups and the queue
 
 - **Groups** (Admin → Ticket groups): Sales, Faults, Billing and General are created for you. For each group choose which ticket categories go to it (e.g. Fault and Porting → Faults), its members, and optionally a shared email address for new-ticket alerts (otherwise each member is emailed, when email is set up). Staff can be in several groups; you can also tick groups on each user's page.
@@ -498,6 +520,7 @@ src/
   ticket_groups.php ticket groups, queue and pick-up
   campaigns.php    service alerts and marketing: audiences, sending, unsubscribes
   mailchimp.php    Mailchimp Marketing API
+  abillity.php     aBILLity billing: customers, products and services sent from the CRM
   giacom.php       Giacom comms API: availability checks, orders and tracking
   entities.php     field definitions + business rules (SLA, contract dates, numbering…)
   repository.php   generic validation, CRUD, listing, formatting
@@ -517,7 +540,7 @@ templates/         PHP view templates
 install/           schema.sql, migrations.php (upgrades), installer, demo data
 cron/              scheduled jobs (sync.php: Xero, GoCardless, contracts awaiting signature, Mailchimp unsubscribes, Giacom orders, queued emails)
 storage/           uploaded templates and generated/signed contracts (created automatically; not web-accessible)
-tests/             integration tests, with local stand-ins for Xero, GoCardless, Mailchimp, Giacom and an SMTP server
+tests/             integration tests, with local stand-ins for Xero, GoCardless, aBILLity, Mailchimp, Giacom and an SMTP server
 .htaccess, index.php  protection + redirect for installs inside public_html
 ```
 

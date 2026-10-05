@@ -265,7 +265,7 @@ function contract_create_services(array $contract): int
             continue;
         }
         for ($n = 1; $n <= min((int)$l['quantity'], 100); $n++) {
-            insert_row('services', [
+            $ids[] = insert_row('services', [
                 'account_id' => $contract['account_id'], 'product_id' => $l['product_id'], 'service_type' => $l['service_type'],
                 'identifier' => 'TBC – ' . $l['description'] . ((int)$l['quantity'] > 1 ? " #$n" : ''),
                 'carrier' => null, 'status' => 'pending', 'monthly_price' => $l['monthly_price'], 'setup_fee' => $l['setup_fee'],
@@ -277,6 +277,9 @@ function contract_create_services(array $contract): int
     }
     if ($created) {
         log_activity((int)$contract['account_id'], 'note', "$created pending service(s) created from contract {$contract['reference']}");
+    }
+    foreach ($ids ?? [] as $serviceId) {
+        abillity_queue_service($serviceId);
     }
     return $created;
 }

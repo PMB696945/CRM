@@ -54,10 +54,15 @@ function execute_account_action(string $type, array $account, string $reason, ar
     db()->beginTransaction();
     try {
         db_exec("UPDATE accounts SET status = 'churned', closed_at = NOW(), closed_reason = ? WHERE id = ?", [mb_substr($reason, 0, 500), $id]);
+        $ceasedIds = [];
         if (!empty($options['cease_services'])) {
+            $ceasedIds = array_map('intval', array_column(db_all("SELECT id FROM services WHERE account_id = ? AND status IN ('active','pending','suspended')", [$id]), 'id'));
             $ceased = db_exec("UPDATE services SET status = 'ceased' WHERE account_id = ? AND status IN ('active','pending','suspended')", [$id]);
         }
         db()->commit();
+        foreach ($ceasedIds as $serviceId) {
+            abillity_queue_service($serviceId); // billing ends
+        }
     } catch (Throwable $e) {
         db()->rollBack();
         throw $e;

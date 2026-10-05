@@ -125,6 +125,21 @@ if (preg_match('#^/api.xro/2.0/Contacts/([0-9a-f-]{36})$#', $path, $m) && $_SERV
     json_out(200, ['Contacts' => [$body['Contacts'][0] + ['ContactID' => $m[1]]]]);
 }
 
+if ($path === '/api.xro/2.0/Contacts' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Create a contact (names must be unique, as in Xero).
+    $c = json_decode(file_get_contents('php://input'), true)['Contacts'][0];
+    foreach ($state['created'] ?? [] as $existing) {
+        if (strcasecmp($existing['Name'], $c['Name']) === 0) {
+            json_out(400, ['Type' => 'ValidationException', 'Elements' => [['ValidationErrors' => [['Message' => 'The contact name ' . $c['Name'] . ' is already assigned to another contact.']]]]]);
+        }
+    }
+    $c['ContactID'] = sprintf('d2000000-0000-0000-0000-%012d', count($state['created'] ?? []) + 1);
+    $c['ContactStatus'] = 'ACTIVE';
+    $state['created'][] = $c;
+    save($state);
+    json_out(200, ['Contacts' => [$c]]);
+}
+
 if ($path === '/api.xro/2.0/Accounts') {
     json_out(200, ['Accounts' => [
         ['Code' => '200', 'Name' => 'Sales', 'Class' => 'REVENUE', 'Status' => 'ACTIVE'],

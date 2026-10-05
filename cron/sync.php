@@ -70,6 +70,19 @@ if (giacom_configured()) {
     }
 }
 
+if (abillity_configured()) {
+    try {
+        $r = abillity_push_pending();
+        echo date('c') . " aBILLity OK: {$r['sent']} sent" . ($r['failed'] ? ', ' . count($r['failed']) . ' still failing' : '') . "\n";
+        foreach ($r['failed'] as $what => $error) {
+            fwrite(STDERR, date('c') . " aBILLity: $what: $error\n");
+        }
+    } catch (Throwable $e) {
+        fwrite(STDERR, date('c') . ' aBILLity sync failed: ' . $e->getMessage() . "\n");
+        $failed = true;
+    }
+}
+
 try {
     if ($n = ticket_pickup_alerts()) {
         echo date('c') . " Tickets: alerted admins about $n ticket(s) not picked up\n";
