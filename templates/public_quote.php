@@ -20,8 +20,8 @@
 <?php else: $totals = quote_totals($lines); ?>
 
   <?php if ($done === 'accepted' || $quote['status'] === 'accepted'): ?>
-    <div class="flash flash-success">✔ Thank you<?= $quote['response_name'] ? ', ' . h(explode(' ', $quote['response_name'])[0]) : '' ?>. You accepted this quote on <?= h(fmt_date($quote['responded_at'])) ?>.
-      <?= esign_auto_send() ? 'Your agreement will arrive by email shortly for you to sign online.' : 'We\'ll be in touch shortly with your agreement.' ?>
+    <div class="flash flash-success">✔ Thank you<?= $quote['response_name'] ? ', ' . h(explode(' ', $quote['response_name'])[0]) : '' ?>. You <?= quote_acceptance_is_request() ? 'asked to go ahead with' : 'accepted' ?> this quote on <?= h(fmt_date($quote['responded_at'])) ?>.
+      <?= quote_acceptance_is_request() ? 'This isn\'t a contract yet: ' . (esign_auto_send() ? 'your Contract Summary and agreement will arrive by email shortly, and the contract is made when you sign.' : 'we\'ll be in touch shortly with your Contract Summary and agreement to sign.') : '' ?>
       <?= $quote['confirmation_sent_at'] ? 'We\'ve emailed a confirmation to ' . h($quote['response_email'] ?: $quote['recipient_email']) . '.' : '' ?>
       <a href="?t=<?= h(rawurlencode($token)) ?>&amp;pdf=1">Download a copy (PDF)</a></div>
   <?php elseif ($done === 'declined' || $quote['status'] === 'declined'): ?>
@@ -59,12 +59,12 @@
   <div class="grid-2">
     <form method="post" class="card stack" action="quote.php?t=<?= h(rawurlencode($token)) ?>">
       <?= csrf_field() ?><input type="hidden" name="response" value="accept">
-      <h2>Accept this quote</h2>
+      <h2><?= quote_acceptance_is_request() ? 'Go ahead with this quote' : 'Accept this quote' ?></h2>
       <label>Your full name<input name="name" required autocomplete="name" value="<?= h($quote['recipient_name']) ?>"></label>
       <label>Your email<input type="email" name="email" required autocomplete="email" value="<?= h($quote['recipient_email']) ?>"></label>
-      <?php if (esign_auto_send()): ?><p class="help -mt-2">We'll send the agreement here for you to sign online.</p><?php endif; ?>
+      <?php if (esign_auto_send()): ?><p class="help -mt-2">We'll send the Contract Summary and agreement here, for you to read and sign online.</p><?php endif; ?>
       <label class="check flex-row! items-start gap-2 font-normal!"><input type="checkbox" name="agree" value="1" required class="mt-0.5"> <?= h(quote_acceptance_statement($account)) ?></label>
-      <button class="btn btn-primary btn-block py-3">Accept quote</button>
+      <button class="btn btn-primary btn-block py-3"><?= quote_acceptance_is_request() ? 'Go ahead' : 'Accept quote' ?></button>
     </form>
     <form method="post" class="card stack" action="quote.php?t=<?= h(rawurlencode($token)) ?>" data-confirm="Decline this quote?">
       <?= csrf_field() ?><input type="hidden" name="response" value="decline">

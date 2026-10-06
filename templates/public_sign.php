@@ -42,23 +42,52 @@ $maskEmail = function (string $email): string {
   <?php if ($error): ?><div class="flash flash-error" role="alert"><?= h($error) ?></div><?php endif; ?>
   <?php if ($notice): ?><div class="flash flash-info" role="status"><?= h($notice) ?></div><?php endif; ?>
 
+<?php
+    $summary = contract_summary_document($contract);
+    $agreements = array_filter($docs, fn($d) => ($d['kind'] ?? '') !== 'summary');
+    $n = 0;
+    $step = function (string $title, bool $done = false) use (&$n) { $n++; return '<span class="step ' . ($done ? 'step-done' : '') . '">' . $n . '</span> ' . h($title); };
+  ?>
   <section class="card">
     <h1><?= h($contract['title']) ?></h1>
     <p class="muted mt-1">Between <b class="text-gray-800 dark:text-white/90"><?= h($company) ?></b> and <b class="text-gray-800 dark:text-white/90"><?= h($account['name']) ?></b> · to be signed by <?= h($contract['signer_name']) ?></p>
-    <p class="mt-3">Please read the agreement below, then sign at the bottom of the page.</p>
+    <p class="mt-3"><?= $summary ? 'Please read the Contract Summary first, then the agreement, then sign at the bottom of the page. Copies of both were attached to the email we sent you.' : 'Please read the agreement below, then sign at the bottom of the page.' ?></p>
   </section>
 
-  <?php foreach ($docs as $i => $d): ?>
+  <?php if ($summary): ?>
+  <section class="card" id="summary">
+    <div class="card-head"><h2><?= $step('Contract Summary', $summaryConfirmed) ?></h2><a class="btn btn-sm" href="<?= h($base . '&doc=' . $summary['index']) ?>">Download (Word)</a></div>
+    <?php if ($summaryConfirmed): ?>
+      <p class="text-ok">✔ You confirmed you'd received and read it on <?= h(fmt_datetime($contract['summary_ack_at'])) ?>.</p>
+      <details class="mt-2"><summary class="cursor-pointer text-sm">Show it again</summary><div class="doc-preview mt-2"><?= $previews[$summary['index']] ?: '' ?></div></details>
+    <?php else: ?>
+      <p class="help">The main points of this agreement: the services, prices, how long it lasts and how to end it.</p>
+      <div class="doc-preview"><?= $previews[$summary['index']] ?: '<p class="muted">This document can\'t be shown here. Please download it to read it.</p>' ?></div>
+      <form method="post" action="<?= h($base) ?>#summary" class="stack mt-4">
+        <?= csrf_field() ?><input type="hidden" name="action" value="confirm_summary">
+        <label class="check flex-row! items-start gap-2 font-normal!"><input type="checkbox" name="received" value="1" required class="mt-0.5"> <?= h(esign_summary_statement($account['name'])) ?></label>
+        <div><button class="btn btn-primary">Confirm and continue</button></div>
+      </form>
+    <?php endif; ?>
+  </section>
+  <?php endif; ?>
+
+  <?php foreach ($agreements as $i => $d): ?>
   <section class="card">
-    <div class="card-head"><h2><?= h($d['title']) ?></h2><a class="btn btn-sm" href="<?= h($base . '&doc=' . $i) ?>">Download (Word)</a></div>
-    <div class="doc-preview"><?= $previews[$i] ?: '<p class="muted">This document can\'t be shown here. Please download it to read it.</p>' ?></div>
+    <div class="card-head"><h2><?= $i === array_key_first($agreements) ? $step($d['title']) : h($d['title']) ?></h2><a class="btn btn-sm" href="<?= h($base . '&doc=' . $i) ?>">Download (Word)</a></div>
+    <?php if ($summaryConfirmed): ?>
+      <div class="doc-preview"><?= $previews[$i] ?: '<p class="muted">This document can\'t be shown here. Please download it to read it.</p>' ?></div>
+    <?php else: ?>
+      <p class="muted">Shown here once you've confirmed the Contract Summary above.</p>
+    <?php endif; ?>
   </section>
   <?php endforeach; ?>
 
+  <?php if ($summaryConfirmed): ?>
   <section class="card stack" id="sign">
     <h2>Sign the agreement</h2>
     <?php if (!$verified): ?>
-      <p><b>Step 1: confirm it's you.</b> We'll email a 6-digit code to <b><?= h($maskEmail((string)$contract['signer_email'])) ?></b>.</p>
+      <p><b><?= $step('Confirm it\'s you') ?>.</b> We'll email a 6-digit code to <b><?= h($maskEmail((string)$contract['signer_email'])) ?></b>.</p>
       <?php if ($codeSent): ?>
         <form method="post" action="<?= h($base) ?>#sign" class="stack">
           <?= csrf_field() ?><input type="hidden" name="action" value="verify">
@@ -70,9 +99,9 @@ $maskEmail = function (string $email): string {
         <?= csrf_field() ?><input type="hidden" name="action" value="send_code">
         <button class="btn <?= $codeSent ? 'btn-ghost btn-sm' : 'btn-primary' ?>"><?= $codeSent ? 'Send a new code' : 'Email me a code' ?></button>
       </form>
-      <p class="help">Step 2, once you've confirmed: type your name and sign.</p>
-    <?php else: ?>
-      <p class="text-ok">✔ Email confirmed. <b>Step 2: sign.</b></p>
+      <p class="help">Then: type your name and sign.</p>
+    <?php else: $n++; ?>
+      <p class="text-ok">✔ Email confirmed. <b><?= $step('Sign') ?>.</b></p>
       <form method="post" action="<?= h($base) ?>#sign" class="stack" data-confirm="Sign the agreement now?">
         <?= csrf_field() ?><input type="hidden" name="action" value="sign">
         <div class="grid gap-4 sm:grid-cols-2">
@@ -82,10 +111,11 @@ $maskEmail = function (string $email): string {
         <div class="signature-preview" aria-hidden="true" data-signature-preview><?= h($contract['signer_name']) ?></div>
         <label class="check flex-row! items-start gap-2 font-normal!"><input type="checkbox" name="agree" value="1" required class="mt-0.5"> <?= h(esign_statement($contract, $account['name'])) ?></label>
         <button class="btn btn-primary btn-block py-3">Sign the agreement</button>
-        <p class="help">We'll record your name, the time, your IP address and device, and a fingerprint of the documents, and email you a copy with a signature certificate.</p>
+        <p class="help">We'll record each step with the time, your IP address and device, and a fingerprint of the documents, and email you a copy with a signature certificate.</p>
       </form>
     <?php endif; ?>
   </section>
+  <?php endif; ?>
 
   <details class="card">
     <summary class="cursor-pointer font-semibold">I don't want to sign this</summary>

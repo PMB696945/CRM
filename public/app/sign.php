@@ -26,6 +26,9 @@ if ($contract && !is_post() && in_array($contract['status'], ['sent', 'signed'],
     $docs = contract_documents($contract);
     if (query('doc') !== '' && isset($docs[(int)query('doc')])) {
         $d = $docs[(int)query('doc')];
+        if ($contract['status'] === 'sent') {
+            esign_downloaded($contract, $d, $ip, $userAgent);
+        }
         send_download(storage_path('contracts') . '/' . basename($d['file']), $contract['reference'] . ' ' . preg_replace('/[^A-Za-z0-9 _-]/', '', $d['title']) . '.docx');
     }
     if (query('cert') === '1' && $contract['status'] === 'signed' && $contract['signed_file'] && $contract['signed_ip']) {
@@ -41,6 +44,13 @@ if ($contract && is_post()) {
             throw new IntegrationException('This agreement can\'t be changed any more.');
         }
         switch ($action) {
+            case 'confirm_summary':
+                if (empty($_POST['received'])) {
+                    $error = 'Please tick to confirm you\'ve received and read the Contract Summary.';
+                    break;
+                }
+                esign_confirm_summary($contract, $ip, $userAgent);
+                break;
             case 'send_code':
                 esign_send_code($contract);
                 $notice = 'We\'ve emailed you a 6-digit code. It works for ' . ESIGN_CODE_MINUTES . ' minutes.';
@@ -74,9 +84,16 @@ if (!$contract || in_array($contract['status'], ['draft', 'failed'], true)) {
 }
 $docs = $contract ? contract_documents($contract) : [];
 $previews = [];
+$summaryConfirmed = $contract && esign_summary_confirmed($contract);
 if ($contract && $contract['status'] === 'sent') {
     foreach ($docs as $i => $d) {
-        $previews[$i] = docx_to_html(storage_path('contracts') . '/' . basename($d['file']));
+        // The agreement is shown once the Contract Summary has been confirmed.
+        if (($d['kind'] ?? '') === 'summary' || $summaryConfirmed) {
+            $previews[$i] = docx_to_html(storage_path('contracts') . '/' . basename($d['file']));
+        }
+    }
+    if ($summaryConfirmed && !db_value("SELECT 1 FROM contract_events WHERE contract_id = ? AND event = 'agreement_shown'", [$contract['id']])) {
+        contract_event((int)$contract['id'], 'agreement_shown', implode(', ', array_column(array_filter($docs, fn($d) => ($d['kind'] ?? '') !== 'summary'), 'title')), $ip, $userAgent);
     }
 }
 render('public_sign', [
@@ -86,6 +103,7 @@ render('public_sign', [
     'previews' => $previews,
     'token'    => $token,
     'verified' => $contract ? esign_is_verified($contract) : false,
+    'summaryConfirmed' => $summaryConfirmed,
     'codeSent' => $contract && $contract['code_hash'] && strtotime((string)$contract['code_expires_at']) > time(),
     'error'    => $error,
     'notice'   => $notice,

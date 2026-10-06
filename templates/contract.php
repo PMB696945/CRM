@@ -31,7 +31,7 @@ $status = $contract['status'];
       <div class="card-head"><h2>Documents</h2></div>
       <ul class="feed">
         <?php foreach ($docs as $d): ?>
-          <li class="flex items-center justify-between gap-3"><span><?= icon('document', 'inline size-5 mr-1 text-gray-400') ?><?= h($d['title']) ?></span>
+          <li class="flex items-center justify-between gap-3"><span><?= icon('document', 'inline size-5 mr-1 text-gray-400') ?><?= h($d['title']) ?><?= ($d['kind'] ?? '') === 'summary' ? ' <span class="badge">sent first</span>' : '' ?></span>
             <a class="btn btn-sm" href="<?= h(url('contracts', ['action' => 'download', 'id' => $id, 'file' => $d['file']])) ?>">Download .docx</a></li>
         <?php endforeach; ?>
         <?php if ($contract['signed_file']): ?>
@@ -45,6 +45,15 @@ $status = $contract['status'];
     <?php if ($contract['sent_at'] || $contract['signed_ip']): $hashes = json_decode((string)$contract['document_hashes'], true) ?: []; ?>
     <section class="card">
       <div class="card-head"><h2>Signing record</h2></div>
+      <?php $events = contract_events($id); if ($events): ?>
+      <ul class="timeline">
+        <?php foreach ($events as $e): ?>
+          <li><div class="timeline-meta"><?= h(date('j M Y, H:i:s', strtotime($e['created_at']))) ?></div><b><?= h(ESIGN_EVENTS[$e['event']] ?? $e['event']) ?></b>
+            <?php if ($e['detail'] || $e['ip']): ?><div class="small break-words"><?= h(trim((string)$e['detail'] . ($e['ip'] ? ' · IP ' . $e['ip'] : ''), ' ·')) ?></div><?php endif; ?>
+            <?php if ($e['event'] === 'signed'): ?><?php foreach ($hashes as $title => $hash): ?><div class="small muted">“<?= h($title) ?>” fingerprint <span class="font-mono"><?= h(substr($hash, 0, 16)) ?>…</span></div><?php endforeach; ?><?php endif; ?></li>
+        <?php endforeach; ?>
+      </ul>
+      <?php else: ?>
       <ul class="timeline">
         <li><div class="timeline-meta"><?= h(fmt_datetime($contract['sent_at'])) ?></div><b>Sent to sign</b><div class="small">Emailed to <?= h($contract['signer_email']) ?><?= (int)$contract['reminders_sent'] ? ' · ' . (int)$contract['reminders_sent'] . ' reminder' . ((int)$contract['reminders_sent'] === 1 ? '' : 's') . ', last ' . h(fmt_datetime($contract['last_reminded_at'])) : '' ?></div></li>
         <?php if ($contract['viewed_at']): ?><li><div class="timeline-meta"><?= h(fmt_datetime($contract['viewed_at'])) ?></div><b>Opened</b><?= $contract['viewed_ip'] ? '<div class="small">from ' . h($contract['viewed_ip']) . '</div>' : '' ?></li><?php endif; ?>
@@ -54,6 +63,7 @@ $status = $contract['status'];
           <?php foreach ($hashes as $title => $hash): ?><div class="small muted">“<?= h($title) ?>” fingerprint <span class="font-mono"><?= h(substr($hash, 0, 16)) ?>…</span></div><?php endforeach; ?></li><?php endif; ?>
         <?php if ($status === 'rejected'): ?><li><b>Declined</b><?= $contract['declined_reason'] ? '<div class="small">' . nl2br(h($contract['declined_reason'])) . '</div>' : '' ?></li><?php endif; ?>
       </ul>
+      <?php endif; ?>
       <?php if ($status === 'sent' && $contract['sign_token']): ?>
         <div class="copy-row mt-3"><input id="sign-link" readonly value="<?= h(esign_url($contract)) ?>" data-select-all aria-label="Signing link"><button type="button" class="btn btn-sm" data-copy="#sign-link">Copy link</button></div>
         <p class="help">The customer's private signing link, if you'd like to send it another way.</p>

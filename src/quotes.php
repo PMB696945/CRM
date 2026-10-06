@@ -203,9 +203,24 @@ function quote_accept(array $quote, string $name, string $ip, bool $byStaff = fa
 }
 
 /** What the customer agrees to when they tick the box on the quote page. */
+const QUOTE_DEFAULT_GO_AHEAD_STATEMENT = 'I would like to go ahead with this quote on behalf of {customer}. I understand this is not yet a contract: the contract is made only when I sign the agreement, which will be sent to me with its Contract Summary.';
+
+/**
+ * What the customer ticks to accept a quote. When an agreement follows, accepting is only a request to go ahead:
+ * the contract is made when they sign it, after receiving the Contract Summary (so nothing required comes "afterwards").
+ */
 function quote_acceptance_statement(array $account): string
 {
-    return 'I accept this quote on behalf of ' . $account['name'] . (esign_auto_send() ? ' and understand an agreement will be sent for me to sign' : '') . '.';
+    if (setting('contracts_auto_on_accept', '1') !== '1') {
+        return 'I accept this quote on behalf of ' . $account['name'] . '.';
+    }
+    return esign_wording('quote_acceptance_statement', QUOTE_DEFAULT_GO_AHEAD_STATEMENT, $account);
+}
+
+/** Does accepting a quote lead to an agreement to sign (rather than being the agreement itself)? */
+function quote_acceptance_is_request(): bool
+{
+    return setting('contracts_auto_on_accept', '1') === '1';
 }
 
 /** A SHA-256 fingerprint of what was accepted: the quote's lines, totals, validity and terms. */
@@ -411,7 +426,10 @@ function quote_send_confirmation(array $quote): ?string
         $totals = quote_totals(quote_lines((int)$quote['id']));
         $when = date('j F Y \a\t H:i', strtotime((string)$quote['responded_at']));
         $body = '<p>Hi ' . h($first ?: 'there') . ',</p>'
-            . '<p>Thank you for accepting quote <b>' . h($quote['reference']) . '</b> – ' . h($quote['title']) . '. This email confirms your acceptance.</p>'
+            . (quote_acceptance_is_request()
+                ? '<p>Thank you for asking to go ahead with quote <b>' . h($quote['reference']) . '</b> – ' . h($quote['title']) . '. This isn\'t a contract yet: '
+                    . 'we\'ll send you a Contract Summary and the agreement, and the contract is made when you sign it.</p>'
+                : '<p>Thank you for accepting quote <b>' . h($quote['reference']) . '</b> – ' . h($quote['title']) . '. This email confirms your acceptance.</p>')
             . '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:8px 0;font-size:14px">'
             . '<tr><td style="padding:6px 0;color:#667085">Accepted by</td><td style="padding:6px 0;text-align:right">' . h($name) . '</td></tr>'
             . '<tr><td style="padding:6px 0;color:#667085">On</td><td style="padding:6px 0;text-align:right">' . h($when) . '</td></tr>'
@@ -422,7 +440,7 @@ function quote_send_confirmation(array $quote): ?string
             . (($order = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$quote['id']]))
                 ? '<p>Your order reference is <b>' . h($order['reference']) . '</b>. We\'ll email you as it progresses, and you can follow it at any time:</p>' . email_button(order_tracking_url($order), 'Track your order')
                 : '')
-            . (esign_auto_send() ? '<p>Your agreement will arrive in a separate email for you to sign online.</p>' : '<p>We\'ll be in touch shortly about the next steps.</p>')
+            . (esign_auto_send() ? '<p>Your Contract Summary and agreement will arrive in a separate email, for you to read and sign online.</p>' : '<p>We\'ll be in touch shortly about the next steps.</p>')
             . '<p style="color:#667085;font-size:13px">If you didn\'t accept this quote, or anything looks wrong, please reply to this email straight away.</p>';
         send_mail($to, $name, 'Confirmation: quote ' . $quote['reference'] . ' accepted', email_layout('Thank you, your quote is accepted', $body), null, [],
             [['name' => $file, 'path' => $tmp, 'mime' => 'application/pdf']]);

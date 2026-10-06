@@ -358,12 +358,25 @@ The CRM won't let a customer be its own dealer, sit under a customer that isn't 
 
 Contracts are signed with the CRM's own e-signature. No outside service or subscription is needed.
 
-1. **Signing link:** the signer gets an email with a private link (it can't be guessed, and stops working if the contract is cancelled). Staff can copy it from the contract page or email it again.
-2. **Reading:** the page shows the agreement, with the exact Word documents to download.
-3. **Confirming who they are:** they ask for a 6-digit code, which is emailed to the signer's address. It lasts 15 minutes, allows 5 tries, and only 5 codes can be sent an hour.
-4. **Signing:** they type their name (and position), tick a statement that they agree, and press **Sign**. They can also decline, with a reason.
-5. **Record:** the CRM records their name, the time, IP address, browser/device, the email check, and a SHA-256 fingerprint of each document. A **signature certificate** (PDF) is made. The signer and your company email both get it, with the documents attached.
-6. **Afterwards:** the order moves to *Agreement signed*, and the person handling it and the sales team are told.
+It's built so the steps Ofcom's General Conditions require before a contract happen in the right order, and the record proves it:
+- **The Contract Information** is supplied before the customer is bound.
+- **The Contract Summary** is supplied before the contract is made, and the customer's agreement comes after they've received it.
+
+1. **Going ahead with a quote isn't the contract.** The customer ticks that they'd like to go ahead, and that the contract is only made when they sign the agreement. (If agreements aren't made automatically, accepting the quote is the agreement, and the wording says so.)
+2. **The documents come first.** The signing email has the **Contract Summary** and the agreement attached, so the customer holds them before they can agree to anything. The fingerprint of each attached file is recorded.
+3. **A fixed order on the signing page**, enforced by the CRM rather than just shown on the page:
+   1. Read the Contract Summary, and tick to confirm receiving it.
+   2. Read the agreement, which is only shown after step 1.
+   3. Confirm their email with a 6-digit code. It lasts 15 minutes, allows 5 tries, and only 5 codes can be sent an hour.
+   4. Type their name (and position), tick the statement, and **Sign**.
+   They can also decline, with a reason.
+4. **A timestamped record of every step:** sent (with what was attached), page opened, documents downloaded, Contract Summary confirmed, agreement shown, code sent and confirmed, signed, and copies sent. Each step has its IP address. It's shown on the contract page and printed on the **signature certificate** (PDF), with a SHA-256 fingerprint of every document. The signer and your company email both get the certificate and the documents.
+5. **Afterwards:** the order moves to *Agreement signed*, and the person handling it and the sales team are told.
+
+**Setting it up:**
+- **Contract Summary template:** under Contract templates, upload one, choosing "Contract Summary". Start from **Example Contract Summary**, which is laid out under Ofcom's standard headings. Until one is uploaded, agreements for customers can't be prepared. Dealer MSAs don't need one.
+- **Wording:** under Settings → Quotes & contracts, the wording customers tick (going ahead with a quote, confirming the Contract Summary, signing) can be replaced with your solicitor's.
+- **Who gets a Contract Summary:** every customer (the default), or only those Ofcom protects: consumers, microenterprises, small businesses and not-for-profits. Set each customer's **Size** on their record; a customer with no size is treated as protected.
 
 Unsigned agreements get a reminder every 3 days (up to 3 times) from the cron job. Change or switch this off under Settings → Quotes & contracts.
 

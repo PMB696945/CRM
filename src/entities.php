@@ -148,6 +148,8 @@ function entities(): array
                 'account_number' => ['label' => 'Account no.', 'type' => 'text', 'help' => 'Leave blank to auto-generate'],
                 'name'           => ['label' => 'Name', 'type' => 'text', 'required' => true],
                 'type'           => ['label' => 'Type', 'type' => 'select', 'options' => opts(['business', 'residential']), 'required' => true],
+                'customer_size'  => ['label' => 'Size', 'type' => 'select', 'options' => CUSTOMER_SIZES,
+                    'help' => 'Ofcom\'s contract rules (Contract Summary before signing) protect all but larger businesses. Leave blank if unsure: they\'re treated as protected'],
                 'status'         => ['label' => 'Status', 'type' => 'select', 'options' => ['prospect' => 'Prospect', 'active' => 'Active', 'suspended' => 'Suspended', 'churned' => 'Closed / churned'], 'required' => true],
                 'is_dealer'      => ['label' => 'This customer is a dealer', 'type' => 'bool', 'help' => 'Dealers can have other customers under them'],
                 'is_supplier'    => ['label' => 'This company is also a supplier', 'type' => 'bool', 'virtual' => true, 'if' => fn() => can('suppliers.edit'),

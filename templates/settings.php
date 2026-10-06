@@ -63,8 +63,18 @@
       <div class="help">Switch this off to create contracts by hand from the quote.</div></div>
     <div class="field field-check"><label><input type="checkbox" name="contracts_auto_send" value="1" <?= setting('contracts_auto_send', '1') === '1' ? 'checked' : '' ?>> Email the contract to the customer to sign straight away</label>
       <div class="help">Otherwise it waits on the contract page for you to check and send.</div></div>
+    <div class="field"><label for="s_cs">Send a Contract Summary before the agreement</label>
+      <select id="s_cs" name="contract_summary_for">
+        <option value="all" <?= setting('contract_summary_for', 'all') === 'all' ? 'selected' : '' ?>>For every customer</option>
+        <option value="protected" <?= setting('contract_summary_for') === 'protected' ? 'selected' : '' ?>>Only where Ofcom requires it (all but larger businesses)</option>
+      </select>
+      <div class="help">Uses the "Contract Summary" template under Contract templates. The customer confirms they've received it before they can see the agreement or sign. Customers with no size set get one.</div></div>
     <div class="field"><label for="s_rd">Remind unsigned contracts every (days)</label><input id="s_rd" name="esign_remind_days" value="<?= $v('esign_remind_days', '3') ?>" inputmode="numeric">
       <div class="help">Up to 3 reminders. 0 turns reminders off.</div></div>
+    <div class="field wide"><label for="s_qas">Wording ticked to go ahead with a quote</label><textarea id="s_qas" name="quote_acceptance_statement" rows="2" placeholder="<?= h(QUOTE_DEFAULT_GO_AHEAD_STATEMENT) ?>"><?= $v('quote_acceptance_statement') ?></textarea>
+      <div class="help">Leave blank for the wording shown. {customer} becomes the customer's name. Have your solicitor approve these three.</div></div>
+    <div class="field wide"><label for="s_ess">Wording ticked to confirm the Contract Summary</label><textarea id="s_ess" name="esign_summary_statement" rows="2" placeholder="<?= h(ESIGN_DEFAULT_SUMMARY_STATEMENT) ?>"><?= $v('esign_summary_statement') ?></textarea></div>
+    <div class="field wide"><label for="s_esg">Wording ticked to sign the agreement</label><textarea id="s_esg" name="esign_sign_statement" rows="2" placeholder="<?= h(ESIGN_DEFAULT_SIGN_STATEMENT) ?>"><?= $v('esign_sign_statement') ?></textarea></div>
     <div class="field wide"><label for="s_qt">Terms shown on quotes</label><textarea id="s_qt" name="quote_terms" rows="4" placeholder="e.g. All prices exclude VAT. Services are subject to survey and our standard terms and conditions."><?= $v('quote_terms') ?></textarea></div>
   </section>
 

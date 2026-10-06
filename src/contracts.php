@@ -11,9 +11,39 @@ function contract_template_types(): array
 {
     return SERVICE_TYPES + [
         'general'      => 'General (any service without its own template)',
+        'contract_summary' => 'Contract Summary (sent and confirmed before the agreement)',
         'msa_schedule' => 'Service schedule under a dealer MSA',
         'msa'          => 'Master services agreement (MSA)',
     ];
+}
+
+/** Customer sizes. Ofcom's pre-contract rules (Contract Summary and Contract Information) protect all but larger businesses. */
+const CUSTOMER_SIZES = [
+    'consumer'       => 'Consumer (an individual)',
+    'micro'          => 'Microenterprise (under 10 staff)',
+    'small'          => 'Small business (10 to 49 staff)',
+    'not_for_profit' => 'Not-for-profit',
+    'larger'         => 'Larger business (50 or more staff)',
+];
+
+/** Is this customer covered by Ofcom's pre-contract rules? When unsure (size not set), assume so. */
+function customer_is_protected(array $account): bool
+{
+    return ($account['type'] ?? '') === 'residential' || ($account['customer_size'] ?? null) !== 'larger';
+}
+
+/** Does a contract for this customer need a Contract Summary first? (Service contracts; dealer MSAs don't.) */
+function contract_summary_required(array $account, string $kind): bool
+{
+    if ($kind !== 'services') {
+        return false;
+    }
+    return setting('contract_summary_for', 'all') === 'all' || customer_is_protected($account);
+}
+
+function contract_summary_template(): ?array
+{
+    return db_one("SELECT * FROM contract_templates WHERE service_type = 'contract_summary' AND active = 1 ORDER BY id DESC LIMIT 1");
 }
 
 /** Private storage folder (outside the web root), created on first use. */
@@ -121,6 +151,12 @@ function contract_table_rows(array $lines): array
 /** Create a contract record and its documents. $lines may be empty (e.g. an MSA). */
 function contract_generate(array $account, array $templatesWithLines, string $title, string $kind, string $signerName, string $signerEmail, ?array $quote = null): array
 {
+    // The Contract Summary comes first, covering everything in the agreement.
+    $summaryTemplate = null;
+    if (contract_summary_required($account, $kind)) {
+        $summaryTemplate = contract_summary_template() ?? throw new IntegrationException('A Contract Summary has to be sent before this agreement, but there\'s no Contract Summary template.'
+            . ' Upload one under Contract templates (choose "Contract Summary").');
+    }
     db_exec('INSERT INTO contracts (account_id, quote_id, kind, title, status, signer_name, signer_email, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [$account['id'], $quote['id'] ?? null, $kind, $title, 'draft', $signerName, $signerEmail, current_user()['id'] ?? ($quote['created_by'] ?? null)]);
     $id = (int)db()->lastInsertId();
@@ -131,6 +167,12 @@ function contract_generate(array $account, array $templatesWithLines, string $ti
     try {
         $docs = [];
         $dir = storage_path('contracts');
+        if ($summaryTemplate) {
+            $allLines = array_merge(...array_map(fn($g) => $g[1], $templatesWithLines ?: [[null, []]]));
+            $file = sprintf('%s-0-summary-%s.docx', $reference, bin2hex(random_bytes(4)));
+            docx_merge(template_file($summaryTemplate), "$dir/$file", contract_fields($account, $quote, $contract, $allLines, $signerName), contract_table_rows($allLines));
+            $docs[] = ['title' => 'Contract Summary', 'file' => $file, 'kind' => 'summary'];
+        }
         foreach ($templatesWithLines as $i => [$template, $lines]) {
             $file = sprintf('%s-%d-%s.docx', $reference, $i + 1, bin2hex(random_bytes(4)));
             $fields = contract_fields($account, $quote, $contract, $lines, $signerName);
@@ -143,6 +185,7 @@ function contract_generate(array $account, array $templatesWithLines, string $ti
         throw $e;
     }
     log_activity((int)$account['id'], 'note', "Contract $reference created" . ($quote ? " from quote {$quote['reference']}" : ''));
+    contract_event($id, 'created', implode(', ', array_column($docs, 'title')));
     return db_one('SELECT * FROM contracts WHERE id = ?', [$id]);
 }
 
@@ -168,6 +211,29 @@ function contract_documents(array $contract): array
     return json_decode((string)$contract['documents'], true) ?: [];
 }
 
+/** The contract's Contract Summary document, if it has one. */
+function contract_summary_document(array $contract): ?array
+{
+    foreach (contract_documents($contract) as $i => $d) {
+        if (($d['kind'] ?? '') === 'summary') {
+            return $d + ['index' => $i];
+        }
+    }
+    return null;
+}
+
+/** A timestamped step in signing (sent, opened, summary confirmed, signed...), for the signing record and certificate. */
+function contract_event(int $contractId, string $event, ?string $detail = null, ?string $ip = null, ?string $userAgent = null): void
+{
+    db_exec('INSERT INTO contract_events (contract_id, event, detail, ip, user_agent) VALUES (?, ?, ?, ?, ?)',
+        [$contractId, $event, $detail, $ip !== null ? mb_substr($ip, 0, 45) : null, $userAgent !== null ? mb_substr($userAgent, 0, 255) : null]);
+}
+
+function contract_events(int $contractId): array
+{
+    return db_all('SELECT * FROM contract_events WHERE contract_id = ? ORDER BY id', [$contractId]);
+}
+
 /** The customer order a contract belongs to (through its quote), if any. */
 function contract_order(array $contract): ?array
 {
@@ -188,6 +254,9 @@ function order_contract(array $order): ?array
 function contract_mark_signed(array $contract, ?string $signedFile, string $how): array
 {
     db_exec("UPDATE contracts SET status = 'signed', signed_at = NOW(), signed_file = COALESCE(?, signed_file), last_error = NULL WHERE id = ?", [$signedFile, $contract['id']]);
+    if (!str_starts_with($how, 'online')) {
+        contract_event((int)$contract['id'], 'marked_signed', $how);
+    }
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} signed by {$contract['signer_name']} ($how)");
     try {
         contract_create_services(db_one('SELECT * FROM contracts WHERE id = ?', [$contract['id']]));
@@ -220,6 +289,7 @@ function contract_cancel(array $contract): void
 {
     // The signing link stops working once the contract is cancelled.
     db_exec("UPDATE contracts SET status = 'cancelled' WHERE id = ?", [$contract['id']]);
+    contract_event((int)$contract['id'], 'cancelled', current_user()['name'] ?? null);
     log_activity((int)$contract['account_id'], 'note', "Contract {$contract['reference']} cancelled");
     $order = contract_order($contract);
     if (!$order || !order_is_open($order)) {

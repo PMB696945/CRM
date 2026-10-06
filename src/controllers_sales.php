@@ -356,9 +356,9 @@ function contract_templates_controller(): void
 
     if ($action === 'example') {
         $path = storage_path('tmp') . '/example-' . bin2hex(random_bytes(4)) . '.docx';
-        docx_example_template($path);
+        query('kind') === 'summary' ? docx_example_summary_template($path) : docx_example_template($path);
         register_shutdown_function(fn() => @unlink($path));
-        send_download($path, 'Example contract template.docx');
+        send_download($path, query('kind') === 'summary' ? 'Example Contract Summary.docx' : 'Example contract template.docx');
     }
     if ($action === 'download' && $id) {
         $t = db_one('SELECT * FROM contract_templates WHERE id = ?', [$id]) ?? not_found();
@@ -436,7 +436,8 @@ function settings_controller(): void
     require_permission('settings.manage');
     $keys = ['ip_restrict', 'allowed_ips', 'company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
-        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'contracts_auto_send', 'esign_remind_days', 'session_idle_minutes', 'require_2fa', 'force_https',
+        'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'contracts_auto_send', 'esign_remind_days',
+        'contract_summary_for', 'quote_acceptance_statement', 'esign_summary_statement', 'esign_sign_statement', 'session_idle_minutes', 'require_2fa', 'force_https',
         'marketing_topics', 'campaign_batch_size',
         'invoice_reader', 'invoice_model', 'invoice_tolerance', 'invoice_alert_email',
         'order_group_id', 'order_message_processing', 'order_message_confirmed', 'order_message_completed', 'order_message_cancelled'];
@@ -512,6 +513,12 @@ function settings_controller(): void
             if ($key === 'require_2fa' && $value === '1' && !current_user()['totp_enabled']) {
                 $value = '0'; // set it up yourself first
                 flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
+            }
+            if ($key === 'contract_summary_for' && !in_array($value, ['all', 'protected'], true)) {
+                $value = 'all';
+            }
+            if (in_array($key, ['quote_acceptance_statement', 'esign_summary_statement', 'esign_sign_statement'], true)) {
+                $value = mb_substr(preg_replace('/\s+/u', ' ', $value), 0, 1000);
             }
             if ($key === 'esign_remind_days') {
                 $value = ctype_digit($value) ? (string)min(30, (int)$value) : '3';

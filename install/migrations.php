@@ -927,4 +927,27 @@ return [
             KEY idx_sc_account (account_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+    27 => function (): void {
+        // Contract Summary before signing, the customer's size (Ofcom's rules protect all but larger businesses),
+        // and a timestamped log of every step of signing.
+        if (!column_exists('accounts', 'customer_size')) {
+            db()->exec('ALTER TABLE accounts ADD COLUMN customer_size VARCHAR(20) NULL AFTER type');
+        }
+        foreach (['summary_ack_at' => 'DATETIME NULL', 'summary_ack_ip' => 'VARCHAR(45) NULL'] as $col => $def) {
+            if (!column_exists('contracts', $col)) {
+                db()->exec("ALTER TABLE contracts ADD COLUMN $col $def");
+            }
+        }
+        db()->exec("CREATE TABLE IF NOT EXISTS contract_events (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            contract_id INT UNSIGNED NOT NULL,
+            event       VARCHAR(40) NOT NULL,
+            detail      TEXT NULL,
+            ip          VARCHAR(45) NULL,
+            user_agent  VARCHAR(255) NULL,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ce_contract (contract_id, id),
+            CONSTRAINT fk_ce_contract FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];

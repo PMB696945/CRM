@@ -1229,6 +1229,13 @@ test('SMTP: email sent with login, encoded subject and both text and HTML parts'
 
 test('quote is emailed with a working link, accepted, and the contract is emailed to sign online', function () use (&$flow, &$dealerIds) {
     // Templates: broadband + general
+    // Without a Contract Summary template, an agreement for a customer can't be prepared.
+    $noSummaryAcct = db_one('SELECT * FROM accounts ORDER BY id LIMIT 1');
+    try { contract_generate($noSummaryAcct, [], 'x', 'services', 'A', 'a@example.com'); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Contract Summary template'), $e->getMessage()); }
+    $stored = bin2hex(random_bytes(6)) . '.docx';
+    docx_example_summary_template(storage_path('templates') . '/' . $stored);
+    db_exec("INSERT INTO contract_templates (name, service_type, file_name, stored_name) VALUES ('Contract Summary', 'contract_summary', 'cs.docx', ?)", [$stored]);
     foreach (['broadband' => 'Broadband agreement', 'general' => 'General terms'] as $type => $name) {
         $stored = bin2hex(random_bytes(6)) . '.docx';
         docx_example_template(storage_path('templates') . '/' . $stored);
@@ -1267,14 +1274,25 @@ test('quote is emailed with a working link, accepted, and the contract is emaile
     ok(preg_match('/^[a-f0-9]{48}$/', (string)$contract['sign_token']) === 1, 'signing token made');
     $signMail = array_values(array_filter(array_slice(sent_mails(), $before), fn($r) => str_contains($r, 'X-Rcpt: eve@echo.example')));
     ok(str_contains(implode('', array_map('mail_body', $signMail)), 'https://crm.example.co.uk/crm/sign.php?t=' . $contract['sign_token']), 'signing link emailed to the signer');
+    $signRaw = implode('', $signMail);
+    ok(str_contains($signRaw, 'Contract Summary.docx') && str_contains($signRaw, 'Broadband agreement.docx') && str_contains($signRaw, 'General terms.docx'),
+        'the Contract Summary and agreement are attached to the signing email, before anything is signed');
+    $q = db_one('SELECT * FROM quotes WHERE id = ?', [$qid]);
+    ok(str_contains((string)$q['response_statement'], 'not yet a contract'), 'accepting the quote is a request to go ahead, not the contract');
+    $events = array_column(contract_events((int)$contract['id']), 'event');
+    eq(['created', 'sent'], $events);
+    ok(str_contains((string)db_value("SELECT detail FROM contract_events WHERE contract_id = ? AND event = 'sent'", [$contract['id']]), 'Contract Summary (SHA-256 '), 'what was supplied is fingerprinted');
     eq($contract['id'], contract_by_sign_token($contract['sign_token'])['id']);
     eq(null, contract_by_sign_token(str_repeat('0', 48)));
     $docs = contract_documents($contract);
-    eq(['Broadband agreement', 'General terms'], array_column($docs, 'title'), 'one document per template (mobile uses General)');
-    $z = new ZipArchive(); $z->open(storage_path('contracts') . '/' . $docs[0]['file']); $xml = $z->getFromName('word/document.xml'); $z->close();
+    eq(['Contract Summary', 'Broadband agreement', 'General terms'], array_column($docs, 'title'), 'the Contract Summary first, then one document per template (mobile uses General)');
+    eq('summary', $docs[0]['kind']);
+    $z = new ZipArchive(); $z->open(storage_path('contracts') . '/' . $docs[0]['file']); $sx = $z->getFromName('word/document.xml'); $z->close();
+    ok(str_contains($sx, 'FTTP 900') && str_contains($sx, '5G SIM') && str_contains($sx, 'Echo Logistics Ltd'), 'the summary covers every service');
+    $z = new ZipArchive(); $z->open(storage_path('contracts') . '/' . $docs[1]['file']); $xml = $z->getFromName('word/document.xml'); $z->close();
     ok(str_contains($xml, 'Echo Logistics Ltd') && str_contains($xml, 'FTTP 900') && !str_contains($xml, '5G SIM'), 'broadband doc has only broadband lines');
     ok(str_contains($xml, 'HU1 1AA'), 'address merged');
-    $html = docx_to_html(storage_path('contracts') . '/' . $docs[0]['file']);
+    $html = docx_to_html(storage_path('contracts') . '/' . $docs[1]['file']);
     ok(str_contains($html, 'Echo Logistics Ltd') && str_contains($html, '<table') && !str_contains($html, '{{'), 'agreement previews as HTML');
     $flow = ['quote' => $qid, 'contract' => (int)$contract['id'], 'account' => $acct];
     ok(str_contains(implode('', array_map('mail_body', array_slice(sent_mails(), $before))), 'accepted'), 'staff notified');
@@ -1282,9 +1300,19 @@ test('quote is emailed with a working link, accepted, and the contract is emaile
 
 test('signing online: email code, typed signature, certificate, copies emailed, pending services created', function () use (&$flow) {
     $c = db_one('SELECT * FROM contracts WHERE id = ?', [$flow['contract']]);
+    // The order is enforced: Contract Summary confirmed, then the email code, then signing.
     try { esign_sign($c, 'Eve Echo', '', '203.0.113.9', 'Test'); throw new Exception('expected failure'); }
-    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'code'), 'must confirm email first'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Contract Summary'), 'must confirm the Contract Summary first'); }
+    try { esign_send_code($c); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Contract Summary'), 'no code before the Contract Summary'); }
     esign_viewed($c, '203.0.113.9', 'Test browser');
+    esign_viewed($c, '203.0.113.9', 'Test browser');
+    esign_downloaded($c, contract_summary_document($c), '203.0.113.9', 'Test browser');
+    esign_confirm_summary($c, '203.0.113.9', 'Test browser');
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
+    ok($c['summary_ack_at'] && esign_summary_confirmed($c), 'receipt of the Contract Summary recorded');
+    try { esign_sign($c, 'Eve Echo', '', '203.0.113.9', 'Test'); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'code'), 'must confirm email next'); }
     $before = count(sent_mails());
     esign_send_code($c);
     usleep(300000);
@@ -1310,10 +1338,15 @@ test('signing online: email code, typed signature, certificate, copies emailed, 
     eq(['Eve Echo', 'Director', '203.0.113.9'], [$c['signed_name'], $c['signed_position'], $c['signed_ip']]);
     ok(str_contains((string)$c['signed_statement'], 'Echo Logistics Ltd'), 'statement recorded');
     $hashes = json_decode((string)$c['document_hashes'], true);
-    eq(hash_file('sha256', storage_path('contracts') . '/' . contract_documents($c)[0]['file']), $hashes['Broadband agreement'], 'document fingerprint recorded');
+    eq(hash_file('sha256', storage_path('contracts') . '/' . contract_documents($c)[1]['file']), $hashes['Broadband agreement'], 'document fingerprint recorded');
+    ok(isset($hashes['Contract Summary']), 'the Contract Summary is fingerprinted too');
+    eq(['created', 'sent', 'opened', 'downloaded', 'summary_confirmed', 'code_sent', 'code_wrong', 'code_confirmed', 'signed', 'copies_sent'],
+        array_column(contract_events((int)$c['id']), 'event'), 'every step in order (a reload isn\'t counted twice)');
     $pdf = (string)file_get_contents(storage_path('contracts') . '/' . $c['signed_file']);
     ok(str_starts_with($pdf, '%PDF'), 'certificate PDF stored');
     ok(str_contains($pdf, '203.0.113.9') && str_contains($pdf, substr($hashes['General terms'], 0, 32)), 'certificate shows IP and fingerprints');
+    ok(str_contains($pdf, 'Receipt of the Contract Summary confirmed') && str_contains($pdf, 'TIMELINE') && strpos($pdf, 'Receipt of the Contract Summary') < strpos($pdf, 'Email address confirmed with the code'),
+        'certificate shows the timeline, Contract Summary before signing');
     $copies = array_slice(sent_mails(), $before);
     $toSigner = array_values(array_filter($copies, fn($r) => str_contains($r, 'X-Rcpt: eve@echo.example')));
     ok($toSigner && str_contains($toSigner[0], 'signature certificate.pdf') && str_contains($toSigner[0], '.docx'), 'signer gets the certificate and documents');
@@ -1425,6 +1458,31 @@ test('MSA-covered customer gets one service schedule; missing templates are expl
     eq('msa_schedule', $groups[0][0]['service_type']);
 });
 
+test('Contract Summary: for every customer, or only those Ofcom protects; editable wording', function () use (&$flow) {
+    $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$flow['account']]);
+    ok(customer_is_protected($acct), 'size not set: treated as protected');
+    ok(customer_is_protected(['type' => 'business', 'customer_size' => 'micro']));
+    ok(!customer_is_protected(['type' => 'business', 'customer_size' => 'larger']));
+    ok(customer_is_protected(['type' => 'residential', 'customer_size' => 'larger']), 'a residential customer is a consumer');
+    $larger = ['customer_size' => 'larger', 'type' => 'business'] + $acct;
+    ok(contract_summary_required($larger, 'services'), 'by default, everyone gets one');
+    ok(!contract_summary_required($acct, 'msa'), 'not for a dealer MSA');
+    set_setting('contract_summary_for', 'protected');
+    ok(!contract_summary_required($larger, 'services') && contract_summary_required($acct, 'services'));
+    $tpl = db_one("SELECT * FROM contract_templates WHERE service_type = 'broadband'");
+    $c = contract_generate($larger, [[$tpl, []]], 'Big firm', 'services', 'B', 'b@example.com');
+    eq(null, contract_summary_document($c));
+    ok(esign_summary_confirmed($c), 'nothing to confirm without one');
+    set_setting('contract_summary_for', null);
+    set_setting('esign_sign_statement', 'Signed for {customer}, as approved by our solicitor.');
+    eq('Signed for ' . $acct['name'] . ', as approved by our solicitor.', esign_statement($c, $acct['name']));
+    set_setting('esign_sign_statement', null);
+    ok(str_contains(quote_acceptance_statement($acct), 'not yet a contract'));
+    set_setting('contracts_auto_on_accept', '0');
+    eq('I accept this quote on behalf of ' . $acct['name'] . '.', quote_acceptance_statement($acct), 'no agreement follows: accepting the quote is the agreement');
+    set_setting('contracts_auto_on_accept', null);
+});
+
 test('e-sign: failed email marks the contract failed; wrong codes lock out; decline; reminders', function () use (&$flow) {
     $acct = db_one('SELECT * FROM accounts WHERE id = ?', [$flow['account']]);
     $tpl = db_one("SELECT * FROM contract_templates WHERE service_type = 'broadband'");
@@ -1440,6 +1498,8 @@ test('e-sign: failed email marks the contract failed; wrong codes lock out; decl
     eq('sent', $c['status']);
     $token = $c['sign_token'];
     eq($token, contract_send($c)['sign_token'], 'resending keeps the same link');
+    esign_confirm_summary($c, '198.51.100.1', 'Test');
+    $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
     esign_send_code($c);
     $c = db_one('SELECT * FROM contracts WHERE id = ?', [$c['id']]);
     for ($i = 0; $i < ESIGN_CODE_ATTEMPTS; $i++) {
@@ -2300,7 +2360,7 @@ test('accepting a quote emails the customer a confirmation with a PDF and the ac
     $conf = array_values(array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: bea@files.example')));
     eq(1, count($conf), 'confirmation sent to whoever accepted');
     ok(str_contains($conf[0], 'filename="Quote ' . $q['reference'] . ' accepted.pdf"') && str_contains($conf[0], 'application/pdf'));
-    ok(str_contains(mail_body($conf[0]), 'confirms your acceptance'));
+    ok(str_contains(mail_body($conf[0]), 'go ahead') && str_contains(mail_body($conf[0]), 'contract is made when you sign'), 'says it isn\'t a contract yet');
     // The PDF.
     $pdf = quote_pdf($q);
     ok(str_starts_with($pdf, '%PDF-1.4') && str_ends_with(rtrim($pdf), '%%EOF'));

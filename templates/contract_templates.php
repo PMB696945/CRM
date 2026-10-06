@@ -1,8 +1,15 @@
 <div class="page-head">
   <h1>Contract templates</h1>
-  <a class="btn" href="<?= h(url('contract_templates', ['action' => 'example'])) ?>">⬇ Download example template</a>
+  <div class="actions">
+    <a class="btn" href="<?= h(url('contract_templates', ['action' => 'example'])) ?>">⬇ Example agreement</a>
+    <a class="btn" href="<?= h(url('contract_templates', ['action' => 'example', 'kind' => 'summary'])) ?>">⬇ Example Contract Summary</a>
+  </div>
 </div>
 <p class="lead">Upload a Word (.docx) contract for each service type. When a quote is accepted, the CRM fills in the customer's details and the quoted services, then emails it to the customer to sign online. Services without their own template use the <b>General</b> template. Customers covered by their dealer's MSA get the <b>Service schedule under a dealer MSA</b> template, if you've uploaded one.</p>
+<p class="lead">A <b>Contract Summary</b> goes first. It's attached to the signing email with the agreement, and shown first on the signing page. The customer must confirm they've received it before they can see the agreement or sign.</p>
+<?php if (!contract_summary_template()): ?>
+  <div class="flash flash-error">There's no Contract Summary template yet, so agreements for customers can't be prepared. Upload one, choosing "Contract Summary". The example is laid out under Ofcom's standard headings; have your solicitor complete it.</div>
+<?php endif; ?>
 
 <div class="grid-side">
   <div>

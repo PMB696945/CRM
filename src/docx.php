@@ -270,3 +270,32 @@ function docx_example_template(string $outPath): void
         'This agreement is signed electronically. The signature certificate issued with it records who signed, when, and how.',
     ]);
 }
+
+/**
+ * An example Contract Summary, laid out under the standard headings Ofcom's General Conditions use.
+ * A starting point only: have the wording checked before using it.
+ */
+function docx_example_summary_template(string $outPath): void
+{
+    docx_create($outPath, [
+        ['Contract Summary', 'Title'],
+        '{{our_company_name}} · for {{customer_name}} ({{account_number}}) · Agreement {{contract_reference}} · {{date}}',
+        'This Contract Summary sets out the main elements of this service offer, as required by Ofcom\'s General Conditions. It helps you compare offers. Full details are in the agreement and its terms, which follow this summary.',
+        ['Services and equipment', 'Heading1'],
+        '{{services_table}}',
+        'Replace with a short description of each service and any equipment provided (and whether it\'s rented or bought).',
+        ['Speed of the internet service and remedies', 'Heading1'],
+        'Replace with the estimated speeds (download and upload) for any broadband services, and what you can do if the speed isn\'t delivered.',
+        ['Price', 'Heading1'],
+        'Monthly charges: {{monthly_total}} excluding VAT. One-off charges: {{setup_total}} excluding VAT.',
+        'Replace with any usage charges, price rises during the contract, and how they\'re worked out.',
+        ['Duration, renewal and termination', 'Heading1'],
+        'Minimum term: {{term}} from the date each service goes live.',
+        'Replace with what happens at the end of the minimum term, how to end the contract, and any early termination charges.',
+        ['Features for end-users with disabilities', 'Heading1'],
+        'Replace with the products and services available for customers with disabilities, or say none apply.',
+        ['Other relevant information', 'Heading1'],
+        'Replace with anything else the customer should know, e.g. switching, number porting, or how to complain.',
+    ]);
+}
+
