@@ -513,7 +513,18 @@ function giacom_place_order(array $check, array $product, array $o): int
         'email' => $o['email'] ?: null,
     ], fn($v) => $v !== null && $v !== '');
 
-    $r = giacom_call($type, ['order' => $order, 'customer' => $customer]);
+    // Who's at the address, for access and the engineer (required by Giacom as well as the customer).
+    $siteContact = array_filter([
+        'title' => ($o['site_title'] ?? '') ?: null,
+        'forename' => $o['site_forename'] ?? '',
+        'surname' => $o['site_surname'] ?? '',
+        'telephone' => preg_replace('/[^\d+]/', '', (string)($o['site_telephone'] ?? '')),
+        'email' => ($o['site_email'] ?? '') ?: null,
+        'pass-phrase' => ($o['site_passphrase'] ?? '') ?: null,
+        'site-notes' => ($o['site_notes'] ?? '') ?: null,
+        'hazard-notes' => ($o['hazard_notes'] ?? '') ?: null,
+    ], fn($v) => $v !== null && $v !== '');
+    $r = giacom_call($type, ['order' => $order, 'customer' => $customer, 'site-contact' => $siteContact]);
     $orderId = (string)($r['order-id'] ?? '');
     if ($orderId === '') {
         throw new GiacomException('Giacom accepted the request but didn\'t return an order number. Check the Giacom portal before trying again.');
@@ -536,7 +547,8 @@ function giacom_place_order(array $check, array $product, array $o): int
             $account['id'], $check['site_id'] ?: null, $serviceId, $check['id'], $type, $orderId, $r['service-id'] ?? null, $o['cli'] ?: null,
             $product['product_id'], mb_substr($product['name'], 0, 190), $product['technology'], $fullUsername ?: null,
             $check['address_label'], $o['crd'], $clientRef, 'Placed',
-            json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email']]),
+            json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email'],
+                'site_contact' => trim(($o['site_forename'] ?? '') . ' ' . ($o['site_surname'] ?? '')), 'site_telephone' => $o['site_telephone'] ?? '']),
             current_user()['id'] ?? null,
         ]);
         $id = (int)db()->lastInsertId();
@@ -929,8 +941,11 @@ function giacom_controller(): void
             }
             $account = db_one('SELECT * FROM accounts WHERE id = ?', [$check['account_id']]);
             $site = $check['site_id'] ? db_one('SELECT * FROM sites WHERE id = ?', [$check['site_id']]) : null;
-            $contact = db_one('SELECT * FROM contacts WHERE id = ?', [($site['contact_id'] ?? null) ?: ($account['main_contact_id'] ?: 0)]);
+            // The customer (end user) is the main contact; the site contact is whoever's at the address (the site's contact, if it has one).
+            $contact = db_one('SELECT * FROM contacts WHERE id = ?', [$account['main_contact_id'] ?: (($site['contact_id'] ?? null) ?: 0)]);
+            $siteContact = db_one('SELECT * FROM contacts WHERE id = ?', [($site['contact_id'] ?? null) ?: ($account['main_contact_id'] ?: 0)]);
             [$title, $forename, $surname] = giacom_split_name((string)($contact['name'] ?? ''));
+            [$siteTitle, $siteForename, $siteSurname] = giacom_split_name((string)($siteContact['name'] ?? ''));
             // Ask Giacom for the actual install dates for this product and address.
             // Giacom says the least site visit the address needs (new line vs existing line).
             $orderType = in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide';
@@ -953,6 +968,9 @@ function giacom_controller(): void
                 'title' => $title, 'forename' => $forename, 'surname' => $surname,
                 'telephone' => (string)(($contact['phone'] ?? '') ?: ($contact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
                 'email' => (string)($contact['email'] ?? $account['email']), 'crm_product_id' => '',
+                'site_title' => $siteTitle, 'site_forename' => $siteForename, 'site_surname' => $siteSurname,
+                'site_telephone' => (string)(($siteContact['phone'] ?? '') ?: ($siteContact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
+                'site_email' => (string)($siteContact['email'] ?? ''), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
             ];
             $errors = [];
             if (is_post()) {
@@ -1020,6 +1038,16 @@ function giacom_controller(): void
                 }
                 if ($values['email'] !== '' && !filter_var($values['email'], FILTER_VALIDATE_EMAIL)) {
                     $errors['email'] = 'That isn\'t a valid email address.';
+                }
+                // Giacom (and the carrier's engineer) need someone at the address.
+                if ($values['site_forename'] === '' || $values['site_surname'] === '') {
+                    $errors['site_surname'] = 'Enter the site contact\'s first name and surname.';
+                }
+                if (!preg_match('/^[\d +]{10,16}$/', $values['site_telephone'])) {
+                    $errors['site_telephone'] = 'Enter the site contact\'s phone number.';
+                }
+                if ($values['site_email'] !== '' && !filter_var($values['site_email'], FILTER_VALIDATE_EMAIL)) {
+                    $errors['site_email'] = 'That isn\'t a valid email address.';
                 }
                 if ($values['care_level'] !== '' && !isset(GIACOM_CARE_LEVELS[$values['care_level']])) {
                     $errors['care_level'] = 'Choose a care level.';

@@ -145,6 +145,16 @@ switch ($call) {
         if (($req['customer']['surname'] ?? '') === '') {
             reply([], 22, 'Customer surname is required');
         }
+        // As the real API: the site contact is required too.
+        $missing = [];
+        foreach (['telephone' => 'Telephone', 'forename' => 'Forename', 'surname' => 'Surname'] as $k => $label) {
+            if (($req['site-contact'][$k] ?? '') === '') {
+                $missing[] = "[Site Contact] $label not present";
+            }
+        }
+        if ($missing) {
+            reply([], 30, 'Cannot provision due to validation errors: ' . implode(', ', $missing));
+        }
         $id = (string)$state['next']++;
         $state['orders'][$id] = ['type' => $call, 'status' => 'Awaiting Processing', 'request' => $req];
         $save();

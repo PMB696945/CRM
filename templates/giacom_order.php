@@ -60,12 +60,22 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <div class="field wide"><div class="help">Full username sent to Giacom: <b data-full-username><?= h(giacom_full_username($values['bb_username'] ?: 'username', $values['bb_suffix'], $values['realm'] ?: 'realm')) ?></b></div></div>
   <?= $f('client_ref', 'Your reference (optional)', 'text', 'Added after the account number, e.g. a PO or quote reference') ?>
 
-  <div class="form-section wide"><h2>Contact at the address</h2><p class="help">Giacom and the carrier use this for access and appointments. Filled in from the <?= $site ? 'site' : 'main' ?> contact.</p></div>
+  <div class="form-section wide"><h2>Customer</h2><p class="help">The end user Giacom registers the service to. Filled in from the main contact.</p></div>
   <?= $f('title', 'Title') ?>
   <?= $f('forename', 'First name', 'text', '', true) ?>
   <?= $f('surname', 'Surname', 'text', '', true) ?>
   <?= $f('telephone', 'Phone', 'tel', '', true) ?>
   <?= $f('email', 'Email', 'email') ?>
+
+  <div class="form-section wide"><h2>Site contact</h2><p class="help">Who Giacom and the engineer contact for access and appointments at the address. Filled in from the <?= $site && $site['contact_id'] ? 'site' : 'main' ?> contact.</p></div>
+  <?= $f('site_title', 'Title') ?>
+  <?= $f('site_forename', 'First name', 'text', '', true) ?>
+  <?= $f('site_surname', 'Surname', 'text', '', true) ?>
+  <?= $f('site_telephone', 'Phone', 'tel', '', true) ?>
+  <?= $f('site_email', 'Email', 'email') ?>
+  <?= $f('site_passphrase', 'Pass phrase (optional)', 'text', 'For the engineer to quote on arrival') ?>
+  <?= $f('site_notes', 'Access notes (optional)', 'text', 'e.g. parking, which entrance, opening hours') ?>
+  <?= $f('hazard_notes', 'Hazards (optional)', 'text', 'Anything the engineer should know about safety') ?>
 
   <div class="form-section wide"><h2>In the CRM</h2><p class="help">A pending service is added to <?= h($account['name']) ?><?= $site ? ' at ' . h($site['name']) : '' ?>, and made active when Giacom completes the order.</p></div>
   <div class="field"><label for="g_prod">Your product / tariff (optional)</label>

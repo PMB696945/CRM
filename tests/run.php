@@ -1993,7 +1993,13 @@ test('Giacom: placing an order sends the right details and adds a pending servic
     $o = ['order_type' => 'provide', 'cli' => '', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-1', 'bb_password' => 'Pa55word!',
         'realm' => 'isp.example', 'care_level' => 'enhanced', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => 'PO 77', 'force_new_ont' => '',
         'title' => '', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '0161 496 0000', 'email' => 'rita@canal.example', 'crm_product_id' => ''];
+    try { giacom_place_order($check, $product, $o); throw new Exception('expected failure'); }
+    catch (GiacomException $e) { ok(str_contains($e->getMessage(), '[Site Contact] Forename not present'), 'Giacom requires a site contact: ' . $e->getMessage()); }
+    $o += ['site_title' => 'Mr', 'site_forename' => 'Sam', 'site_surname' => 'Site', 'site_telephone' => '07700 900 111', 'site_email' => 'sam@canal.example',
+        'site_passphrase' => 'blue door', 'site_notes' => 'Ring the bell at the side entrance', 'hazard_notes' => ''];
     $g['order'] = giacom_place_order($check, $product, $o);
+    eq(['title' => 'Mr', 'forename' => 'Sam', 'surname' => 'Site', 'telephone' => '07700900111', 'email' => 'sam@canal.example', 'pass-phrase' => 'blue door',
+        'site-notes' => 'Ring the bell at the side entrance'], g_state()['last']['provide']['site-contact'], 'site contact sent alongside the customer');
     $sent = g_state()['last']['provide'];
     eq('34350', $sent['order']['prod-id']); eq('A00012345679', $sent['order']['address-reference']);
     eq('enhanced', $sent['order']['attributes']['care-level']); eq('Pa55word!', $sent['order']['attributes']['password']);
@@ -2070,7 +2076,8 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     $product = json_decode($check['result'], true)['products'][3];
     $o = ['order_type' => 'migrate', 'cli' => '01614960001', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-2', 'bb_password' => 'secret12', 'bb_suffix' => '-public',
         'realm' => 'GreatDSL', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => 'N',
-        'title' => 'Ms', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '01614960000', 'email' => '', 'crm_product_id' => ''];
+        'title' => 'Ms', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '01614960000', 'email' => '', 'crm_product_id' => '',
+        'site_forename' => 'Rita', 'site_surname' => 'Reception', 'site_telephone' => '01614960000'];
     $id = giacom_place_order($check, $product, $o);
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
     eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
