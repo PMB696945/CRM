@@ -390,6 +390,15 @@ document.querySelectorAll('select[data-ont-follows-order-type]').forEach((select
   });
 });
 
+// Giacom orders: the install dates depend on the engineer visit, so ask Giacom again when it changes.
+const refreshDates = (select) => {
+  const button = select.form?.querySelector('[data-refresh-dates]');
+  if (!button) return;
+  select.form.querySelectorAll('[data-dates-note]').forEach((n) => { n.textContent = 'Getting Giacom\'s dates for this visit…'; });
+  button.click();
+};
+document.querySelectorAll('[data-refresh-dates]').forEach((b) => { b.hidden = true; });
+
 // Giacom orders: only offer engineer visits at or above the minimum Giacom gives for the order type.
 document.querySelectorAll('select[data-min-provide]').forEach((select) => {
   const order = ['NO_SITE_VISIT', 'STANDARD', 'PREMIUM'];
@@ -401,6 +410,35 @@ document.querySelectorAll('select[data-min-provide]').forEach((select) => {
   };
   // Switching the order type starts from that type's minimum (as the form does when it opens).
   select.form?.querySelectorAll('input[name="order_type"]').forEach((radio) => {
-    radio.addEventListener('change', () => { if (radio.checked) select.value = apply(radio.value) || 'NO_SITE_VISIT'; });
+    radio.addEventListener('change', () => {
+      if (!radio.checked) return;
+      const before = select.value;
+      select.value = apply(radio.value) || 'NO_SITE_VISIT';
+      if (select.value !== before) refreshDates(select);
+    });
   });
+  select.addEventListener('change', () => refreshDates(select));
+});
+
+// Giacom orders: the appointment slots shown follow the required-by date (none set if Giacom offers none that day).
+document.querySelectorAll('input[data-appointment-date]').forEach((input) => {
+  const box = input.form?.querySelector('[data-appointment-slots]');
+  if (!box) return;
+  const none = box.querySelector('[data-slot-none]');
+  const note = box.querySelector('[data-slot-none-note]');
+  const sync = () => {
+    const slots = [...box.querySelectorAll('[data-slot-date]')];
+    const today = slots.filter((l) => l.dataset.slotDate === input.value);
+    slots.forEach((l) => { l.hidden = !today.includes(l); });
+    const checked = box.querySelector('input[name="appointment"]:checked');
+    if (today.length) {
+      if (!checked || !today.includes(checked.closest('label'))) today[0].querySelector('input').checked = true;
+    } else {
+      none.querySelector('input').checked = true;
+    }
+    note.hidden = today.length > 0;
+  };
+  input.addEventListener('change', sync);
+  input.addEventListener('input', sync);
+  sync();
 });

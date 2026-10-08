@@ -23,30 +23,34 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   </div>
   <?= $f('cli', 'Phone number on the line', 'tel', 'Needed for a migrate. Leave blank for a new provide with no line.') ?>
   <div data-when="order_type=migrate"><?= $f('access_line_id', 'Access line ID (optional)', 'text', 'For SOGEA/FTTP take-overs, if you have it') ?></div>
-  <div class="form-section wide"><h2>Install date</h2>
-    <p class="help"><?= $appointments
-        ? 'Giacom\'s earliest install date for this product here is <b>' . h(fmt_date($appointments[0]['date'])) . ($appointments[0]['slot'] ? ' (' . h($appointments[0]['slot']) . ')' : '') . '</b>. Choose it or another date below.'
-        : ($leadSource === 'lead time' ? 'Giacom\'s earliest date for this product: <b>' . h(fmt_date($lead)) . '</b>.' : 'Giacom didn\'t offer any install dates' . ($appointmentsError ? ' (' . h($appointmentsError) . ')' : '') . '. Enter the date you need.') ?></p></div>
-  <?php if ($appointments): ?>
-    <div class="field wide <?= isset($errors['appointment']) ? 'has-error' : '' ?>">
-      <div class="appointment-grid">
-        <?php foreach ($appointments as $i => $a): $key = giacom_appointment_key($a); ?>
-          <label class="check"><input type="radio" name="appointment" value="<?= h($key) ?>" <?= $values['appointment'] === $key ? 'checked' : '' ?>>
-            <span><b><?= h(date('D j M', strtotime($a['date']))) ?></b> <?= h($a['slot']) ?><?= $i === 0 ? ' <span class="badge badge-active">Earliest</span>' : '' ?></span></label>
-        <?php endforeach; ?>
-        <label class="check"><input type="radio" name="appointment" value="" <?= $values['appointment'] === '' ? 'checked' : '' ?>><span>Another date (enter below)</span></label>
-      </div>
-      <?php if (isset($errors['appointment'])): ?><div class="error"><?= h($errors['appointment']) ?></div><?php endif; ?>
-    </div>
-    <div data-when="appointment="><?= $f('crd', 'Required by (if not one of the dates above)', 'date', 'Giacom will fit the install around this date') ?></div>
-  <?php else: ?>
-    <?= $f('crd', 'Required by', 'date', $leadSource === 'lead time' ? 'Earliest: ' . fmt_date($lead) : 'Check the lead time with Giacom', true) ?>
-  <?php endif; ?>
+  <div class="form-section wide"><h2>Install</h2><p class="help">Choose the engineer visit first: the install dates Giacom offers depend on it.</p></div>
   <div class="field"><label for="g_visit">Engineer visit</label>
     <?php $min = giacom_min_visit($result, $values['order_type']); $rank = array_flip(array_keys(GIACOM_VISITS)); ?>
     <select id="g_visit" name="site_visit_reason" data-min-provide="<?= h((string)giacom_min_visit($result, 'provide')) ?>" data-min-migrate="<?= h((string)giacom_min_visit($result, 'migrate')) ?>">
       <?php foreach (GIACOM_VISITS as $k => $l): $below = $min && $rank[$k] < $rank[$min]; ?><option value="<?= $k ?>" <?= $values['site_visit_reason'] === $k ? 'selected' : '' ?><?= $below ? ' hidden disabled' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
-    <div class="help"><?php if ($min && $min !== 'NO_SITE_VISIT'): ?>Giacom says this address needs at least a <b><?= h(strtolower(GIACOM_VISITS[$min])) ?></b> for a <?= $values['order_type'] === 'migrate' ? 'take-over of the existing' : 'new' ?> line, so less isn't offered. <?php endif; ?>The dates on offer depend on this. <button class="btn btn-sm" name="refresh" value="1" formnovalidate data-skip-confirm>Show dates for this</button></div></div>
+    <div class="help"><?php if ($min && $min !== 'NO_SITE_VISIT'): ?>Giacom says this address needs at least a <b><?= h(strtolower(GIACOM_VISITS[$min])) ?></b> for a <?= $values['order_type'] === 'migrate' ? 'take-over of the existing' : 'new' ?> line, so less isn't offered. <?php endif; ?><span data-dates-note>The dates below are Giacom's for this visit, and are fetched again when it's changed.</span> <button class="btn btn-sm" name="refresh" value="1" formnovalidate data-skip-confirm data-refresh-dates>Show dates for this</button></div></div>
+
+  <?php $earliest = $appointments ? $appointments[0]['date'] : ($leadSource === 'lead time' ? $lead : date('Y-m-d', strtotime('+1 weekday'))); ?>
+  <div class="field <?= isset($errors['crd']) ? 'has-error' : '' ?>"><label for="g_crd">Required by <span class="req">*</span></label>
+    <input id="g_crd" type="date" name="crd" value="<?= h($values['crd']) ?>" min="<?= h($earliest) ?>" required data-appointment-date>
+    <?php if (isset($errors['crd'])): ?><div class="error"><?= h($errors['crd']) ?></div><?php endif; ?>
+    <div class="help"><?= $appointments
+        ? 'Giacom\'s earliest appointment here is <b>' . h(date('D j M Y', strtotime($earliest))) . '</b>. Choose a later date if the customer needs it; earlier dates aren\'t available.'
+        : ($leadSource === 'lead time' ? 'Giacom\'s earliest date for this product is <b>' . h(fmt_date($earliest)) . '</b>.' : 'Giacom didn\'t offer any install dates' . ($appointmentsError ? ' (' . h($appointmentsError) . ')' : '') . '. Enter the date you need.') ?></div></div>
+  <?php if ($appointments): ?>
+    <div class="field wide <?= isset($errors['appointment']) ? 'has-error' : '' ?>" data-appointment-slots>
+      <label>Appointment</label>
+      <div class="appointment-grid">
+        <?php foreach ($appointments as $i => $a): $key = giacom_appointment_key($a); ?>
+          <label class="check" data-slot-date="<?= h($a['date']) ?>"><input type="radio" name="appointment" value="<?= h($key) ?>" <?= $values['appointment'] === $key ? 'checked' : '' ?>>
+            <span><b><?= h(date('D j M', strtotime($a['date']))) ?></b> <?= h($a['slot']) ?><?= $i === 0 ? ' <span class="badge badge-active">Earliest</span>' : '' ?></span></label>
+        <?php endforeach; ?>
+        <label class="check" data-slot-none hidden><input type="radio" name="appointment" value="" <?= $values['appointment'] === '' ? 'checked' : '' ?>><span>No set slot</span></label>
+      </div>
+      <div class="help" data-slot-none-note hidden>Giacom hasn't offered a slot on this date, so it'll fit the install around it.</div>
+      <?php if (isset($errors['appointment'])): ?><div class="error"><?= h($errors['appointment']) ?></div><?php endif; ?>
+    </div>
+  <?php endif; ?>
   <div class="field <?= isset($errors['care_level']) ? 'has-error' : '' ?>"><label for="g_care">Care level</label>
     <select id="g_care" name="care_level"><?php foreach ($levels as $l): ?><option value="<?= h($l) ?>" <?= $values['care_level'] === $l ? 'selected' : '' ?>><?= h(GIACOM_CARE_LEVELS[$l] ?? ucfirst($l)) ?></option><?php endforeach; ?></select></div>
   <?php if (giacom_is_fttp($product)): ?>

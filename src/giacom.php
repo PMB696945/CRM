@@ -1010,7 +1010,12 @@ function giacom_controller(): void
                 }
                 $values['order_type'] = $values['order_type'] === 'migrate' ? 'migrate' : 'provide';
                 $values['site_visit_reason'] = giacom_visit_at_least(giacom_visit_code($values['site_visit_reason']) ?? 'NO_SITE_VISIT', giacom_min_visit($result, $values['order_type']));
-                // An offered appointment sets the required-by date.
+                if (!empty($_POST['refresh'])) {
+                    // The install type changed, so Giacom was asked again: start from its earliest date for this visit.
+                    $values['crd'] = max($lead, date('Y-m-d', strtotime('+1 weekday')));
+                    $values['appointment'] = $appointments ? giacom_appointment_key($appointments[0]) : '';
+                }
+                // The appointment slot follows the required-by date.
                 $chosen = null;
                 foreach ($appointments as $a) {
                     if (giacom_appointment_key($a) === $values['appointment']) {
@@ -1020,9 +1025,14 @@ function giacom_controller(): void
                 if ($values['appointment'] !== '' && !$chosen && empty($_POST['refresh'])) {
                     $errors['appointment'] = 'That appointment is no longer available. Choose another.';
                 }
-                if ($chosen) {
-                    $values['crd'] = $chosen['date'];
+                // The required-by date leads: a slot only counts if it's on that date (the first slot that day if none was picked).
+                if ($chosen && $chosen['date'] !== $values['crd']) {
+                    $chosen = null;
                 }
+                if (!$chosen && !isset($errors['appointment'])) {
+                    $chosen = array_values(array_filter($appointments, fn($a) => $a['date'] === $values['crd']))[0] ?? null;
+                }
+                $values['appointment'] = $chosen ? giacom_appointment_key($chosen) : '';
                 // FTTP: a new service gets a new ONT, a take-over keeps the existing one (unless changed on the form).
                 $values['force_new_ont'] = !giacom_is_fttp($product) ? ''
                     : (in_array($values['force_new_ont'], ['Y', 'N'], true) ? $values['force_new_ont'] : giacom_default_ont($values['order_type']));
@@ -1038,7 +1048,7 @@ function giacom_controller(): void
                     $errors['crd'] = 'Choose a date in the future.';
                 }
                 elseif ($leadSource && $values['crd'] < $lead) {
-                    $errors['crd'] = 'Giacom\'s earliest date for this product is ' . fmt_date($lead) . '.';
+                    $errors['crd'] = 'Giacom\'s earliest ' . ($appointments ? 'appointment' : 'date') . ' for this product is ' . fmt_date($lead) . '. Choose that date or later.';
                 }
                 // The suffix and realm are added on sending, so drop them if typed into the username too.
                 if (str_contains($values['bb_username'], '@')) {
