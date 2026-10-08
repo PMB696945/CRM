@@ -487,7 +487,7 @@ function giacom_place_order(array $check, array $product, array $o): int
         'realm' => $realmAttr,
         'care-level' => $o['care_level'] ?: null,
         'site-visit-reason' => $o['site_visit_reason'] ?: null,
-        'force-new-ont' => $o['force_new_ont'] ?? null,
+        'force-new-ont' => ($o['force_new_ont'] ?? '') ?: (giacom_is_fttp($product) ? giacom_default_ont($type) : null),
     ], fn($v) => $v !== null && $v !== '');
     $order = array_filter([
         'client-ref' => $clientRef,
@@ -563,6 +563,18 @@ function giacom_place_order(array $check, array $product, array $o): int
     log_activity((int)$account['id'], 'note', "Giacom $type order $orderId placed: {$product['name']}");
     service_changed($serviceId, null);
     return $id;
+}
+
+/** Is this an FTTP product (which has an ONT on the wall)? */
+function giacom_is_fttp(array $product): bool
+{
+    return str_contains(strtolower((string)($product['technology'] ?? '')), 'fttp') || ($product['tech_label'] ?? '') === 'FTTP';
+}
+
+/** The ONT choice for an FTTP order: new for a new service, the existing one for a take-over. */
+function giacom_default_ont(string $orderType): string
+{
+    return $orderType === 'migrate' ? 'N' : 'Y';
 }
 
 /** Refresh one order's status and history from Giacom. */
@@ -963,7 +975,8 @@ function giacom_controller(): void
                 'bb_username' => giacom_suggest_username($account), 'bb_password' => substr(strtr(base64_encode(random_bytes(9)), '+/', 'Kq'), 0, 12),
                 'bb_suffix' => (string)setting('giacom_username_suffix'), 'realm' => (string)setting('giacom_realm'),
                 'care_level' => in_array(setting('giacom_care_level'), $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS), true) ? setting('giacom_care_level') : ($product['care_default'] ?? 'standard'),
-                'site_visit_reason' => $visit, 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => '',
+                'site_visit_reason' => $visit, 'access_line_id' => '', 'client_ref' => '',
+                'force_new_ont' => giacom_is_fttp($product) ? giacom_default_ont($orderType) : '',
                 'appointment' => $appointments ? giacom_appointment_key($appointments[0]) : '',
                 'title' => $title, 'forename' => $forename, 'surname' => $surname,
                 'telephone' => (string)(($contact['phone'] ?? '') ?: ($contact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
@@ -992,7 +1005,9 @@ function giacom_controller(): void
                 if ($chosen) {
                     $values['crd'] = $chosen['date'];
                 }
-                $values['force_new_ont'] = in_array($values['force_new_ont'], ['Y', 'N'], true) ? $values['force_new_ont'] : '';
+                // FTTP: a new service gets a new ONT, a take-over keeps the existing one (unless changed on the form).
+                $values['force_new_ont'] = !giacom_is_fttp($product) ? ''
+                    : (in_array($values['force_new_ont'], ['Y', 'N'], true) ? $values['force_new_ont'] : giacom_default_ont($values['order_type']));
                 $values['cli'] = preg_replace('/\D/', '', $values['cli']);
                 if ($values['cli'] !== '' && !preg_match('/^0\d{9,10}$/', $values['cli'])) {
                     $errors['cli'] = 'Enter the phone number as 10 or 11 digits starting with 0.';

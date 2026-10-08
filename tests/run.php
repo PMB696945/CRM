@@ -2082,6 +2082,13 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
     eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
     eq('-public@GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm'], 'realm sent as Giacom lists it');
+    // FTTP: a new service gets a new ONT, a take-over keeps the existing one, unless chosen otherwise; FTTC has no ONT.
+    ok(giacom_is_fttp($product) && !giacom_is_fttp(json_decode($check['result'], true)['products'][0]));
+    eq(['Y', 'N'], [giacom_default_ont('provide'), giacom_default_ont('migrate')]);
+    giacom_place_order($check, $product, ['force_new_ont' => '', 'bb_username' => 'acc10001-3'] + $o);
+    eq('N', g_state()['last']['migrate']['order']['attributes']['force-new-ont'], 'take-over: existing ONT');
+    giacom_place_order($check, $product, ['force_new_ont' => '', 'order_type' => 'provide', 'cli' => '', 'bb_username' => 'acc10001-4'] + $o);
+    eq('Y', g_state()['last']['provide']['order']['attributes']['force-new-ont'], 'new service: new ONT');
     try { giacom_place_order($check, $product, ['realm' => '', 'bb_suffix' => ''] + $o); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'realm')); }
     eq('N', g_state()['last']['migrate']['order']['attributes']['force-new-ont']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);

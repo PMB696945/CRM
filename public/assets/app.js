@@ -382,3 +382,10 @@ document.addEventListener('change', (e) => {
   if (!e.target.matches('[data-toggle-boxes]')) return;
   e.target.form?.querySelectorAll('input[type="checkbox"][name="ids[]"]').forEach((b) => { b.checked = e.target.checked; });
 });
+
+// Giacom FTTP orders: a new service (provide) gets a new ONT; taking over (migrate) keeps the existing one.
+document.querySelectorAll('select[data-ont-follows-order-type]').forEach((select) => {
+  select.form?.querySelectorAll('input[name="order_type"]').forEach((radio) => {
+    radio.addEventListener('change', () => { if (radio.checked) select.value = radio.value === 'migrate' ? 'N' : 'Y'; });
+  });
+});

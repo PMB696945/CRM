@@ -47,9 +47,10 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
     <div class="help"><?php $min = $result['min_visit'][$values['order_type'] === 'migrate' ? 'existing_line' : 'new_line'] ?? null; if ($min): ?>Giacom says this address needs at least a <b><?= h(['NO_SITE_VISIT' => 'no visit', 'STANDARD' => 'standard install', 'PREMIUM' => 'premium install'][$min]) ?></b> for a <?= $values['order_type'] === 'migrate' ? 'existing' : 'new' ?> line. <?php endif; ?>The dates on offer depend on this. <button class="btn btn-sm" name="refresh" value="1" formnovalidate data-skip-confirm>Show dates for this</button></div></div>
   <div class="field <?= isset($errors['care_level']) ? 'has-error' : '' ?>"><label for="g_care">Care level</label>
     <select id="g_care" name="care_level"><?php foreach ($levels as $l): ?><option value="<?= h($l) ?>" <?= $values['care_level'] === $l ? 'selected' : '' ?>><?= h(GIACOM_CARE_LEVELS[$l] ?? ucfirst($l)) ?></option><?php endforeach; ?></select></div>
-  <?php if (str_contains($product['technology'], 'fttp') || ($product['tech_label'] ?? '') === 'FTTP'): ?>
+  <?php if (giacom_is_fttp($product)): ?>
   <div class="field"><label for="g_ont">FTTP ONT</label>
-    <select id="g_ont" name="force_new_ont"><option value="">Giacom decides</option><option value="Y" <?= $values['force_new_ont'] === 'Y' ? 'selected' : '' ?>>New ONT</option><option value="N" <?= $values['force_new_ont'] === 'N' ? 'selected' : '' ?>>Use existing ONT</option></select></div>
+    <select id="g_ont" name="force_new_ont" data-ont-follows-order-type><option value="Y" <?= $values['force_new_ont'] === 'Y' ? 'selected' : '' ?>>New ONT</option><option value="N" <?= $values['force_new_ont'] === 'N' ? 'selected' : '' ?>>Use existing ONT</option></select>
+    <div class="help">Set from the order type: a new service gets a new ONT, a take-over uses the existing one. Change it if needed.</div></div>
   <?php endif; ?>
 
   <div class="form-section wide"><h2>Broadband login</h2></div>
