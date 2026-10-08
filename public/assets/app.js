@@ -389,3 +389,18 @@ document.querySelectorAll('select[data-ont-follows-order-type]').forEach((select
     radio.addEventListener('change', () => { if (radio.checked) select.value = radio.value === 'migrate' ? 'N' : 'Y'; });
   });
 });
+
+// Giacom orders: only offer engineer visits at or above the minimum Giacom gives for the order type.
+document.querySelectorAll('select[data-min-provide]').forEach((select) => {
+  const order = ['NO_SITE_VISIT', 'STANDARD', 'PREMIUM'];
+  const apply = (type) => {
+    const min = select.dataset[type === 'migrate' ? 'minMigrate' : 'minProvide'];
+    const floor = min ? order.indexOf(min) : 0;
+    [...select.options].forEach((o) => { const below = order.indexOf(o.value) < floor; o.hidden = below; o.disabled = below; });
+    return min;
+  };
+  // Switching the order type starts from that type's minimum (as the form does when it opens).
+  select.form?.querySelectorAll('input[name="order_type"]').forEach((radio) => {
+    radio.addEventListener('change', () => { if (radio.checked) select.value = apply(radio.value) || 'NO_SITE_VISIT'; });
+  });
+});

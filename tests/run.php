@@ -2082,6 +2082,12 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
     eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
     eq('-public@GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm'], 'realm sent as Giacom lists it');
+    // Engineer visit: never less than Giacom's minimum for the order type.
+    eq('PREMIUM', giacom_visit_at_least('NO_SITE_VISIT', 'PREMIUM'));
+    eq('PREMIUM', giacom_visit_at_least('STANDARD', 'PREMIUM'));
+    eq('PREMIUM', giacom_visit_at_least('PREMIUM', 'STANDARD'), 'more than the minimum is fine');
+    eq('NO_SITE_VISIT', giacom_visit_at_least('NO_SITE_VISIT', null), 'no minimum given');
+    eq('STANDARD', giacom_min_visit(['min_visit' => ['new_line' => 'PREMIUM', 'existing_line' => 'STANDARD']], 'migrate'));
     // FTTP: a new service gets a new ONT, a take-over keeps the existing one, unless chosen otherwise; FTTC has no ONT.
     ok(giacom_is_fttp($product) && !giacom_is_fttp(json_decode($check['result'], true)['products'][0]));
     eq(['Y', 'N'], [giacom_default_ont('provide'), giacom_default_ont('migrate')]);

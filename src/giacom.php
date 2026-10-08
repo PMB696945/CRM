@@ -408,6 +408,21 @@ function giacom_visit_code(mixed $v): ?string
     };
 }
 
+const GIACOM_VISITS = ['NO_SITE_VISIT' => 'Not needed', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install'];
+
+/** The least engineer visit Giacom says the address needs for this kind of order (null if it didn't say). */
+function giacom_min_visit(array $result, string $orderType): ?string
+{
+    return $result['min_visit'][$orderType === 'migrate' ? 'existing_line' : 'new_line'] ?? null;
+}
+
+/** A visit no lower than the minimum (Not needed < Standard < Premium). */
+function giacom_visit_at_least(string $visit, ?string $min): string
+{
+    $rank = array_flip(array_keys(GIACOM_VISITS));
+    return $min !== null && isset($rank[$min]) && ($rank[$visit] ?? 0) < $rank[$min] ? $min : (isset($rank[$visit]) ? $visit : ($min ?? 'NO_SITE_VISIT'));
+}
+
 /** A saved check's result, re-read from Giacom's raw response so parsing fixes apply to old checks. */
 function giacom_check_result(array $check): array
 {
@@ -961,8 +976,10 @@ function giacom_controller(): void
             // Ask Giacom for the actual install dates for this product and address.
             // Giacom says the least site visit the address needs (new line vs existing line).
             $orderType = in_array($result['quick_result'] ?? null, [4, 10], true) || $check['cli'] ? 'migrate' : 'provide';
-            $minVisit = $result['min_visit'][$orderType === 'migrate' ? 'existing_line' : 'new_line'] ?? null;
-            $visit = giacom_visit_code($_POST['site_visit_reason'] ?? null) ?? $minVisit ?? 'NO_SITE_VISIT';
+            // Never less of a visit than Giacom says the address needs (for the order type being placed).
+            $postedType = is_post() && isset($_POST['order_type']) ? (($_POST['order_type'] === 'migrate') ? 'migrate' : 'provide') : $orderType;
+            $minVisit = giacom_min_visit($result, $postedType);
+            $visit = giacom_visit_at_least(giacom_visit_code($_POST['site_visit_reason'] ?? null) ?? $minVisit ?? 'NO_SITE_VISIT', $minVisit);
             $slots = giacom_appointments($check, $product, $visit);
             $appointments = $slots['appointments'];
             $appointmentsError = $slots['error'];
@@ -992,6 +1009,7 @@ function giacom_controller(): void
                     $values[$k] = trim((string)($_POST[$k] ?? ''));
                 }
                 $values['order_type'] = $values['order_type'] === 'migrate' ? 'migrate' : 'provide';
+                $values['site_visit_reason'] = giacom_visit_at_least(giacom_visit_code($values['site_visit_reason']) ?? 'NO_SITE_VISIT', giacom_min_visit($result, $values['order_type']));
                 // An offered appointment sets the required-by date.
                 $chosen = null;
                 foreach ($appointments as $a) {
