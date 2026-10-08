@@ -20,6 +20,15 @@ function install_schema(): void
 function migrations_file(): string
 {
     $file = APP_ROOT . '/install/migrations.php';
+    if (!is_file($file)) {
+        // Easy to delete by mistake after installing (or leave out when moving servers): say exactly what's wrong.
+        $message = 'The CRM\'s install folder is missing (it should contain install/migrations.php). It holds the database updates the CRM checks on every page, '
+            . 'so it must stay after installing. Upload the install folder from the CRM files again, next to src/ and public/.';
+        if (PHP_SAPI !== 'cli' && function_exists('crm_fail_page')) {
+            crm_fail_page('A CRM folder is missing', '<p>' . htmlspecialchars($message) . '</p><p>Expected at: <code>' . htmlspecialchars($file) . '</code></p>');
+        }
+        throw new RuntimeException($message);
+    }
     if (function_exists('opcache_invalidate')) {
         @opcache_invalidate($file);
     }

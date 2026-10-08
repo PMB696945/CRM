@@ -84,6 +84,8 @@ For the web server, point the document root at `public/` (Apache/Nginx + PHP-FPM
 
 ## Troubleshooting
 
+**"A CRM folder is missing", or an unexpected error after installing or moving servers.** Keep the `install/` folder. It holds the database updates the CRM checks on every page, so it mustn't be deleted after installing, and it must be copied when moving servers. It's blocked from the web, so leaving it there is safe.
+
 **The page shows a message instead of the CRM.** The CRM checks the server on every page load and explains what's wrong. The most common problems are an old PHP version (8.1+ is needed; change it in cPanel → *MultiPHP Manager* / *Select PHP Version*) and a missing PHP extension (`pdo_mysql`, `curl`, `mbstring`).
 
 **"Something went wrong".** The error is shown on the page and saved in `public/app/crm-error.log`. That file can't be opened from the web; use File Manager.
