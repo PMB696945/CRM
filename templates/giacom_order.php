@@ -56,9 +56,8 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <div class="form-section wide"><h2>Broadband login</h2></div>
   <?= $f('bb_username', 'Username', 'text', 'e.g. joebloggs', true) ?>
   <?= $f('bb_password', 'Password', 'text', 'Saved with Giacom only. Give it to the customer or put it on the router.', true) ?>
-  <?= $f('bb_suffix', 'Added after the username', 'text', 'The part Giacom puts in front of the realm on your account, e.g. -Finn') ?>
-  <?= $f('realm', 'Realm', 'text', !empty($product['realms']) ? 'Giacom offers: ' . implode(', ', $product['realms']) : 'e.g. surfdsluk (the part after the @)', true) ?>
-  <div class="field wide"><div class="help">Full username sent to Giacom: <b data-full-username><?= h(giacom_full_username($values['bb_username'] ?: 'username', $values['bb_suffix'], $values['realm'] ?: 'realm')) ?></b></div></div>
+  <div class="field wide"><div class="help">Full username sent to Giacom: <b data-full-username data-suffix="<?= h($values['bb_suffix']) ?>" data-realm="<?= h($values['realm']) ?>"><?= h(giacom_full_username($values['bb_username'] ?: 'username', $values['bb_suffix'], $values['realm'] ?: 'realm')) ?></b>
+    <br>The part after the username is set for your Giacom account<?= can('settings.manage') ? ' under <a href="' . h(url('giacom', ['action' => 'settings'])) . '">Admin → Giacom</a>' : '' ?>.</div></div>
   <?= $f('client_ref', 'Your reference (optional)', 'text', 'Added after the account number, e.g. a PO or quote reference') ?>
 
   <div class="form-section wide"><h2>Customer</h2><p class="help">The end user Giacom registers the service to. Filled in from the main contact.</p></div>

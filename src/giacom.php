@@ -1026,18 +1026,15 @@ function giacom_controller(): void
                 if (str_contains($values['bb_username'], '@')) {
                     $values['bb_username'] = substr($values['bb_username'], 0, strpos($values['bb_username'], '@'));
                 }
-                [$typedSuffix, $values['realm']] = giacom_split_realm($values['realm']);
-                if ($typedSuffix !== '' && $values['bb_suffix'] === '') {
-                    $values['bb_suffix'] = $typedSuffix;
-                }
-                if ($values['bb_suffix'] !== '' && !preg_match('/^[A-Za-z0-9._+-]{1,40}$/', $values['bb_suffix'])) {
-                    $errors['bb_suffix'] = 'Use letters, numbers and . _ - only.';
-                }
+                // The username suffix and realm are set for the whole account under Admin → Giacom, not per order.
+                $values['bb_suffix'] = (string)setting('giacom_username_suffix');
+                $values['realm'] = (string)setting('giacom_realm');
                 $offered = array_map('strtolower', $product['realms'] ?? []);
                 if ($values['realm'] === '') {
-                    $errors['realm'] = 'Giacom needs a realm to set up the broadband login. Set a default under Admin → Giacom.';
+                    $errors['_'] = 'Giacom needs a realm to set up the broadband login, and none is set. ' . (can('settings.manage') ? 'Add it under Admin → Giacom.' : 'Ask an admin to add it under Admin → Giacom.');
                 } elseif ($offered && !in_array(strtolower(giacom_realm_value($values['bb_suffix'], $values['realm'])), $offered, true)) {
-                    $errors['realm'] = 'Giacom offers these realms for this product: ' . implode(', ', $product['realms']) . '.';
+                    $errors['_'] = 'Giacom only offers these realms for this product: ' . implode(', ', $product['realms']) . '. The realm under Admin → Giacom ('
+                        . giacom_realm_value($values['bb_suffix'], $values['realm']) . ') isn\'t one of them.';
                 }
                 if (!preg_match('/^[A-Za-z0-9._+-]{2,100}$/', $values['bb_username'])) {
                     $errors['bb_username'] = 'Use letters, numbers and . _ - only.';
