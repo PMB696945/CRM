@@ -564,6 +564,7 @@ function giacom_place_order(array $check, array $product, array $o): int
             $check['address_label'], $o['crd'], $clientRef, 'Placed',
             json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email'],
                 'site_contact' => trim(($o['site_forename'] ?? '') . ' ' . ($o['site_surname'] ?? '')), 'site_telephone' => $o['site_telephone'] ?? '',
+                'site_email' => $o['site_email'] ?? '',
                 'site_visit_reason' => $o['site_visit_reason'] ?? null]),
             current_user()['id'] ?? null,
         ]);
@@ -1131,10 +1132,10 @@ function giacom_controller(): void
                 'appointment' => $appointments ? giacom_appointment_key($appointments[0]) : '',
                 'title' => $title, 'forename' => $forename, 'surname' => $surname,
                 'telephone' => (string)(($contact['phone'] ?? '') ?: ($contact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
-                'email' => (string)($contact['email'] ?? $account['email']), 'crm_product_id' => '',
+                'email' => (string)(($contact['email'] ?? '') ?: ($account['email'] ?? '') ?: ($siteContact['email'] ?? '')), 'crm_product_id' => '',
                 'site_title' => $siteTitle, 'site_forename' => $siteForename, 'site_surname' => $siteSurname,
                 'site_telephone' => (string)(($siteContact['phone'] ?? '') ?: ($siteContact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
-                'site_email' => (string)($siteContact['email'] ?? ''), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
+                'site_email' => (string)(($siteContact['email'] ?? '') ?: ($contact['email'] ?? '') ?: ($account['email'] ?? '')), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
                 'send_confirmation' => '1',
             ];
             $errors = [];
@@ -1211,7 +1212,10 @@ function giacom_controller(): void
                 if (!preg_match('/^[\d +]{10,16}$/', $values['telephone'])) {
                     $errors['telephone'] = 'Enter a contact phone number.';
                 }
-                if ($values['email'] !== '' && !filter_var($values['email'], FILTER_VALIDATE_EMAIL)) {
+                // Giacom sends the customer its updates by email, and it can't be added once the order is placed.
+                if ($values['email'] === '') {
+                    $errors['email'] = 'Enter the customer\'s email address.';
+                } elseif (!filter_var($values['email'], FILTER_VALIDATE_EMAIL)) {
                     $errors['email'] = 'That isn\'t a valid email address.';
                 }
                 // Giacom (and the carrier's engineer) need someone at the address.

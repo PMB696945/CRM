@@ -19,6 +19,10 @@
         <dt>Broadband username</dt><dd><?= h($order['broadband_username'] ?: '—') ?></dd>
 <?php $appt = (json_decode((string)$order['details'], true) ?: [])['appointment'] ?? null; ?>
         <dt><?= $appt ? 'Install appointment' : 'Required by' ?></dt><dd><?= h(fmt_date($order['crd'])) ?><?= $appt && $appt['slot'] ? ' ' . h($appt['slot']) : '' ?></dd>
+<?php $d = json_decode((string)$order['details'], true) ?: []; ?>
+        <dt>Customer contact</dt><dd><?= h(($d['contact'] ?? '') ?: '—') ?><?php foreach (['telephone', 'email'] as $k): if (($d[$k] ?? '') !== ''): ?><br><span class="muted"><?= h($d[$k]) ?></span><?php endif; endforeach; ?>
+          <?php if (($d['email'] ?? '') === ''): ?><br><span class="text-danger small">No email was sent to Giacom with this order.</span><?php endif; ?></dd>
+        <?php if (($d['site_contact'] ?? '') !== ''): ?><dt>Site contact</dt><dd><?= h($d['site_contact']) ?><?php foreach (['site_telephone', 'site_email'] as $k): if (($d[$k] ?? '') !== ''): ?><br><span class="muted"><?= h($d[$k]) ?></span><?php endif; endforeach; ?></dd><?php endif; ?>
         <dt>Your reference</dt><dd><?= h($order['client_ref']) ?></dd>
         <dt>Giacom service ID</dt><dd><?= h($order['giacom_service_id'] ?: '—') ?></dd>
         <dt>Placed</dt><dd><?= h(fmt_datetime($order['created_at'])) ?> by <?= h($order['user_name'] ?? '—') ?></dd>

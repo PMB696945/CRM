@@ -71,7 +71,7 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <?= $f('forename', 'First name', 'text', '', true) ?>
   <?= $f('surname', 'Surname', 'text', '', true) ?>
   <?= $f('telephone', 'Phone', 'tel', '', true) ?>
-  <?= $f('email', 'Email', 'email') ?>
+  <?= $f('email', 'Email', 'email', 'Giacom sends order updates here. It can\'t be added after the order is placed.', true) ?>
 
   <div class="form-section wide"><div class="card-head"><h2>Site contact</h2>
       <button type="button" class="btn btn-sm" data-copy-contact="title:site_title,forename:site_forename,surname:site_surname,telephone:site_telephone,email:site_email">Use the main contact</button></div>
