@@ -2082,6 +2082,19 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
     eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
     eq('-public@GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm'], 'realm sent as Giacom lists it');
+    // Asking for dates: Giacom wants the line type (SOGEA as new or existing) and the visit.
+    eq(['SOGEA', 'SOGEA_NEW'], giacom_appointment_service(['technology' => 'sogea', 'tech_label' => 'SOGEA'], 'provide'));
+    eq(['SOGEA', 'SOGEA_EXISTING'], giacom_appointment_service(['technology' => '', 'name' => 'SKY SOGEA 80/20'], 'migrate'));
+    eq(['FTTP', null], giacom_appointment_service(['technology' => '', 'tech_label' => 'FTTP'], 'migrate'));
+    $sogea = array_values(array_filter(json_decode($check['result'], true)['products'], fn($p) => ($p['tech_label'] ?? '') === 'SOGEA'))[0];
+    $r = giacom_appointments($check, $sogea, 'PREMIUM', 'migrate');
+    ok($r['appointments'] && !$r['error'], 'SOGEA take-over dates: ' . (string)$r['error']);
+    eq(['SOGEA', 'SOGEA_EXISTING', 'PREMIUM'], [end(g_state()['appointment_requests'])['technology-type'], end(g_state()['appointment_requests'])['order-type'], end(g_state()['appointment_requests'])['site-visit-reason']]);
+    // A placed order asks with its own product (supplier, line type) and the visit it was ordered with.
+    $placed = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
+    eq((string)$placed['product_id'], (string)giacom_order_product($placed, $check)['product_id']);
+    ok(!giacom_appointments($check, giacom_order_product($placed, $check), giacom_order_visit($placed, $check), (string)$placed['order_type'])['error']);
+
     // Engineer visit: never less than Giacom's minimum for the order type.
     eq('PREMIUM', giacom_visit_at_least('NO_SITE_VISIT', 'PREMIUM'));
     eq('PREMIUM', giacom_visit_at_least('STANDARD', 'PREMIUM'));

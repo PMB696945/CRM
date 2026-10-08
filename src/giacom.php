@@ -563,7 +563,8 @@ function giacom_place_order(array $check, array $product, array $o): int
             $product['product_id'], mb_substr($product['name'], 0, 190), $product['technology'], $fullUsername ?: null,
             $check['address_label'], $o['crd'], $clientRef, 'Placed',
             json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email'],
-                'site_contact' => trim(($o['site_forename'] ?? '') . ' ' . ($o['site_surname'] ?? '')), 'site_telephone' => $o['site_telephone'] ?? '']),
+                'site_contact' => trim(($o['site_forename'] ?? '') . ' ' . ($o['site_surname'] ?? '')), 'site_telephone' => $o['site_telephone'] ?? '',
+                'site_visit_reason' => $o['site_visit_reason'] ?? null]),
             current_user()['id'] ?? null,
         ]);
         $id = (int)db()->lastInsertId();
@@ -590,6 +591,25 @@ function giacom_is_fttp(array $product): bool
 function giacom_default_ont(string $orderType): string
 {
     return $orderType === 'migrate' ? 'N' : 'Y';
+}
+
+/** A placed order's product as it was in the availability check (supplier, line type), for asking about dates again. */
+function giacom_order_product(array $order, ?array $check): array
+{
+    foreach ($check ? (giacom_check_result($check)['products'] ?? []) : [] as $p) {
+        if ((string)($p['product_id'] ?? '') === (string)$order['product_id']) {
+            return $p;
+        }
+    }
+    return ['technology' => $order['technology_type'], 'name' => $order['product_name'], 'supplier' => null, 'supplier_code' => null];
+}
+
+/** The engineer visit for a placed order: as ordered, else the least Giacom said the address needs. */
+function giacom_order_visit(array $order, ?array $check): string
+{
+    $details = json_decode((string)$order['details'], true) ?: [];
+    $min = $check ? giacom_min_visit(giacom_check_result($check), (string)$order['order_type']) : null;
+    return giacom_visit_at_least(giacom_visit_code($details['site_visit_reason'] ?? null) ?? $min ?? 'NO_SITE_VISIT', $min);
 }
 
 /** Refresh one order's status and history from Giacom. */
@@ -817,22 +837,37 @@ function giacom_suggest_username(array $account): string
  * Install/engineer appointments Giacom can offer for a product at an address.
  * Returns ['appointments' => [['date', 'slot', 'ref'], ...], 'error' => ?string].
  */
-function giacom_appointments(array $check, array $product, string $visitReason = 'NO_SITE_VISIT', string $orderType = ''): array
+/**
+ * What Giacom's appointment search calls the line type: [technology-type, order-type]. Giacom accepts FTTP, FTTC,
+ * SOADSL, and SOGEA as SOGEA_NEW (a new line) or SOGEA_EXISTING (taking over an existing one).
+ */
+function giacom_appointment_service(array $product, string $orderType): array
+{
+    $tech = strtoupper((string)(($product['tech_label'] ?? '') ?: giacom_tech_label((string)($product['technology'] ?? ''), (string)($product['supplier_ref'] ?? ''), (string)($product['name'] ?? ''))));
+    return match ($tech) {
+        'SOGEA' => ['SOGEA', $orderType === 'migrate' ? 'SOGEA_EXISTING' : 'SOGEA_NEW'],
+        'FTTP', 'FTTC', 'SOADSL' => [$tech, null],
+        default => [strtoupper((string)($product['technology'] ?? '')) ?: $tech, null],
+    };
+}
+
+function giacom_appointments(array $check, array $product, string $visitReason = 'NO_SITE_VISIT', string $orderType = 'provide'): array
 {
     $address = json_decode((string)$check['address'], true) ?: [];
+    [$technologyType, $giacomOrderType] = giacom_appointment_service($product, $orderType);
     $supplier = $product['supplier_code'] ?? null;
     if (!$supplier && ($product['supplier'] ?? '') === 'Sky') {
         $supplier = 'SKY';
     }
     try {
         $r = giacom_call('available_appointments', array_filter([
-            'technology-type' => strtoupper((string)$product['technology']),
+            'technology-type' => $technologyType,
             'address-reference' => $address['address-reference'] ?? null,
             'css-database-code' => $address['css-database-code'] ?? null,
             'uprn' => $address['uprn'] ?? null,
             'supplier' => $supplier,
             'site-visit-reason' => $visitReason ?: null,
-            'order-type' => $orderType ?: null,
+            'order-type' => $giacomOrderType,
         ], fn($v) => $v !== null && $v !== ''), '2.0.1');
     } catch (GiacomException $e) {
         return ['appointments' => [], 'error' => $e->getMessage()];
@@ -1022,7 +1057,7 @@ function giacom_controller(): void
             $postedType = is_post() && isset($_POST['order_type']) ? (($_POST['order_type'] === 'migrate') ? 'migrate' : 'provide') : $orderType;
             $minVisit = giacom_min_visit($result, $postedType);
             $visit = giacom_visit_at_least(giacom_visit_code($_POST['site_visit_reason'] ?? null) ?? $minVisit ?? 'NO_SITE_VISIT', $minVisit);
-            $slots = giacom_appointments($check, $product, $visit);
+            $slots = giacom_appointments($check, $product, $visit, $postedType);
             $appointments = $slots['appointments'];
             $appointmentsError = $slots['error'];
             $lead = $appointments[0]['date'] ?? ($product['leadtime']['first_date'] ?? null);
@@ -1171,10 +1206,12 @@ function giacom_controller(): void
                 try {
                     if (query('do') === 'appointment') {
                         require_permission('orders.place');
-                        $product = ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null];
                         $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
+                        $product = giacom_order_product($order, $check);
                         $key = (string)($_POST['appointment'] ?? '');
-                        $offered = $check ? giacom_appointments($check, $product, giacom_visit_code($_POST['visit'] ?? null) ?? 'NO_SITE_VISIT')['appointments'] : [];
+                        $visit = giacom_visit_at_least(giacom_visit_code($_POST['visit'] ?? null) ?? giacom_order_visit($order, $check),
+                            $check ? giacom_min_visit(giacom_check_result($check), (string)$order['order_type']) : null);
+                        $offered = $check ? giacom_appointments($check, $product, $visit, (string)$order['order_type'])['appointments'] : [];
                         $chosen = array_values(array_filter($offered, fn($a) => giacom_appointment_key($a) === $key))[0] ?? null;
                         if (!$chosen) {
                             throw new GiacomException('That appointment is no longer available. Show the dates again and choose another.');
@@ -1200,12 +1237,14 @@ function giacom_controller(): void
             }
             $events = db_all('SELECT * FROM giacom_order_events WHERE order_id = ? ORDER BY event_date DESC, id DESC', [$order['id']]);
             $slots = null;
+            $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
+            $minVisit = $check ? giacom_min_visit(giacom_check_result($check), (string)$order['order_type']) : null;
+            $visit = giacom_visit_at_least(giacom_visit_code(query('visit')) ?? giacom_order_visit($order, $check), $minVisit);
             if (query('appointments') === '1' && can('orders.place')) {
-                $check = $order['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$order['check_id']]) : null;
-                $slots = $check ? giacom_appointments($check, ['technology' => $order['technology_type'], 'supplier' => null, 'supplier_code' => null], giacom_visit_code(query('visit')) ?? 'NO_SITE_VISIT')
+                $slots = $check ? giacom_appointments($check, giacom_order_product($order, $check), $visit, (string)$order['order_type'])
                     : ['appointments' => [], 'error' => 'The availability check for this order is no longer available.'];
             }
-            page('giacom_view', compact('order', 'events', 'slots'), 'Giacom order ' . $order['giacom_order_id']);
+            page('giacom_view', compact('order', 'events', 'slots', 'visit', 'minVisit'), 'Giacom order ' . $order['giacom_order_id']);
             return;
 
         case 'sync':

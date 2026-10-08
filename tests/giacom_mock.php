@@ -160,6 +160,15 @@ switch ($call) {
         $save();
         reply(['order-id' => $id, 'service-id' => '9' . $id]);
     case 'available_appointments':
+        // As the real API: the service type comes from technology-type, or the order-type for SOGEA.
+        $tech = strtoupper((string)($req['technology-type'] ?? ''));
+        $serviceType = $tech === 'SOGEA' ? (string)($req['order-type'] ?? '') : $tech;
+        $state['appointment_requests'][] = $req;
+        $save();
+        if (in_array($req['site-visit-reason'] ?? '', ['PREMIUM', 'NO_SITE_VISIT'], true)
+            && !in_array($serviceType, ['FTTP', 'FTTC', 'SOGEA_NEW', 'SOGEA_EXISTING', 'SOADSL'], true)) {
+            reply([], 50, "Failed to get list of appointments: Appointment Error - if appointmentType is one of 'PREMIUM, NO_SITE_VISIT' then serviceType is one of 'FTTP, FTTC, SOGEA_NEW, SOGEA_EXISTING, SOADSL'.");
+        }
         $extra = ($req['site-visit-reason'] ?? '') === 'STANDARD' ? 5 : 0;
         reply(['appointments' => [
             ['date' => date('Y-m-d', strtotime('+' . (9 + $extra) . ' days')), 'timeslot' => 'PM', 'appointment-ref' => 'APT9'],

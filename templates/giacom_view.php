@@ -38,14 +38,19 @@
     <?php if ($open && can('orders.place')): ?>
       <section class="card">
         <div class="card-head"><h2>Install appointment</h2></div>
+        <?php $rank = array_flip(array_keys(GIACOM_VISITS)); ?>
+        <form method="get" action="index.php" class="stack">
+          <input type="hidden" name="page" value="giacom"><input type="hidden" name="action" value="view"><input type="hidden" name="id" value="<?= (int)$order['id'] ?>"><input type="hidden" name="appointments" value="1">
+          <label>Engineer visit<select name="visit" data-autosubmit>
+            <?php foreach (GIACOM_VISITS as $k => $l): if ($minVisit && $rank[$k] < $rank[$minVisit]) continue; ?><option value="<?= $k ?>" <?= $visit === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
+          <?php if ($slots === null): ?><p class="help">See the dates Giacom can offer for this visit, and book or change the appointment.</p><div><button class="btn btn-sm">Show available dates</button></div><?php endif; ?>
+        </form>
         <?php if ($slots === null): ?>
-          <p class="help">See the dates Giacom can offer and book or change the appointment.</p>
-          <a class="btn btn-sm" href="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'appointments' => 1])) ?>">Show available dates</a>
         <?php elseif (!$slots['appointments']): ?>
           <p class="muted">Giacom didn't offer any dates<?= $slots['error'] ? ': ' . h($slots['error']) : '' ?>.</p>
         <?php else: ?>
           <form method="post" action="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'do' => 'appointment'])) ?>" class="stack">
-            <?= csrf_field() ?><input type="hidden" name="visit" value="<?= h(query('visit', 'NO_SITE_VISIT')) ?>">
+            <?= csrf_field() ?><input type="hidden" name="visit" value="<?= h($visit) ?>">
             <div class="address-list">
               <?php foreach ($slots['appointments'] as $i => $a): ?>
                 <label class="check"><input type="radio" name="appointment" value="<?= h(giacom_appointment_key($a)) ?>" <?= $i === 0 ? 'checked' : '' ?> required>
