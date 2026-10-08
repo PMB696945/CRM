@@ -7,9 +7,9 @@ $exportParams = array_merge($_GET, ['page' => $name, 'action' => 'export', 'p' =
 $bulk = $name === 'products' && xero_connected() && can('products.edit');
 ?>
 <div class="page-head">
-  <h1><?= h($entity['plural']) ?> <small class="count"><?= (int)$result['total'] ?></small></h1>
+  <h1><?= h($entity['plural']) ?> <small class="count" data-live-count><?= (int)$result['total'] ?></small></h1>
   <div class="actions">
-    <?php if (can('export')): ?><a class="btn" href="<?= h(url($name, $exportParams)) ?>">Export CSV</a><?php endif; ?>
+    <?php if (can('export')): ?><a class="btn" href="<?= h(url($name, $exportParams)) ?>" data-live-export>Export CSV</a><?php endif; ?>
     <?php if ($name === 'accounts' && xero_connected() && can('customers.edit')): ?><a class="btn" href="<?= h(url('xero_customers')) ?>">Add from Xero</a><?php endif; ?>
     <?php if ($name === 'suppliers' && xero_connected() && can('suppliers.edit')): ?><form method="post" action="<?= h(url('suppliers', ['action' => 'xero_import'])) ?>" class="inline"><?= csrf_field() ?><button class="btn">Bring in from Xero</button></form><?php endif; ?>
     <?php if ($canWrite && empty($entity['no_new']) && ($name !== 'products' || can('products.edit'))): ?><a class="btn btn-primary" href="<?= h(url($name, ['action' => 'new'])) ?>">+ New <?= h(strtolower($entity['label'])) ?></a><?php endif; ?>
@@ -25,10 +25,11 @@ $bulk = $name === 'products' && xero_connected() && can('products.edit');
 </div>
 <?php endif; ?>
 
-<form class="filters" method="get" action="index.php">
+<form class="filters" method="get" action="index.php" data-live-search>
   <input type="hidden" name="page" value="<?= h($name) ?>">
   <?php if ($opts['preset'] !== ''): ?><input type="hidden" name="preset" value="<?= h($opts['preset']) ?>"><?php endif; ?>
-  <input type="search" name="q" value="<?= h($opts['q']) ?>" placeholder="Search…">
+  <?php foreach (['sort', 'dir'] as $k): if ((string)($opts[$k] ?? '') !== ''): ?><input type="hidden" name="<?= $k ?>" value="<?= h((string)$opts[$k]) ?>"><?php endif; endforeach; ?>
+  <input type="search" name="q" value="<?= h($opts['q']) ?>" placeholder="Search…" autocomplete="off" aria-label="Search <?= h(strtolower($entity['plural'])) ?>">
   <?php foreach ($entity['filters'] ?? [] as $f):
       $def = $entity['fields'][$f];
       $choices = match ($def['type']) {
@@ -46,9 +47,9 @@ $bulk = $name === 'products' && xero_connected() && can('products.edit');
     </select>
   <?php endforeach; ?>
   <button class="btn">Filter</button>
-  <?php if ($opts['q'] !== '' || array_filter($opts['filters'], fn($v) => $v !== '')): ?>
+  <span data-live-clear><?php if ($opts['q'] !== '' || array_filter($opts['filters'], fn($v) => $v !== '')): ?>
     <a class="btn btn-ghost" href="<?= h(url($name, ['preset' => $opts['preset']])) ?>">Clear</a>
-  <?php endif; ?>
+  <?php endif; ?></span>
 </form>
 
 <?php if ($bulk): ?>
@@ -60,6 +61,7 @@ $bulk = $name === 'products' && xero_connected() && can('products.edit');
   <?php if (!xero_can_write_items()): ?><span class="small text-warning">Switch on "Send products to Xero" under <a href="<?= h(url('xero')) ?>">Admin → Xero</a> first.</span><?php endif; ?>
 </form>
 <?php endif; ?>
+<div data-live-results>
 <?php render('_table', ['entity' => $entity, 'name' => $name, 'rows' => $result['rows'], 'columns' => $entity['list'], 'sortable' => true, 'opts' => $opts, 'selectable' => $bulk]); ?>
 
 <?php if ($pages > 1): ?>
@@ -69,3 +71,4 @@ $bulk = $name === 'products' && xero_connected() && can('products.edit');
   <?php if ($current < $pages): ?><a class="btn btn-sm" href="<?= h(url($name, array_merge($_GET, ['page' => $name, 'p' => $current + 1]))) ?>">Next →</a><?php endif; ?>
 </nav>
 <?php endif; ?>
+</div>

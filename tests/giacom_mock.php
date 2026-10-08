@@ -183,8 +183,13 @@ switch ($call) {
     case 'order_eventlog_changes':
         reply(['eventlog' => array_values($state['events'])]);
     case 'order_abort':
+        // As the API since Sept 2026: cancel-status success/error, with the reasons in an errors block.
+        if (!empty($state['refuse_cancel'])) {
+            reply(['cancel-status' => 'error', 'errors' => [['error' => 'Order is too far progressed to cancel']],
+                'components' => [['component' => '9175', 'error' => 'Engineer appointment already confirmed', 'info' => '', 'warn' => '']], 'message' => 'Cancellation failed']);
+        }
         $state['orders'][$req['order-id']]['status'] = 'Cancelled';
         $save();
-        reply(['cancel-status' => 'Cancelled']);
+        reply(['cancel-status' => 'success', 'message' => 'Order cancelled']);
 }
 reply([], 99, "Unknown call $call");

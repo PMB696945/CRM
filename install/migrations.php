@@ -950,4 +950,22 @@ return [
             CONSTRAINT fk_ce_contract FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+    28 => function (): void {
+        // Giacom orders the CRM wrongly treated as cancelled when Giacom had refused the cancellation (before its
+        // Sept 2026 reply format was handled): put the order back to be refreshed, and the service back to pending.
+        $orders = db_all("SELECT o.* FROM giacom_orders o WHERE o.status = 'Cancellation requested'
+            AND EXISTS (SELECT 1 FROM giacom_order_events e WHERE e.order_id = o.id AND e.name = 'cancel' AND e.value LIKE 'error:%')");
+        foreach ($orders as $o) {
+            db_exec("UPDATE giacom_orders SET status = 'Placed', last_error = 'Giacom refused the cancellation, so the order is still open. Refresh it to see its status.' WHERE id = ?", [$o['id']]);
+            db_exec('INSERT IGNORE INTO giacom_order_events (order_id, event_date, name, value) VALUES (?, NOW(), ?, ?)',
+                [$o['id'], 'cancel', 'Correction: Giacom refused the cancellation, so the order is still open']);
+            $service = $o['service_id'] ? db_one('SELECT * FROM services WHERE id = ?', [$o['service_id']]) : null;
+            if ($service && $service['status'] === 'ceased') {
+                db_exec("UPDATE services SET status = 'pending' WHERE id = ?", [$service['id']]);
+                if (function_exists('service_changed')) {
+                    service_changed((int)$service['id'], $service);
+                }
+            }
+        }
+    },
 ];

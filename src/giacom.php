@@ -630,8 +630,12 @@ function giacom_is_complete(string $status): bool
     return (bool)preg_match('/^(completed?|live|active)\b/i', trim($status));
 }
 
+/** Is the order finished without going live? Only once Giacom confirms it: "Cancellation requested" isn't cancelled yet. */
 function giacom_is_cancelled(string $status): bool
 {
+    if (preg_match('/request|pending|refus|in progress|awaiting/i', $status)) {
+        return false;
+    }
     return (bool)preg_match('/cancel|abort|reject|fail/i', $status);
 }
 
@@ -704,11 +708,49 @@ function giacom_sync(): array
 function giacom_abort_order(array $order, string $reason): string
 {
     $r = giacom_call('order_abort', ['order-id' => $order['giacom_order_id'], 'reason' => $reason]);
-    $status = (string)($r['cancel-status'] ?? 'Cancellation requested');
-    giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'cancel', $status . ': ' . $reason);
-    giacom_set_status($order, giacom_is_cancelled($status) ? $status : 'Cancellation requested');
-    audit('giacom_abort', "Giacom order {$order['giacom_order_id']} cancellation requested: $reason", 'accounts', $order['account_id'] ? (int)$order['account_id'] : null);
-    return $status;
+    // Since Sept 2026 Giacom says whether the cancel worked (cancel-status success/error), with the reasons when it didn't.
+    $status = strtolower(trim((string)($r['cancel-status'] ?? '')));
+    $problems = [];
+    foreach (is_array($r['errors'] ?? null) ? $r['errors'] : [] as $e) {
+        $problems[] = trim((string)(is_array($e) ? ($e['error'] ?? '') : $e));
+    }
+    $warnings = [];
+    foreach (is_array($r['components'] ?? null) ? $r['components'] : [] as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        $label = !empty($c['component']) ? 'Component ' . $c['component'] . ': ' : '';
+        if (trim((string)($c['error'] ?? '')) !== '') {
+            $problems[] = $label . trim((string)$c['error']);
+        }
+        if (trim((string)($c['warn'] ?? '')) !== '') {
+            $warnings[] = $label . trim((string)$c['warn']);
+        }
+    }
+    $problems = array_values(array_unique(array_filter($problems)));
+    $message = trim((string)($r['message'] ?? ''));
+    $accountId = $order['account_id'] ? (int)$order['account_id'] : null;
+
+    if ($status === 'error' || ($problems && $status !== 'success')) {
+        $why = implode('; ', $problems) ?: ($message ?: 'Giacom didn\'t give a reason');
+        giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'cancel', 'Cancellation refused: ' . $why . ' (reason given: ' . $reason . ')');
+        audit('giacom_abort', "Giacom refused to cancel order {$order['giacom_order_id']}: $why", 'accounts', $accountId);
+        throw new GiacomException("Giacom couldn't cancel this order: $why");
+    }
+
+    $note = 'Cancellation accepted' . ($message !== '' ? " ($message)" : '') . ': ' . $reason . ($warnings ? ' · Warnings: ' . implode('; ', $warnings) : '');
+    giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'cancel', $note);
+    // Older replies gave the new status itself (e.g. "Cancelled").
+    $legacy = (string)($r['cancel-status'] ?? '');
+    giacom_set_status($order, giacom_is_cancelled($legacy) ? $legacy : 'Cancellation requested');
+    audit('giacom_abort', "Giacom order {$order['giacom_order_id']} cancellation accepted: $reason", 'accounts', $accountId);
+    try {
+        giacom_refresh_order(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$order['id']]));
+    } catch (GiacomException) {
+        // The cron job picks up the final status.
+    }
+    $now = (string)db_value('SELECT status FROM giacom_orders WHERE id = ?', [$order['id']]);
+    return 'Cancellation accepted. The order is now: ' . $now . ($warnings ? '. Warnings: ' . implode('; ', $warnings) : '') . '.';
 }
 
 /** "Dr. Priya Shah" → ['Dr', 'Priya', 'Shah']. */
@@ -1145,7 +1187,7 @@ function giacom_controller(): void
                         if ($reason === '') {
                             throw new GiacomException('Please give a reason for cancelling.');
                         }
-                        flash('Giacom says: ' . giacom_abort_order($order, mb_substr($reason, 0, 250)));
+                        flash(giacom_abort_order($order, mb_substr($reason, 0, 250)));
                     } else {
                         giacom_refresh_order($order);
                         flash('Order refreshed from Giacom.');

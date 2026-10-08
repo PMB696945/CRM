@@ -455,3 +455,44 @@ document.querySelectorAll('[data-copy-contact]').forEach((button) => {
     });
   });
 });
+
+// Lists: search as you type. The matching rows are fetched from the server (so paging, filters, sorting and
+// permissions all still apply) and swapped in, and the address bar is updated so refresh and back keep the search.
+document.querySelectorAll('form[data-live-search]').forEach((form) => {
+  const input = form.querySelector('input[name="q"]');
+  if (!input) return;
+  let timer;
+  let controller;
+  let last = input.value;
+  const run = async () => {
+    if (input.value === last) return;
+    last = input.value;
+    const params = new URLSearchParams(new FormData(form));
+    params.delete('p'); // back to the first page
+    [...params.keys()].forEach((k) => { if (params.get(k) === '') params.delete(k); });
+    const url = form.getAttribute('action') + '?' + params.toString();
+    controller?.abort();
+    controller = new AbortController();
+    form.classList.add('is-loading');
+    try {
+      const res = await fetch(url, { signal: controller.signal, headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin' });
+      if (!res.ok || res.redirected) { window.location = url; return; }
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      ['[data-live-results]', '[data-live-count]', '[data-live-export]', '[data-live-clear]'].forEach((sel) => {
+        const now = document.querySelector(sel);
+        const next = doc.querySelector(sel);
+        if (now && next) now.replaceWith(next);
+      });
+      history.replaceState(null, '', url);
+    } catch (e) {
+      if (e.name !== 'AbortError') window.location = url;
+    } finally {
+      form.classList.remove('is-loading');
+    }
+  };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
+  // Enter searches straight away rather than reloading the page.
+  form.addEventListener('submit', (e) => {
+    if (document.activeElement === input) { e.preventDefault(); clearTimeout(timer); last = null; run(); }
+  });
+});

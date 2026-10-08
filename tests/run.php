@@ -2098,10 +2098,26 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     try { giacom_place_order($check, $product, ['realm' => '', 'bb_suffix' => ''] + $o); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'realm')); }
     eq('N', g_state()['last']['migrate']['order']['attributes']['force-new-ont']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
-    eq('Cancelled', giacom_abort_order($order, 'Customer changed their mind'));
-    eq('Cancelled', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$id]));
+    // Giacom refuses: its reasons are shown, and nothing changes here.
+    $st = g_state(); $st['refuse_cancel'] = true; file_put_contents($GLOBALS['gState'], json_encode($st));
+    try { giacom_abort_order($order, 'Test Order'); throw new Exception('expected failure'); }
+    catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'too far progressed') && str_contains($e->getMessage(), 'Engineer appointment already confirmed'), $e->getMessage()); }
+    eq('Placed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$id]), 'not marked as cancelling');
+    eq('pending', db_value('SELECT status FROM services WHERE id = ?', [$order['service_id']]), 'service not ceased');
+    ok(str_contains((string)db_value("SELECT value FROM giacom_order_events WHERE order_id = ? ORDER BY id DESC LIMIT 1", [$id]), 'Cancellation refused'), 'refusal noted on the order');
+    $st = g_state(); $st['refuse_cancel'] = false; file_put_contents($GLOBALS['gState'], json_encode($st));
+    ok(str_contains(giacom_abort_order($order, 'Customer changed their mind'), 'Cancellation accepted'));
+    eq('Cancelled', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$id]), 'status from Giacom after the cancel');
     eq('ceased', db_value('SELECT status FROM services WHERE id = ?', [$order['service_id']]));
     eq('Customer changed their mind', g_state()['last']['order_abort']['reason']);
+    ok(!giacom_is_cancelled('Cancellation requested') && giacom_is_cancelled('Cancelled'), 'only a confirmed cancellation ceases the service');
+    // Repair for orders the old code treated as cancelled although Giacom refused (shown as "Cancel error: <reason>").
+    db_exec("UPDATE giacom_orders SET status = 'Cancellation requested' WHERE id = ?", [$id]);
+    db_exec("UPDATE services SET status = 'ceased' WHERE id = ?", [$order['service_id']]);
+    db_exec("INSERT INTO giacom_order_events (order_id, event_date, name, value) VALUES (?, NOW() - INTERVAL 1 DAY, 'cancel', 'error: Test Order')", [$id]);
+    (require migrations_file())[28]();
+    eq('Placed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$id]), 'order open again');
+    eq('pending', db_value('SELECT status FROM services WHERE id = ?', [$order['service_id']]), 'service back to pending');
 });
 proc_terminate($gProc);
 @unlink($gState);
