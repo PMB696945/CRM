@@ -983,4 +983,50 @@ return [
             KEY idx_ml_to (to_email)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+    30 => function (): void {
+        // Dealer portal: dealer users who sign in to a separate site, and the orders they submit for approval.
+        db()->exec("CREATE TABLE IF NOT EXISTS dealer_users (
+            id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id               INT UNSIGNED NOT NULL,
+            name                     VARCHAR(150) NOT NULL,
+            email                    VARCHAR(190) NOT NULL UNIQUE,
+            password_hash            VARCHAR(255) NULL,
+            active                   TINYINT(1) NOT NULL DEFAULT 1,
+            must_change_password     TINYINT(1) NOT NULL DEFAULT 1,
+            temp_password_expires_at DATETIME NULL,
+            failed_logins            TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            locked_until             DATETIME NULL,
+            reset_sent_at            DATETIME NULL,
+            last_login_at            DATETIME NULL,
+            created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_du_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        db()->exec("CREATE TABLE IF NOT EXISTS dealer_orders (
+            id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            reference         VARCHAR(20) NULL,
+            dealer_id         INT UNSIGNED NOT NULL,
+            account_id        INT UNSIGNED NOT NULL,
+            dealer_user_id    INT UNSIGNED NULL,
+            check_id          INT UNSIGNED NULL,
+            product_id        INT UNSIGNED NULL,
+            supplier_product  VARCHAR(40) NULL,
+            details           TEXT NULL,
+            status            VARCHAR(20) NOT NULL DEFAULT 'submitted',
+            giacom_order_id   INT UNSIGNED NULL,
+            decided_by        INT UNSIGNED NULL,
+            decided_at        DATETIME NULL,
+            decision_note     VARCHAR(500) NULL,
+            last_error        VARCHAR(500) NULL,
+            created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_do_dealer (dealer_id, created_at),
+            KEY idx_do_status (status),
+            CONSTRAINT fk_do_dealer FOREIGN KEY (dealer_id) REFERENCES accounts(id) ON DELETE CASCADE,
+            CONSTRAINT fk_do_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach (['dealer_price' => 'DECIMAL(10,2) NULL', 'dealer_setup_fee' => 'DECIMAL(10,2) NULL', 'supplier_product_ids' => 'VARCHAR(255) NULL'] as $col => $def) {
+            if (!column_exists('products', $col)) {
+                db()->exec("ALTER TABLE products ADD COLUMN $col $def");
+            }
+        }
+    },
 ];
