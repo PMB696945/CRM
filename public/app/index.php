@@ -104,6 +104,7 @@ match (true) {
     $page === 'customer_orders' => customer_orders_controller(),
     $page === 'supplier_invoices' => supplier_invoices_controller(),
     $page === 'error_log' => error_log_controller(),
+    $page === 'mail_log'  => mail_log_controller(),
     $page === 'purchase_orders' => purchase_orders_controller(),
     $page === 'price_import' => price_import_controller(),
     $page === 'abillity'  => abillity_controller(),

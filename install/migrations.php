@@ -968,4 +968,19 @@ return [
             }
         }
     },
+    29 => function (): void {
+        // Every email the CRM sends (or fails to send), so staff can see what went out and why something didn't.
+        db()->exec("CREATE TABLE IF NOT EXISTS mail_log (
+            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            to_email    VARCHAR(190) NOT NULL,
+            to_name     VARCHAR(190) NULL,
+            subject     VARCHAR(255) NOT NULL,
+            transport   VARCHAR(20) NOT NULL,
+            status      VARCHAR(10) NOT NULL,
+            error       VARCHAR(500) NULL,
+            created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_ml_created (created_at),
+            KEY idx_ml_to (to_email)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];

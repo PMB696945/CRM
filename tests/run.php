@@ -1225,6 +1225,14 @@ test('SMTP: email sent with login, encoded subject and both text and HTML parts'
     ok(str_contains($raw, 'text/plain') && str_contains($raw, 'text/html'));
     ok(str_contains(mail_body($raw), 'Hello there'), 'plain-text version generated');
     try { send_mail('not-an-email', '', 's', 'b'); throw new Exception('expected failure'); } catch (IntegrationException) {}
+    $log = db_all('SELECT * FROM mail_log ORDER BY id DESC LIMIT 2');
+    eq(['failed', 'not-an-email'], [$log[0]['status'], $log[0]['to_email']], 'failed sends are logged');
+    eq(['sent', 'test@example.com', 'smtp'], [$log[1]['status'], $log[1]['to_email'], $log[1]['transport']], 'sent emails are logged');
+    set_setting('smtp_port', '1');
+    try { send_mail('x@example.com', 'X', 'Unreachable', '<p>x</p>'); throw new Exception('expected failure'); } catch (IntegrationException) {}
+    set_setting('smtp_port', (string)$smtpPort);
+    $row = db_one('SELECT * FROM mail_log ORDER BY id DESC LIMIT 1');
+    ok($row['status'] === 'failed' && str_contains($row['error'], 'connect'), 'the reason is kept: ' . $row['error']);
 });
 
 test('quote is emailed with a working link, accepted, and the contract is emailed to sign online', function () use (&$flow, &$dealerIds) {
@@ -2021,6 +2029,24 @@ test('Giacom: placing an order sends the right details and adds a pending servic
     try { giacom_place_order($check, $product, ['order_type' => 'migrate'] + $o); throw new Exception('expected failure'); }
     catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'CLI or access line ID')); }
 });
+test('Giacom: the customer is emailed an order confirmation in our name', function () use (&$g) {
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
+    $before = count(sent_mails());
+    eq('rita@canal.example', giacom_email_confirmation($order));
+    usleep(300000);
+    $all = sent_mails();
+    ok(count($all) === $before + 1, 'one email sent');
+    $raw = end($all);
+    $body = mail_body($raw);
+    ok(str_contains($raw, 'X-Rcpt: rita@canal.example'));
+    ok(str_contains($body, 'Hi Rita') && str_contains($body, 'Unit 2') && str_contains($body, 'Your broadband order is confirmed'), 'product, address and greeting');
+    ok(stripos($raw, 'giacom') === false && stripos($body, 'giacom') === false, 'the supplier is not named');
+    ok((bool)db_value("SELECT id FROM giacom_order_events WHERE order_id = ? AND name = 'email'", [$order['id']]), 'recorded on the order');
+    $noEmail = ['details' => json_encode(['contact' => 'X'])] + $order;
+    try { giacom_email_confirmation($noEmail); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'no customer email'), $e->getMessage()); }
+});
+
 test('Giacom: status updates are picked up; completion makes the service live', function () use (&$g, &$gPort) {
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$g['order']]);
     $order = giacom_refresh_order($order);

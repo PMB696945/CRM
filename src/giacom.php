@@ -911,6 +911,63 @@ function giacom_book_appointment(array $order, array $appointment): void
     audit('giacom_appointment', "Giacom order {$order['giacom_order_id']}: appointment booked for {$appointment['date']} {$appointment['slot']}", 'accounts', $order['account_id'] ? (int)$order['account_id'] : null);
 }
 
+/**
+ * Email the customer a confirmation of their broadband order: what, where and when the install is.
+ * In our name only (the supplier isn't mentioned). Returns the address used; throws IntegrationException.
+ */
+function giacom_email_confirmation(array $order, ?string $to = null): string
+{
+    $details = json_decode((string)$order['details'], true) ?: [];
+    $to = trim((string)($to ?? ($details['email'] ?? '')));
+    if ($to === '') {
+        throw new IntegrationException('There\'s no customer email address on this order.');
+    }
+    $name = trim((string)($details['contact'] ?? ''));
+    $first = trim(explode(' ', preg_replace('/^(mr|mrs|ms|miss|dr)\.?\s+/i', '', $name))[0] ?? '') ?: 'there';
+    $account = $order['account_id'] ? db_one('SELECT name, account_number FROM accounts WHERE id = ?', [$order['account_id']]) : null;
+    $product = $order['service_id'] ? db_value('SELECT p.name FROM services s JOIN products p ON p.id = s.product_id WHERE s.id = ?', [$order['service_id']]) : null;
+    $product = $product ?: trim(preg_replace('/\bgiacom\b/i', '', (string)$order['product_name']));
+    $appointment = $details['appointment'] ?? null;
+    $visit = $details['site_visit_reason'] ?? null;
+    $rows = array_filter([
+        'Service' => $product ?: 'Broadband',
+        'Order' => $order['order_type'] === 'migrate' ? 'Taking over your existing service' : 'New service',
+        'Address' => (string)$order['address_label'],
+        'Phone number' => (string)$order['cli'],
+        $appointment ? 'Engineer appointment' : 'Expected by' => $appointment
+            ? fmt_date($appointment['date']) . ($appointment['slot'] ? ' (' . $appointment['slot'] . ')' : '')
+            : ($order['crd'] ? fmt_date($order['crd']) : ''),
+        'Engineer visit' => $visit && $visit !== 'NO_SITE_VISIT' ? 'Yes – someone will need to be at the address to let the engineer in' : '',
+        'Your account' => (string)($account['account_number'] ?? ''),
+    ], fn($v) => $v !== '');
+    $table = '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:12px 0">';
+    foreach ($rows as $label => $value) {
+        $table .= '<tr><td style="padding:6px 12px 6px 0;color:#667085;vertical-align:top;white-space:nowrap">' . h($label) . '</td><td style="padding:6px 0">' . h($value) . '</td></tr>';
+    }
+    $table .= '</table>';
+    $company = company('name', config('app_name'));
+    $body = '<p>Hi ' . h($first) . ',</p>'
+        . '<p>Thank you for your order. We\'ve placed it and will keep you updated as it progresses.</p>' . $table
+        . '<p>If any of these details are wrong, or the date doesn\'t suit you, please reply to this email as soon as possible.</p>';
+    send_mail($to, $name, "Your broadband order with $company", email_layout('Your broadband order is confirmed', $body));
+    giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'email', 'Order confirmation emailed to ' . $to);
+    if ($order['account_id']) {
+        log_activity((int)$order['account_id'], 'email', 'Broadband order confirmation sent to ' . ($name ? "$name <$to>" : $to));
+    }
+    return $to;
+}
+
+/** Send the confirmation after placing an order, as a sentence for the flash message (the order stands either way). */
+function giacom_try_confirmation(int $orderId): string
+{
+    try {
+        return ' A confirmation was emailed to ' . giacom_email_confirmation(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$orderId])) . '.';
+    } catch (IntegrationException $e) {
+        db_exec('UPDATE giacom_orders SET last_error = ? WHERE id = ?', ['The order confirmation couldn\'t be emailed: ' . mb_substr($e->getMessage(), 0, 400), $orderId]);
+        return ' The confirmation email couldn\'t be sent: ' . $e->getMessage();
+    }
+}
+
 /* ---------------------------------------------------------- Controller --- */
 
 function giacom_controller(): void
@@ -1078,6 +1135,7 @@ function giacom_controller(): void
                 'site_title' => $siteTitle, 'site_forename' => $siteForename, 'site_surname' => $siteSurname,
                 'site_telephone' => (string)(($siteContact['phone'] ?? '') ?: ($siteContact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
                 'site_email' => (string)($siteContact['email'] ?? ''), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
+                'send_confirmation' => '1',
             ];
             $errors = [];
             if (is_post()) {
@@ -1182,11 +1240,16 @@ function giacom_controller(): void
                                 giacom_book_appointment(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]), $chosen);
                             } catch (GiacomException $e) {
                                 db_exec('UPDATE giacom_orders SET last_error = ? WHERE id = ?', ['Order placed, but the appointment couldn\'t be booked: ' . mb_substr($e->getMessage(), 0, 400), $id]);
-                                flash('Order placed with Giacom, but the appointment couldn\'t be booked: ' . $e->getMessage() . ' Choose another on the order page.', 'error');
+                                flash('Order placed with Giacom, but the appointment couldn\'t be booked: ' . $e->getMessage() . ' Choose another on the order page,'
+                                    . ' then send the customer their confirmation from there.', 'error');
                                 redirect(url('giacom', ['action' => 'view', 'id' => $id]));
                             }
                         }
-                        flash('Order placed with Giacom. Its progress will show here and on the customer\'s page.');
+                        $note = '';
+                        if ($values['send_confirmation'] === '1') {
+                            $note = giacom_try_confirmation($id);
+                        }
+                        flash('Order placed with Giacom. Its progress will show here and on the customer\'s page.' . $note, str_contains($note, 'couldn\'t be sent') ? 'error' : 'success');
                         redirect(url('giacom', ['action' => 'view', 'id' => $id]));
                     } catch (GiacomException $e) {
                         $errors['_'] = $e->getMessage();
@@ -1218,6 +1281,14 @@ function giacom_controller(): void
                         }
                         giacom_book_appointment($order, $chosen);
                         flash('Appointment booked for ' . fmt_date($chosen['date']) . ($chosen['slot'] ? ' ' . $chosen['slot'] : '') . '.');
+                    } elseif (query('do') === 'confirmation') {
+                        require_permission('orders.place');
+                        $to = trim((string)($_POST['email'] ?? ''));
+                        try {
+                            flash('Order confirmation emailed to ' . giacom_email_confirmation($order, $to !== '' ? $to : null) . '.');
+                        } catch (IntegrationException $e) {
+                            flash('The confirmation couldn\'t be sent: ' . $e->getMessage(), 'error');
+                        }
                     } elseif (query('do') === 'abort') {
                         require_permission('orders.place');
                         $reason = trim((string)($_POST['reason'] ?? ''));

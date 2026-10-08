@@ -90,6 +90,9 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
     <select id="g_prod" name="crm_product_id"><option value="">—</option><?php foreach ($crmProducts as $id => $l): ?><option value="<?= (int)$id ?>" <?= (string)$values['crm_product_id'] === (string)$id ? 'selected' : '' ?>><?= h($l) ?></option><?php endforeach; ?></select>
     <div class="help">Sets the price and term on the new service.</div></div>
 
+  <div class="field field-check wide"><label><input type="checkbox" name="send_confirmation" value="1" <?= $values['send_confirmation'] === '1' ? 'checked' : '' ?>> Email the customer an order confirmation</label>
+    <div class="help">Sent to the customer email above once the order is placed: the product, address and install date, in your company's name.</div></div>
+
   <div class="form-actions wide">
     <button class="btn btn-primary">Place order with Giacom</button>
     <a class="btn btn-ghost" href="<?= h(url('giacom', ['action' => 'result', 'id' => $check['id']])) ?>">Cancel</a>

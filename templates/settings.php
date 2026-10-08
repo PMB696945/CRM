@@ -137,4 +137,4 @@
 
   <div class="form-actions"><button class="btn btn-primary">Save settings</button></div>
 </form>
-<form method="post" action="<?= h(url('settings', ['action' => 'test_email'])) ?>" class="mt-4"><?= csrf_field() ?><button class="btn">✉ Send me a test email</button> <span class="help">Save first.</span></form>
+<form method="post" action="<?= h(url('settings', ['action' => 'test_email'])) ?>" class="mt-4"><?= csrf_field() ?><button class="btn">✉ Send me a test email</button> <span class="help">Save first.</span> <a class="btn btn-ghost" href="<?= h(url('mail_log')) ?>">Email log</a></form>

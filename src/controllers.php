@@ -1423,3 +1423,23 @@ function error_log_controller(): void
     }
     page('error_log', ['lines' => $lines, 'path' => $path, 'size' => $size], 'Error log');
 }
+
+/** Every email the CRM has sent or tried to send, newest first, with the reason for any failure. */
+function mail_log_controller(): void
+{
+    require_permission('settings.manage');
+    $q = trim((string)query('q', ''));
+    $failed = query('status') === 'failed';
+    $where = [];
+    $params = [];
+    if ($q !== '') {
+        $where[] = '(to_email LIKE ? OR to_name LIKE ? OR subject LIKE ?)';
+        array_push($params, "%$q%", "%$q%", "%$q%");
+    }
+    if ($failed) {
+        $where[] = "status = 'failed'";
+    }
+    $rows = db_all('SELECT * FROM mail_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY id DESC LIMIT 300', $params);
+    $failures = (int)db_value("SELECT COUNT(*) FROM mail_log WHERE status = 'failed' AND created_at > NOW() - INTERVAL 7 DAY");
+    page('mail_log', compact('rows', 'q', 'failed', 'failures'), 'Email log');
+}

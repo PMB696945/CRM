@@ -158,11 +158,41 @@ function mail_build(string $to, string $toName, string $subject, string $html, ?
 function send_mail(string $to, string $toName, string $subject, string $html, ?string $text = null, array $headers = [], array $attachments = []): void
 {
     if (!mail_configured()) {
+        mail_log($to, $toName, $subject, 'failed', 'Email isn\'t set up (no "send from" address).');
         throw new IntegrationException('Email isn\'t set up yet. An admin can add it under Settings → Email.');
     }
     if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        mail_log($to, $toName, $subject, 'failed', "Not a valid email address.");
         throw new IntegrationException("\"$to\" isn't a valid email address.");
     }
+    try {
+        mail_transport_send($to, $toName, $subject, $html, $text, $headers, $attachments);
+    } catch (Throwable $e) {
+        mail_log($to, $toName, $subject, 'failed', $e->getMessage());
+        throw $e;
+    }
+    mail_log($to, $toName, $subject, 'sent');
+}
+
+/** Record an email in the email log (Admin → Email log). Never stops the email itself. */
+function mail_log(string $to, string $toName, string $subject, string $status, ?string $error = null): void
+{
+    try {
+        db_exec('INSERT INTO mail_log (to_email, to_name, subject, transport, status, error) VALUES (?, ?, ?, ?, ?, ?)', [
+            mb_substr($to, 0, 190), mb_substr($toName, 0, 190) ?: null, mb_substr($subject, 0, 255),
+            (string)(setting('mail_transport') ?: 'php'), $status, $error !== null ? mb_substr($error, 0, 500) : null,
+        ]);
+        if (random_int(1, 200) === 1) {
+            db_exec('DELETE FROM mail_log WHERE created_at < NOW() - INTERVAL 180 DAY');
+        }
+    } catch (Throwable $e) {
+        error_log('Email log failed: ' . $e->getMessage());
+    }
+}
+
+/** Hand the message to the chosen transport. */
+function mail_transport_send(string $to, string $toName, string $subject, string $html, ?string $text, array $headers, array $attachments): void
+{
     if (setting('mail_transport') === 'mandrill') {
         mandrill_send($to, $toName, $subject, $html, $text, $headers, $attachments);
         return;

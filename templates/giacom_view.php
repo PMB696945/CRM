@@ -62,6 +62,15 @@
         <?php endif; ?>
       </section>
       <section class="card">
+        <div class="card-head"><h2>Customer confirmation</h2></div>
+        <form method="post" action="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'do' => 'confirmation'])) ?>" class="stack">
+          <?= csrf_field() ?>
+          <label>Email to<input type="email" name="email" value="<?= h((string)((json_decode((string)$order['details'], true) ?: [])['email'] ?? '')) ?>" required></label>
+          <button class="btn">Email order confirmation</button>
+          <p class="help">The product, address and install date, in your company's name. Sent automatically when the order is placed; use this to send it again (e.g. after changing the appointment).</p>
+        </form>
+      </section>
+      <section class="card">
         <div class="card-head"><h2>Cancel order</h2></div>
         <form method="post" action="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'do' => 'abort'])) ?>" class="stack" data-confirm="Ask Giacom to cancel this order?">
           <?= csrf_field() ?>
