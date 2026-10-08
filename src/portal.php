@@ -62,6 +62,15 @@ function portal_user(): ?array
     if (!$id) {
         return null;
     }
+    // Signed out after the same idle time as staff (Settings), and at least every 12 hours.
+    $idle = max(5, (int)(setting('session_idle_minutes') ?: 60)) * 60;
+    $now = time();
+    if ($now - (int)($_SESSION['portal_last'] ?? $now) > $idle || $now - (int)($_SESSION['portal_since'] ?? $now) > SESSION_MAX_HOURS * 3600) {
+        unset($_SESSION['portal_user_id'], $_SESSION['portal_last'], $_SESSION['portal_since']);
+        $_SESSION['flash'] = ['message' => 'You were signed out after a period of inactivity. Please sign in again.', 'type' => 'error'];
+        return null;
+    }
+    $_SESSION['portal_last'] = $now;
     $u = db_one('SELECT u.*, a.name AS dealer_name, a.account_number AS dealer_number FROM dealer_users u JOIN accounts a ON a.id = u.account_id
         WHERE u.id = ? AND u.active = 1 AND a.is_dealer = 1', [$id]);
     if (!$u) {
@@ -91,8 +100,11 @@ function portal_login(string $email, string $password): array
     if ($u['must_change_password'] && $u['temp_password_expires_at'] && strtotime($u['temp_password_expires_at']) < time()) {
         throw new RuntimeException('That temporary password has expired. Use "Forgotten your password?" to get a new one.');
     }
-    session_regenerate_id(true);
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_regenerate_id(true);
+    }
     $_SESSION['portal_user_id'] = (int)$u['id'];
+    $_SESSION['portal_since'] = $_SESSION['portal_last'] = time();
     db_exec('UPDATE dealer_users SET failed_logins = 0, locked_until = NULL, last_login_at = NOW() WHERE id = ?', [$u['id']]);
     return $u;
 }
@@ -200,6 +212,83 @@ function portal_offer(array $check, int $productId): ?array
     return null;
 }
 
+/* ----------------------------------------------------------- Agreements --- */
+
+/*
+ * Dealers contract with us directly: they sign our master terms (a dealer MSA, sent from the CRM as for any
+ * dealer) before ordering, and every order they place has its own agreement with them, signed online
+ * through the normal e-signature (Contract Summary first where required) before we approve it.
+ */
+
+/** The dealer's signed master terms, or null. */
+function dealer_msa(int $dealerId): ?array
+{
+    return db_one("SELECT * FROM contracts WHERE account_id = ? AND kind = 'msa' AND status = 'signed' ORDER BY signed_at DESC LIMIT 1", [$dealerId]);
+}
+
+/** Master terms sent to the dealer and waiting to be signed, or null. */
+function dealer_msa_waiting(int $dealerId): ?array
+{
+    return db_one("SELECT * FROM contracts WHERE account_id = ? AND kind = 'msa' AND status = 'sent' ORDER BY id DESC LIMIT 1", [$dealerId]);
+}
+
+/** The agreement for a dealer order (or null). */
+function dealer_order_agreement(array $d): ?array
+{
+    return $d['contract_id'] ? db_one('SELECT * FROM contracts WHERE id = ?', [$d['contract_id']]) : null;
+}
+
+/** The order as a contract line: our product at the dealer's price, for their customer at the address. */
+function dealer_order_line(array $d): array
+{
+    $product = db_one('SELECT * FROM products WHERE id = ?', [$d['product_id']]) ?? throw new IntegrationException('The product on this order no longer exists.');
+    $address = $d['check_id'] ? (string)db_value('SELECT address_label FROM giacom_checks WHERE id = ?', [$d['check_id']]) : '';
+    return [
+        'product_id' => $product['id'], 'service_type' => $product['category'], 'quantity' => 1,
+        'description' => $product['name'] . ' for ' . $d['account_name'] . ($address !== '' ? ', ' . $address : ''),
+        'monthly_price' => (float)$product['dealer_price'], 'setup_fee' => (float)($product['dealer_setup_fee'] ?? 0), 'term_months' => (int)$product['term_months'],
+    ];
+}
+
+/**
+ * Create the order's agreement with the dealer (not their customer) and email it to the dealer user who
+ * placed the order to sign. Replaces an earlier one that wasn't signed. Returns the contract.
+ */
+function dealer_order_send_agreement(array $d): array
+{
+    if ($d['status'] !== 'submitted') {
+        throw new IntegrationException('Only an order waiting for approval needs an agreement.');
+    }
+    $old = dealer_order_agreement($d);
+    if ($old && $old['status'] === 'signed') {
+        throw new IntegrationException('The agreement for this order has already been signed.');
+    }
+    if ($old && $old['status'] === 'sent') {
+        return contract_send($old, true);
+    }
+    if (!$d['user_email']) {
+        throw new IntegrationException('The dealer user who placed this order has no email address.');
+    }
+    $dealer = db_one('SELECT * FROM accounts WHERE id = ?', [$d['dealer_id']]);
+    $line = dealer_order_line($d);
+    $contract = contract_generate($dealer, contract_templates_for($dealer, [$line]), "Order {$d['reference']}: " . $line['description'], 'services',
+        (string)$d['user_name'], (string)$d['user_email']);
+    db_exec('UPDATE dealer_orders SET contract_id = ?, last_error = NULL WHERE id = ?', [$contract['id'], $d['id']]);
+    return contract_send($contract);
+}
+
+/** Called when any contract is signed: if it's a dealer order's agreement, the order is ready to approve. */
+function dealer_order_agreement_signed(array $contract): void
+{
+    $d = db_one("SELECT id FROM dealer_orders WHERE contract_id = ? AND status = 'submitted'", [$contract['id']]);
+    if (!$d) {
+        return;
+    }
+    $d = dealer_order((int)$d['id']);
+    audit('update', "Dealer order {$d['reference']}: agreement {$contract['reference']} signed by {$contract['signer_name']}", 'accounts', (int)$d['account_id'], null, null, (int)$d['account_id']);
+    dealer_order_notify_team($d, 'The dealer has signed the agreement, so it\'s ready to approve.');
+}
+
 /* --------------------------------------------------------------- Orders --- */
 
 function dealer_order(int $id, ?int $dealerId = null): ?array
@@ -241,6 +330,16 @@ function dealer_orders_waiting(): int
     }
 }
 
+/** Does anyone use the portal yet? (Shows Dealer orders in the staff menu.) */
+function dealer_portal_in_use(): bool
+{
+    try {
+        return (bool)db_value('SELECT 1 FROM dealer_users LIMIT 1') || (bool)db_value('SELECT 1 FROM dealer_orders LIMIT 1');
+    } catch (PDOException) {
+        return false;
+    }
+}
+
 /** A dealer submits an order: saved for our approval, and the team is told. */
 function portal_submit_order(array $user, array $customer, array $check, array $offer, array $values): array
 {
@@ -253,12 +352,18 @@ function portal_submit_order(array $user, array $customer, array $check, array $
     audit('create', "Dealer order $ref submitted by {$user['name']} ({$user['dealer_name']}) for {$customer['name']}: {$offer['product']['name']}", 'accounts', (int)$customer['id'], null, null, (int)$customer['id']);
     log_activity((int)$customer['id'], 'task', "Dealer order $ref submitted on the partner portal: {$offer['product']['name']}", 'Approve it under Sales → Dealer orders');
     $order = dealer_order($id);
-    dealer_order_notify_team($order);
-    return $order;
+    try {
+        dealer_order_send_agreement($order);
+    } catch (Throwable $e) {
+        // The order stands: staff see why and can send the agreement from the order.
+        db_exec('UPDATE dealer_orders SET last_error = ? WHERE id = ?', ['The agreement couldn\'t be sent: ' . mb_substr($e->getMessage(), 0, 450), $id]);
+        dealer_order_notify_team(dealer_order($id), 'Its agreement couldn\'t be sent to the dealer: ' . $e->getMessage());
+    }
+    return dealer_order($id);
 }
 
 /** Tell the onboarding team (or the company inbox) there's a dealer order to approve. */
-function dealer_order_notify_team(array $d): void
+function dealer_order_notify_team(array $d, string $why = ''): void
 {
     if (!mail_configured()) {
         return;
@@ -269,6 +374,7 @@ function dealer_order_notify_team(array $d): void
         $to = [['email' => $ours, 'name' => company('name', config('app_name'))]];
     }
     $body = '<p><b>' . h($d['dealer_name']) . '</b> has submitted order <b>' . h($d['reference']) . '</b> for ' . h($d['account_name']) . ': ' . h((string)$d['product_name']) . '.</p>'
+        . ($why !== '' ? '<p>' . h($why) . '</p>' : '')
         . email_button(app_url() . '/' . url('dealer_orders', ['action' => 'view', 'id' => $d['id']]), 'Check and approve');
     foreach ($to as $t) {
         try {
@@ -301,6 +407,13 @@ function dealer_order_approve(array $d): array
 {
     if ($d['status'] !== 'submitted') {
         throw new IntegrationException('This order has already been ' . strtolower(DEALER_ORDER_STATUSES[$d['status']] ?? $d['status']) . '.');
+    }
+    if (!dealer_msa((int)$d['dealer_id'])) {
+        throw new IntegrationException("{$d['dealer_name']} hasn't signed their master terms yet.");
+    }
+    $agreement = dealer_order_agreement($d);
+    if (!$agreement || $agreement['status'] !== 'signed') {
+        throw new IntegrationException('The dealer hasn\'t signed the agreement for this order yet' . ($agreement ? " ({$agreement['reference']} is " . $agreement['status'] . ')' : '') . '.');
     }
     $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$d['check_id']]) ?? throw new IntegrationException('The availability check for this order is no longer there. Ask the dealer to check again.');
     $product = null;
@@ -344,12 +457,22 @@ function dealer_order_approve(array $d): array
     return ['order' => $d, 'note' => $note, 'giacom_order_id' => $giacomId];
 }
 
+/** An order that won't go ahead: its agreement, if not signed yet, can no longer be signed. */
+function dealer_order_cancel_agreement(array $d): void
+{
+    $agreement = dealer_order_agreement($d);
+    if ($agreement && in_array($agreement['status'], ['draft', 'sent', 'failed'], true)) {
+        contract_cancel($agreement);
+    }
+}
+
 function dealer_order_reject(array $d, string $reason): void
 {
     if ($d['status'] !== 'submitted') {
         throw new IntegrationException('Only an order waiting for approval can be turned down.');
     }
     db_exec("UPDATE dealer_orders SET status = 'rejected', decision_note = ?, decided_by = ?, decided_at = NOW() WHERE id = ?", [mb_substr($reason, 0, 500), current_user()['id'] ?? null, $d['id']]);
+    dealer_order_cancel_agreement($d);
     audit('update', "Dealer order {$d['reference']} not accepted: $reason", 'accounts', (int)$d['account_id'], null, null, (int)$d['account_id']);
     dealer_order_notify_dealer(dealer_order((int)$d['id']), "Order {$d['reference']} not accepted",
         '<p>We couldn\'t accept your order <b>' . h($d['reference']) . '</b> for ' . h($d['account_name']) . '.</p><p><b>Reason:</b> ' . nl2br(h($reason)) . '</p>');
@@ -357,31 +480,61 @@ function dealer_order_reject(array $d, string $reason): void
 
 /* ----------------------------------------------------------- The portal --- */
 
+/** Thrown instead of sending the page when the tests drive the portal (PORTAL_TESTING). */
+final class PortalExit extends Exception
+{
+    public function __construct(public readonly string $html = '', public readonly ?string $location = null)
+    {
+        parent::__construct('Portal response');
+    }
+}
+
+/** Send a page or a redirect, and stop. */
+function portal_exit(string $html, ?string $location = null): never
+{
+    if (defined('PORTAL_TESTING')) {
+        throw new PortalExit($html, $location);
+    }
+    if ($location !== null) {
+        redirect($location);
+    }
+    echo $html;
+    exit;
+}
+
 function portal_page(string $template, array $vars, string $title): never
 {
     ob_start();
-    render('portal/' . $template, $vars);
-    $content = ob_get_clean();
-    render('portal/layout', ['content' => $content, 'title' => $title, 'user' => $vars['user'] ?? portal_user()]);
-    exit;
+    try {
+        render('portal/' . $template, $vars);
+        $content = (string)ob_get_clean();
+    } catch (Throwable $e) {
+        ob_end_clean();
+        throw $e;
+    }
+    ob_start();
+    render('portal/layout', ['content' => $content, 'title' => $title, 'user' => array_key_exists('user', $vars) ? $vars['user'] : portal_user()]);
+    portal_exit((string)ob_get_clean());
 }
 
 function portal_redirect(string $go, array $params = []): never
 {
-    redirect(portal_url($go, $params));
+    portal_exit('', portal_url($go, $params));
 }
 
 /** The dealer portal (its subdomain, or portal.php). */
 function portal_dispatch(): never
 {
-    start_session();
+    if (!defined('PORTAL_TESTING')) {
+        start_session();
+    }
     $go = (string)($_GET['go'] ?? 'orders');
     $user = portal_user();
     $error = null;
 
     // Signing in, forgotten passwords and signing out work without being signed in.
     if ($go === 'logout') {
-        unset($_SESSION['portal_user_id']);
+        unset($_SESSION['portal_user_id'], $_SESSION['portal_last'], $_SESSION['portal_since']);
         portal_redirect('login');
     }
     if ($go === 'forgot') {
@@ -403,9 +556,11 @@ function portal_dispatch(): never
             verify_csrf();
             try {
                 portal_login((string)($_POST['email'] ?? ''), (string)($_POST['password'] ?? ''));
-                portal_redirect('orders');
             } catch (RuntimeException $e) {
                 $error = $e->getMessage();
+            }
+            if ($error === null) {
+                portal_redirect('orders');
             }
         }
         if ($user && $go === 'login' && !is_post()) {
@@ -503,6 +658,9 @@ function portal_dispatch(): never
             portal_page('result', ['user' => $user, 'check' => $check, 'customer' => $customer, 'offers' => portal_offers($check), 'result' => giacom_check_result($check)], 'Availability');
 
         case 'order_new':
+            if (!dealer_msa($dealerId)) {
+                portal_page('message', ['title' => 'Please sign our master terms first', 'message' => portal_msa_message($dealerId), 'sign' => dealer_msa_waiting($dealerId)], 'Master terms');
+            }
             [$check, $customer] = portal_check_for($dealerId, (int)($_REQUEST['check'] ?? 0));
             $offer = portal_offer($check, (int)($_REQUEST['product'] ?? 0)) ?? portal_not_found('That product isn\'t available at this address.');
             portal_order_form($user, $customer, $check, $offer);
@@ -512,11 +670,13 @@ function portal_dispatch(): never
             if (is_post() && ($_POST['action'] ?? '') === 'withdraw' && $d['status'] === 'submitted') {
                 verify_csrf();
                 db_exec("UPDATE dealer_orders SET status = 'withdrawn' WHERE id = ? AND status = 'submitted'", [$d['id']]);
+                dealer_order_cancel_agreement($d);
                 audit('update', "Dealer order {$d['reference']} withdrawn by {$user['name']}", 'accounts', (int)$d['account_id']);
                 flash('Order withdrawn.');
                 portal_redirect('order', ['id' => $d['id']]);
             }
-            portal_page('order_view', ['user' => $user, 'd' => $d, 'progress' => dealer_order_progress($d), 'v' => json_decode((string)$d['details'], true) ?: []], 'Order ' . $d['reference']);
+            portal_page('order_view', ['user' => $user, 'd' => $d, 'progress' => dealer_order_progress($d), 'v' => json_decode((string)$d['details'], true) ?: [],
+                'agreement' => dealer_order_agreement($d)], 'Order ' . $d['reference']);
 
         case 'orders':
         default:
@@ -526,9 +686,19 @@ function portal_dispatch(): never
     }
 }
 
+/** Why a dealer can't order yet, and what to do. */
+function portal_msa_message(int $dealerId): string
+{
+    return dealer_msa_waiting($dealerId)
+        ? 'Before placing orders, your master terms need to be signed. We\'ve emailed them to you; you can also review and sign them now.'
+        : 'Before placing orders, your master terms need to be signed. Please contact us and we\'ll send them to you to sign online. You can still check availability in the meantime.';
+}
+
 function portal_not_found(string $message): never
 {
-    http_response_code(404);
+    if (!headers_sent()) {
+        http_response_code(404);
+    }
     portal_page('message', ['title' => 'Not found', 'message' => $message], 'Not found');
 }
 
@@ -561,8 +731,8 @@ function portal_order_form(array $user, array $customer, array $check, array $of
         'order_type' => $postedType, 'cli' => (string)$check['cli'], 'site_visit_reason' => $visit,
         'crd' => max($lead, date('Y-m-d', strtotime('+1 weekday'))), 'appointment' => $appointments ? giacom_appointment_key($appointments[0]) : '',
         'force_new_ont' => giacom_is_fttp($sp) ? giacom_default_ont($postedType) : '',
-        'title' => $title, 'forename' => $forename, 'surname' => $surname, 'telephone' => $phone, 'email' => (string)($customer['contact_email'] ?? $customer['email']),
-        'site_title' => $title, 'site_forename' => $forename, 'site_surname' => $surname, 'site_telephone' => $phone, 'site_email' => (string)($customer['contact_email'] ?? ''),
+        'title' => $title, 'forename' => $forename, 'surname' => $surname, 'telephone' => $phone, 'email' => (string)(($customer['contact_email'] ?? '') ?: ($customer['email'] ?? '')),
+        'site_title' => $title, 'site_forename' => $forename, 'site_surname' => $surname, 'site_telephone' => $phone, 'site_email' => (string)(($customer['contact_email'] ?? '') ?: ($customer['email'] ?? '')),
         'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '', 'client_ref' => '',
     ];
     $errors = [];
@@ -605,18 +775,138 @@ function portal_order_form(array $user, array $customer, array $check, array $of
                     $errors[$k] = 'Enter a phone number.';
                 }
             }
+            if ($values['email'] === '') {
+                $errors['email'] = 'Enter the customer\'s email address.';
+            }
             foreach (['email', 'site_email'] as $k) {
-                if ($values[$k] !== '' && !filter_var($values[$k], FILTER_VALIDATE_EMAIL)) {
+                if ($values[$k] !== '' && !isset($errors[$k]) && !filter_var($values[$k], FILTER_VALIDATE_EMAIL)) {
                     $errors[$k] = 'That isn\'t a valid email address.';
                 }
             }
+            if (!$errors && !dealer_msa((int)$user['account_id'])) {
+                $errors['_'] = portal_msa_message((int)$user['account_id']);
+            }
             if (!$errors) {
                 $d = portal_submit_order($user, $customer, $check, $offer, $values);
-                flash("Order {$d['reference']} sent. We'll check it and let you know when it's placed.");
+                flash($d['contract_id'] ? "Order {$d['reference']} received. We've emailed you its agreement: once it's signed we'll check the order and let you know when it's placed."
+                    : "Order {$d['reference']} received. We'll email you its agreement to sign shortly.");
                 portal_redirect('order', ['id' => $d['id']]);
             }
         }
     }
     $slotsError = $slots['error'] ? portal_clean($slots['error']) : null;
     portal_page('order_form', compact('user', 'customer', 'check', 'offer', 'result', 'values', 'errors', 'appointments', 'lead', 'minVisit', 'slotsError'), 'Order ' . $offer['product']['name']);
+}
+
+/** A labelled input for portal forms. */
+function portal_field(array $values, array $errors, string $name, string $label, string $type = 'text', string $help = '', bool $required = false): string
+{
+    $err = $errors[$name] ?? null;
+    return '<div class="field ' . ($err ? 'has-error' : '') . '"><label for="p_' . $name . '">' . h($label) . ($required ? ' <span class="req">*</span>' : '') . '</label>'
+        . '<input id="p_' . $name . '" type="' . $type . '" name="' . $name . '" value="' . h((string)($values[$name] ?? '')) . '"' . ($required ? ' required' : '') . ' autocomplete="off">'
+        . ($err ? '<div class="error">' . h($err) . '</div>' : ($help ? '<div class="help">' . h($help) . '</div>' : '')) . '</div>';
+}
+
+/** The portal's name, e.g. "Netcomm partner portal". */
+function portal_name(): string
+{
+    return company('name', config('app_name')) . ' partner portal';
+}
+
+/* ---------------------------------------------------------- Staff pages --- */
+
+/** Staff: dealer orders to approve, one order (approve / turn down / agreement), and dealers' portal users. */
+function dealer_orders_controller(): void
+{
+    $action = query('action', 'list');
+    if ($action === 'users') {
+        require_permission('customers.edit');
+        verify_csrf();
+        $dealer = db_one('SELECT * FROM accounts WHERE id = ? AND is_dealer = 1', [query_int('account_id') ?? 0]) ?? not_found('Dealer not found.');
+        $back = url('accounts', ['action' => 'view', 'id' => $dealer['id'], 'tab' => 'dealer']) . '#portal-users';
+        $do = query('do');
+        if ($do === 'add') {
+            $name = trim((string)($_POST['name'] ?? ''));
+            $email = strtolower(trim((string)($_POST['email'] ?? '')));
+            if ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                flash('Enter a name and a valid email address.', 'error');
+                redirect($back);
+            }
+            if ($other = db_one('SELECT u.id, a.name FROM dealer_users u JOIN accounts a ON a.id = u.account_id WHERE u.email = ?', [$email])) {
+                flash("$email already has portal access (for {$other['name']}).", 'error');
+                redirect($back);
+            }
+            db_exec('INSERT INTO dealer_users (account_id, name, email) VALUES (?, ?, ?)', [$dealer['id'], mb_substr($name, 0, 150), $email]);
+            $uid = (int)db()->lastInsertId();
+            audit('create', "Partner portal access given to $name <$email> for {$dealer['name']}", 'accounts', (int)$dealer['id'], null, null, (int)$dealer['id']);
+            $r = portal_send_password($uid, true);
+            flash($r['emailed'] ? "Portal access added. $name has been emailed a temporary password." : "Portal access added, but the welcome email couldn't be sent: {$r['error']}", $r['emailed'] ? 'success' : 'error');
+            redirect($back);
+        }
+        $u = db_one('SELECT * FROM dealer_users WHERE id = ? AND account_id = ?', [query_int('user_id') ?? 0, $dealer['id']]) ?? not_found('Portal user not found.');
+        if ($do === 'reset') {
+            $r = portal_send_password((int)$u['id'], $u['last_login_at'] === null);
+            audit('update', "Partner portal password reset for {$u['name']} <{$u['email']}>", 'accounts', (int)$dealer['id'], null, null, (int)$dealer['id']);
+            flash($r['emailed'] ? "A new temporary password has been emailed to {$u['email']}." : "The email couldn't be sent: {$r['error']}", $r['emailed'] ? 'success' : 'error');
+        } elseif ($do === 'toggle') {
+            db_exec('UPDATE dealer_users SET active = ? WHERE id = ?', [$u['active'] ? 0 : 1, $u['id']]);
+            audit('update', 'Partner portal access ' . ($u['active'] ? 'removed from' : 'restored for') . " {$u['name']} <{$u['email']}>", 'accounts', (int)$dealer['id'], null, null, (int)$dealer['id']);
+            flash($u['active'] ? "{$u['name']} can no longer sign in to the portal." : "{$u['name']} can sign in to the portal again.");
+        }
+        redirect($back);
+    }
+
+    require_permission('orders.check');
+    if ($action === 'view') {
+        $d = dealer_order(query_int('id') ?? 0) ?? not_found('Dealer order not found.');
+        if (is_post()) {
+            verify_csrf();
+            require_permission('orders.place');
+            try {
+                switch (query('do')) {
+                    case 'approve':
+                        $r = dealer_order_approve($d);
+                        flash("Order {$d['reference']} approved and placed." . ($r['note'] !== '' ? ' ' . $r['note'] : ''));
+                        break;
+                    case 'reject':
+                        $reason = trim((string)($_POST['reason'] ?? ''));
+                        if ($reason === '') {
+                            throw new IntegrationException('Give the dealer a reason.');
+                        }
+                        dealer_order_reject($d, $reason);
+                        flash("Order {$d['reference']} turned down. The dealer has been told why.");
+                        break;
+                    case 'agreement':
+                        $c = dealer_order_send_agreement($d);
+                        flash("Agreement {$c['reference']} emailed to {$c['signer_email']} to sign.");
+                        break;
+                }
+            } catch (IntegrationException $e) {
+                flash($e->getMessage(), 'error');
+            }
+            redirect(url('dealer_orders', ['action' => 'view', 'id' => $d['id']]));
+        }
+        $check = $d['check_id'] ? db_one('SELECT * FROM giacom_checks WHERE id = ?', [$d['check_id']]) : null;
+        page('dealer_order', ['d' => $d, 'v' => json_decode((string)$d['details'], true) ?: [], 'agreement' => dealer_order_agreement($d),
+            'msa' => dealer_msa((int)$d['dealer_id']), 'check' => $check, 'progress' => dealer_order_progress($d)], 'Dealer order ' . $d['reference']);
+        return;
+    }
+    $show = query('show', 'waiting');
+    $where = $show === 'all' ? '1=1' : "d.status = 'submitted'";
+    $orders = db_all("SELECT d.*, a.name AS account_name, dl.name AS dealer_name, p.name AS product_name, c.status AS agreement_status, c.reference AS agreement_reference
+        FROM dealer_orders d JOIN accounts a ON a.id = d.account_id JOIN accounts dl ON dl.id = d.dealer_id LEFT JOIN products p ON p.id = d.product_id
+        LEFT JOIN contracts c ON c.id = d.contract_id WHERE $where ORDER BY d.id DESC LIMIT 300");
+    page('dealer_orders', ['orders' => $orders, 'show' => $show], 'Dealer orders');
+}
+
+/** For a dealer's page: their portal users, master terms and recent orders. */
+function dealer_portal_summary(int $dealerId): array
+{
+    return [
+        'users' => db_all('SELECT * FROM dealer_users WHERE account_id = ? ORDER BY active DESC, name', [$dealerId]),
+        'msa' => dealer_msa($dealerId),
+        'msaWaiting' => dealer_msa_waiting($dealerId),
+        'orders' => db_all('SELECT d.*, a.name AS account_name, p.name AS product_name FROM dealer_orders d JOIN accounts a ON a.id = d.account_id
+            LEFT JOIN products p ON p.id = d.product_id WHERE d.dealer_id = ? ORDER BY d.id DESC LIMIT 10', [$dealerId]),
+    ];
 }

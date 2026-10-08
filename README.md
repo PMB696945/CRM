@@ -488,6 +488,21 @@ Emails go out in batches (50 by default; see Settings → Marketing) while the p
 
 **Service alerts through Mailchimp:** Mailchimp's rules don't allow service messages to be sent as marketing campaigns. Its paid **Transactional** add-on (formerly Mandrill) is designed for them. To use it for all email the CRM sends, choose *Mailchimp Transactional* under Settings → Email and paste its API key.
 
+## Dealer (partner) portal
+
+Dealers can sign in to their own portal to check broadband availability for their customers and send orders for you to approve. **Dealers never see the wholesale supplier's name**: products appear as your products at the dealer's price, orders by your reference (`DO-000123`), and any supplier message is reworded first. The portal's pages, emails and script are tested for this.
+
+**Setting it up**
+1. In cPanel → *Domains*, create a subdomain (e.g. `partners.yourcompany.co.uk`) with the same document root as the CRM (its `public` folder), then enter it under **Settings → Dealer portal**. Without a subdomain the portal works at `…/portal.php` on the CRM's address. The staff CRM's IP allow-list doesn't apply to the portal.
+2. On each broadband product dealers can order (**Products & tariffs**), fill in the **Dealer price**, optional **Dealer setup fee**, and **Supplier product IDs**: the supplier's product IDs it covers, as shown on an availability check. Only products with both are offered.
+3. On the dealer's page (**Dealer** tab → *Partner portal*), give their staff access. Each is emailed a temporary password and chooses their own at first sign-in. You can send a new password or remove access there. Five wrong passwords lock the account for 15 minutes.
+
+**Contracts.** The dealer contracts with you directly, as any customer would:
+- They must have signed their **master terms** (a dealer MSA, sent from *New contract / MSA* on their page) before they can send orders. They can sign in and check availability before that.
+- Every order has its **own agreement with the dealer** (Contract Summary first where required), made from your contract templates at the dealer price and emailed straight away to the dealer user who placed it. They sign it online, from the email or from the order on the portal.
+
+**Orders.** Dealers add their own customers (created under the dealer, billed via the dealer), check an address, choose a product, the engineer visit and the install date, and send the order. It appears under **Sales → Dealer orders**. Once the agreement is signed the team is emailed. **Approve and place order** places it with the supplier exactly like a staff broadband order (login made from the settings under Admin → Giacom, the chosen appointment booked if it's still free), and the dealer is emailed. **Turn down** emails the dealer your reason. Dealers can withdraw an order until it's approved. Turning an order down or withdrawing it cancels its unsigned agreement.
+
 ## Orders and onboarding
 
 Accepting a quote (online or recorded by staff) creates an **order** (ORD-000001…) and emails the **onboarding team**: the *Onboarding* group under Admin → Ticket groups (change which group in Settings → Orders). Add the people who process orders to that group; if it has a shared email address, alerts go there instead.

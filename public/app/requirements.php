@@ -60,8 +60,9 @@ function crm_error_page($message, $file, $line)
         $isAdmin = true;
     }
     if (!$isAdmin) {
-        crm_fail_page('Something went wrong', '<p>Sorry, the CRM hit an unexpected error. Please try again in a moment.</p>'
-            . '<p>If it keeps happening, give your administrator this reference: <b>' . $ref . '</b></p>');
+        // Neutral wording: dealers on the portal see this too.
+        crm_fail_page('Something went wrong', '<p>Sorry, there was an unexpected error. Please try again in a moment.</p>'
+            . '<p>If it keeps happening, contact us and quote this reference: <b>' . $ref . '</b></p>');
     }
     crm_fail_page('Something went wrong', '<p>The CRM hit an error it couldn\'t recover from:</p>'
         . '<pre style="white-space:pre-wrap;background:#f2f4f7;padding:1rem;border-radius:8px">' . htmlspecialchars($message)

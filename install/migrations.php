@@ -984,7 +984,8 @@ return [
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
     30 => function (): void {
-        // Dealer portal: dealer users who sign in to a separate site, and the orders they submit for approval.
+        // Dealer portal: dealer users who sign in to a separate site, and the orders they submit for approval
+        // (each with its own agreement, signed by the dealer).
         db()->exec("CREATE TABLE IF NOT EXISTS dealer_users (
             id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             account_id               INT UNSIGNED NOT NULL,
@@ -1013,6 +1014,7 @@ return [
             details           TEXT NULL,
             status            VARCHAR(20) NOT NULL DEFAULT 'submitted',
             giacom_order_id   INT UNSIGNED NULL,
+            contract_id       INT UNSIGNED NULL,
             decided_by        INT UNSIGNED NULL,
             decided_at        DATETIME NULL,
             decision_note     VARCHAR(500) NULL,
@@ -1027,6 +1029,12 @@ return [
             if (!column_exists('products', $col)) {
                 db()->exec("ALTER TABLE products ADD COLUMN $col $def");
             }
+        }
+    },
+    31 => function (): void {
+        // Dealer orders link to their agreement (for databases that had the portal tables before this column).
+        if (!column_exists('dealer_orders', 'contract_id')) {
+            db()->exec('ALTER TABLE dealer_orders ADD COLUMN contract_id INT UNSIGNED NULL AFTER giacom_order_id');
         }
     },
 ];

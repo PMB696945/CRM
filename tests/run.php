@@ -2158,10 +2158,280 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     eq('Placed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$id]), 'order open again');
     eq('pending', db_value('SELECT status FROM services WHERE id = ?', [$order['service_id']]), 'service back to pending');
 });
+
+
+echo "Dealer portal\n";
+define('PORTAL_TESTING', true);
+/** Drive the portal like a browser: returns [html, redirect location]. */
+function portal_req(string $go, array $get = [], ?array $post = null): array
+{
+    $_GET = ['go' => $go] + $get;
+    $_REQUEST = $_GET + (array)$post;
+    $_POST = $post === null ? [] : $post + ['_csrf' => csrf_token()];
+    $_SERVER['REQUEST_METHOD'] = $post === null ? 'GET' : 'POST';
+    try {
+        portal_dispatch();
+    } catch (PortalExit $e) {
+        return [$e->html, $e->location];
+    } finally {
+        $_GET = $_POST = $_REQUEST = [];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+    }
+}
+$portal = ['html' => []];
+/** Everything a dealer sees: never the wholesale supplier's name. */
+function portal_seen(string $html, string $what): void
+{
+    global $portal;
+    $portal['html'][$what] = $html;
+    ok(!preg_match('/giacom|cloud\s*market/i', $html), "the supplier isn't named on the portal ($what): " . (preg_match('/.{0,80}(giacom|cloud\s*market).{0,80}/is', $html, $m) ? $m[0] : ''));
+}
+
+test('portal: dealer users sign in with a temporary password, are locked out after repeated failures, and choose their own', function () use (&$portal, &$g) {
+    set_setting('giacom_realm', 'isp.example');
+    $portal['dealer'] = create('accounts', ['name' => 'Northern Comms Ltd', 'type' => 'business', 'status' => 'active', 'is_dealer' => '1', 'main_name' => 'Dee Dealer', 'main_email' => 'dee@northern.example', 'billing_same' => '1']);
+    $portal['other'] = create('accounts', ['name' => 'Southern Voice Ltd', 'type' => 'business', 'status' => 'active', 'is_dealer' => '1', 'billing_same' => '1']);
+    db_exec('INSERT INTO dealer_users (account_id, name, email) VALUES (?, ?, ?)', [$portal['dealer'], 'Dee Dealer', 'dee@northern.example']);
+    $portal['user'] = (int)db()->lastInsertId();
+    db_exec('INSERT INTO dealer_users (account_id, name, email, password_hash, must_change_password) VALUES (?, ?, ?, ?, 0)',
+        [$portal['other'], 'Sam South', 'sam@southern.example', password_hash('Southern-pass-99', PASSWORD_DEFAULT)]);
+    $portal['otherUser'] = (int)db()->lastInsertId();
+    $before = count(sent_mails());
+    ok(portal_send_password($portal['user'], true)['emailed']);
+    usleep(300000);
+    $all = sent_mails();
+    eq($before + 1, count($all));
+    $raw = end($all);
+    $body = mail_body($raw);
+    ok(str_contains($raw, 'X-Rcpt: dee@northern.example') && str_contains($body, 'partner portal') && str_contains($body, 'portal.php?go=login'), 'welcome email with the portal link');
+    ok(!preg_match('/giacom/i', $raw . $body), 'the supplier is not named in the email');
+    preg_match('/Temporary password: ([A-Za-z0-9!@#$%&*?\-]+)/', strip_tags($body), $m);
+    $temp = $m[1] ?? '';
+    ok($temp !== '', 'temporary password in the email');
+
+    [$html] = portal_req('orders');
+    ok(str_contains($html, 'Partner sign in'), 'signed out: the sign-in page');
+    portal_seen($html, 'login');
+    [$html] = portal_req('forgot');
+    portal_seen($html, 'forgot');
+    for ($i = 0; $i < PORTAL_LOCK_AFTER; $i++) {
+        [$html] = portal_req('login', [], ['email' => 'dee@northern.example', 'password' => 'wrong-' . $i]);
+        ok(str_contains($html, 'don&#039;t match') || str_contains($html, "don't match"), 'wrong password refused');
+    }
+    [$html] = portal_req('login', [], ['email' => 'dee@northern.example', 'password' => $temp]);
+    ok(str_contains($html, 'Too many attempts'), 'locked after ' . PORTAL_LOCK_AFTER . ' failures, even with the right password');
+    db_exec('UPDATE dealer_users SET locked_until = NULL WHERE id = ?', [$portal['user']]);
+    [$html, $loc] = portal_req('login', [], ['email' => 'DEE@northern.example ', 'password' => $temp]);
+    eq('index.php?go=orders', $loc, preg_match('/flash-error[^>]*>([^<]*)/', $html, $em) ? $em[1] : 'temp=' . $temp);
+    [$html] = portal_req('customers');
+    ok(str_contains($html, 'Choose your password'), 'a temporary password must be changed first');
+    portal_seen($html, 'password');
+    [$html] = portal_req('password', [], ['new_password' => 'short', 'confirm_password' => 'short']);
+    ok(str_contains($html, 'at least 10'));
+    [, $loc] = portal_req('password', [], ['new_password' => 'Northern-pass-2026', 'confirm_password' => 'Northern-pass-2026']);
+    eq('index.php?go=orders', $loc);
+    ok(password_verify('Northern-pass-2026', db_value('SELECT password_hash FROM dealer_users WHERE id = ?', [$portal['user']])));
+    // Access removed: signed out on the next page.
+    db_exec('UPDATE dealer_users SET active = 0 WHERE id = ?', [$portal['user']]);
+    [$html] = portal_req('orders');
+    ok(str_contains($html, 'Partner sign in'), 'disabled users are signed out');
+    db_exec('UPDATE dealer_users SET active = 1 WHERE id = ?', [$portal['user']]);
+    portal_req('login', [], ['email' => 'dee@northern.example', 'password' => 'Northern-pass-2026']);
+    eq($portal['user'], (int)$_SESSION['portal_user_id']);
+});
+
+test('portal: dealers add customers and check availability; only products with a dealer price are offered', function () use (&$portal) {
+    $portal['fttc'] = create('products', ['sku' => 'BB-FTTC80', 'name' => 'Business Fibre 80', 'category' => 'broadband', 'monthly_price' => '45', 'term_months' => '24',
+        'dealer_price' => '29.50', 'dealer_setup_fee' => '50', 'supplier_product_ids' => '34350, 99999', 'active' => '1']);
+    create('products', ['sku' => 'BB-HIDDEN', 'name' => 'Staff-only broadband', 'category' => 'broadband', 'monthly_price' => '45', 'term_months' => '24', 'supplier_product_ids' => '59310', 'active' => '1']);
+    [$html] = portal_req('customers');
+    ok(str_contains($html, 'No customers yet'));
+    portal_seen($html, 'customers');
+    [$html] = portal_req('customer_new', [], ['name' => '', 'type' => 'business', 'contact_name' => '', 'email' => 'x', 'postcode' => 'nope']);
+    ok(str_contains($html, 'Enter the customer') && str_contains($html, 'full UK postcode'));
+    portal_seen($html, 'customer form');
+    [, $loc] = portal_req('customer_new', [], ['name' => 'Harbour Café', 'type' => 'business', 'company_number' => '', 'contact_name' => 'Hal Harbour', 'email' => 'hal@harbour.example',
+        'phone' => '0161 496 0123', 'address' => '10 Canal Street', 'address2' => '', 'city' => 'Manchester', 'postcode' => 'm1 3he']);
+    $portal['customer'] = (int)db_value("SELECT id FROM accounts WHERE name = 'Harbour Café'");
+    eq("index.php?go=check&customer={$portal['customer']}", $loc);
+    $c = db_one('SELECT * FROM accounts WHERE id = ?', [$portal['customer']]);
+    eq([(int)$portal['dealer'], 'billed_via_dealer', 'M1 3HE'], [(int)$c['parent_id'], $c['parent_relationship'], $c['postcode']]);
+    ok(str_starts_with((string)$c['account_number'], 'ACC-'), 'a normal customer number');
+    eq('Hal Harbour', db_value('SELECT name FROM contacts WHERE id = ?', [$c['main_contact_id']]));
+
+    [$html] = portal_req('check', ['customer' => $portal['customer']]);
+    ok(str_contains($html, 'Harbour Café'));
+    portal_seen($html, 'check');
+    [$html] = portal_req('check', [], ['customer' => $portal['customer'], 'postcode' => 'M1 3HE', 'building' => '']);
+    ok(str_contains($html, 'Choose the address') && str_contains($html, '12 Canal Street'));
+    portal_seen($html, 'address list');
+    $address = giacom_address_search('M1 3HE')[1];
+    [, $loc] = portal_req('check', [], ['customer' => $portal['customer'], 'postcode' => 'M1 3HE', 'building' => '', 'address' => json_encode($address)]);
+    ok((bool)preg_match('/go=result&check=(\d+)/', (string)$loc, $m), (string)$loc);
+    $portal['check'] = (int)$m[1];
+    eq($portal['customer'], (int)db_value('SELECT account_id FROM giacom_checks WHERE id = ?', [$portal['check']]));
+    [$html] = portal_req('result', ['check' => $portal['check']]);
+    ok(str_contains($html, 'Business Fibre 80') && str_contains($html, '£29.50') && str_contains($html, '£50.00'), 'our product at the dealer price: '
+        . json_encode(db_one('SELECT active, dealer_price, dealer_setup_fee, supplier_product_ids FROM products WHERE id = ?', [$portal['fttc']])) . ' ' . substr(strip_tags($html), -600));
+    ok(!str_contains($html, 'Staff-only broadband'), 'products without a dealer price are not offered');
+    ok(!str_contains($html, 'Business FTTC 80/20'), "the supplier's own product names aren't shown");
+    portal_seen($html, 'availability');
+    eq([(int)$portal['fttc']], array_map(fn($o) => (int)$o['product']['id'], portal_offers(db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']]))));
+    eq('Sorry: our supplier couldn\'t book that.', portal_clean('Sorry: Giacom couldn\'t book that.'));
+    eq('our supplier\'s systems are busy', portal_clean('Giacom\'s systems are busy'));
+    eq('Cannot provision', portal_clean('Giacom said: Cannot provision'));
+});
+
+test('portal: dealers see only their own customers, checks and orders', function () use (&$portal) {
+    $mine = $_SESSION['portal_user_id'];
+    $_SESSION['portal_user_id'] = $portal['otherUser'];
+    [$html] = portal_req('customers');
+    ok(!str_contains($html, 'Harbour Café'), "another dealer's customers aren't listed");
+    [$html] = portal_req('result', ['check' => $portal['check']]);
+    ok(str_contains($html, 'wasn&#039;t found') || str_contains($html, "wasn't found"), "another dealer's check can't be opened");
+    [$html] = portal_req('check', ['customer' => $portal['customer']]);
+    ok(!str_contains($html, 'Harbour Café'), "another dealer's customer can't be chosen");
+    [, $loc] = portal_req('check', [], ['customer' => $portal['customer'], 'postcode' => 'M1 3HE', 'building' => '', 'address' => json_encode(giacom_address_search('M1 3HE')[0])]);
+    eq(null, $loc, "can't check for another dealer's customer");
+    $_SESSION['portal_user_id'] = $mine;
+});
+
+test('portal: orders need signed master terms, and each has its own agreement with the dealer, signed before approval', function () use (&$portal) {
+    $offer = ['check' => $portal['check'], 'product' => $portal['fttc']];
+    [$html] = portal_req('orders');
+    ok(str_contains($html, 'master terms haven'), 'reminder that the master terms need signing');
+    [$html] = portal_req('order_new', $offer);
+    ok(str_contains($html, 'Please sign our master terms first'), 'no ordering before the master terms are signed');
+    portal_seen($html, 'master terms');
+    // Master terms sent but not signed: the dealer can sign from the portal.
+    db_exec("INSERT INTO contracts (account_id, kind, title, status, signer_name, signer_email, sign_token, reference) VALUES (?, 'msa', 'Dealer agreement', 'sent', 'Dee Dealer', 'dee@northern.example', ?, 'CON-MSA1')",
+        [$portal['dealer'], str_repeat('ab', 24)]);
+    [$html] = portal_req('order_new', $offer);
+    ok(str_contains($html, 'sign.php?t=' . str_repeat('ab', 24)), 'link to sign the master terms');
+    db_exec("UPDATE contracts SET status = 'signed', signed_at = NOW() WHERE reference = 'CON-MSA1'");
+
+    [$html] = portal_req('order_new', $offer);
+    ok(str_contains($html, 'Order Business Fibre 80') && str_contains($html, 'hal@harbour.example'), 'the order form, filled in from the customer');
+    ok(str_contains($html, 'data-min-provide') && str_contains($html, 'data-appointment-date'), 'same date and visit behaviour as the staff form');
+    portal_seen($html, 'order form');
+    $form = ['order_type' => 'provide', 'cli' => '', 'site_visit_reason' => 'PREMIUM', 'crd' => '', 'appointment' => '', 'force_new_ont' => '', 'client_ref' => 'NC-77',
+        'title' => '', 'forename' => 'Hal', 'surname' => 'Harbour', 'telephone' => '0161 496 0123', 'email' => '',
+        'site_title' => '', 'site_forename' => 'Hal', 'site_surname' => 'Harbour', 'site_telephone' => '0161 496 0123', 'site_email' => '',
+        'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => ''];
+    [$html] = portal_req('order_new', $offer, $form);
+    ok(str_contains($html, 'Enter the customer&#039;s email') || str_contains($html, "Enter the customer's email"), 'customer email required');
+    ok(str_contains($html, 'Choose a date'), 'a date is needed');
+    $slots = giacom_appointments(db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']]), portal_offer(db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']]), $portal['fttc'])['supplier'], 'PREMIUM', 'provide')['appointments'];
+    ok((bool)$slots, 'dates offered');
+    $form = ['email' => 'hal@harbour.example', 'crd' => $slots[0]['date'], 'appointment' => giacom_appointment_key($slots[0])] + $form;
+    $before = count(sent_mails());
+    [, $loc] = portal_req('order_new', $offer, $form);
+    ok((bool)preg_match('/go=order&id=(\d+)/', (string)$loc, $m), 'order sent: ' . $loc);
+    $d = dealer_order((int)$m[1]);
+    $portal['order'] = (int)$d['id'];
+    eq(['submitted', (int)$portal['dealer'], $portal['customer'], (int)$portal['fttc'], '34350'], [$d['status'], (int)$d['dealer_id'], (int)$d['account_id'], (int)$d['product_id'], $d['supplier_product']]);
+    ok(str_starts_with($d['reference'], 'DO-'));
+    // Its agreement: with the dealer (not their customer), signed by the dealer user, emailed to sign.
+    $c = dealer_order_agreement($d);
+    eq([(int)$portal['dealer'], 'services', 'sent', 'Dee Dealer', 'dee@northern.example'], [(int)$c['account_id'], $c['kind'], $c['status'], $c['signer_name'], $c['signer_email']]);
+    ok(str_contains($c['title'], $d['reference']) && str_contains($c['title'], 'Harbour Café'), 'agreement for this order: ' . $c['title']);
+    ok((bool)contract_summary_document($c), 'with a Contract Summary first, as for any customer');
+    usleep(300000);
+    $mails = array_slice(sent_mails(), $before);
+    $toDealer = array_values(array_filter($mails, fn($r) => str_contains($r, 'X-Rcpt: dee@northern.example')));
+    ok(count($toDealer) === 1 && str_contains(mail_body($toDealer[0]), 'Review and sign'), 'the dealer is emailed the agreement to sign');
+    ok(!preg_match('/giacom/i', $toDealer[0] . mail_body($toDealer[0])), 'the agreement email does not name the supplier');
+    [$html] = portal_req('order', ['id' => $portal['order']]);
+    ok(str_contains($html, 'Awaiting approval') && str_contains($html, 'Review and sign') && str_contains($html, esign_url($c)), 'the order page asks for the agreement to be signed');
+    portal_seen($html, 'order (waiting)');
+    [$html] = portal_req('orders');
+    ok(str_contains($html, $d['reference']) && str_contains($html, 'Agreement to sign'));
+    portal_seen($html, 'orders');
+
+    // Staff can't approve until it's signed.
+    try { dealer_order_approve($d); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), "hasn't signed the agreement"), $e->getMessage()); }
+    ob_start(); $_GET = ['action' => 'view', 'id' => (string)$portal['order']]; dealer_orders_controller(); $staff = ob_get_clean(); $_GET = [];
+    ok(str_contains($staff, 'Approve and place order') && str_contains($staff, 'disabled'), 'approve is disabled until signed');
+    $before = count(sent_mails());
+    contract_mark_signed($c, null, 'online');
+    usleep(300000);
+    ok((bool)array_filter(array_slice(sent_mails(), $before), fn($r) => str_contains(mail_body($r), 'ready to approve')), 'the team is told when the dealer has signed');
+
+    $before = count(sent_mails());
+    $r = dealer_order_approve(dealer_order($portal['order']));
+    $d = dealer_order($portal['order']);
+    eq('placed', $d['status']);
+    $go = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$d['giacom_order_id']]);
+    $sent = g_state()['last']['provide'];
+    ok(str_contains($sent['order']['client-ref'], $d['reference']) && str_contains($sent['order']['client-ref'], 'NC-77'), 'our reference and the dealer\'s go with the order');
+    eq(['Hal', 'hal@harbour.example', '01614960123'], [$sent['customer']['forename'], $sent['customer']['email'], $sent['customer']['telephone']]);
+    ok(str_ends_with($sent['order']['username'], '@isp.example'), 'broadband login made from the account settings');
+    eq('PREMIUM', $sent['order']['attributes']['site-visit-reason']);
+    eq((int)$portal['fttc'], (int)db_value('SELECT product_id FROM services WHERE id = ?', [$go['service_id']]), 'the pending service is our product');
+    eq($slots[0]['date'], $go['crd'], 'the chosen appointment was booked');
+    usleep(300000);
+    $accepted = array_values(array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'X-Rcpt: dee@northern.example')));
+    ok(count($accepted) === 1 && str_contains(mail_body($accepted[0]), 'accepted and placed'), 'the dealer is told');
+    ok(!preg_match('/giacom|700\d{3}/i', $accepted[0] . mail_body($accepted[0])), "no supplier name or supplier order number in the dealer's email");
+    [$html] = portal_req('order', ['id' => $portal['order']]);
+    ok(str_contains($html, 'In progress') && str_contains($html, 'Install'), 'progress shown');
+    ok(!str_contains($html, (string)$go['giacom_order_id']), "the supplier's order number isn't shown");
+    portal_seen($html, 'order (placed)');
+    try { dealer_order_approve($d); throw new Exception('expected failure'); } catch (IntegrationException) {}
+});
+
+test('portal: turning an order down or withdrawing it cancels its unsigned agreement', function () use (&$portal) {
+    $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']]);
+    $user = db_one('SELECT u.*, a.name AS dealer_name FROM dealer_users u JOIN accounts a ON a.id = u.account_id WHERE u.id = ?', [$portal['user']]);
+    $customer = portal_customer((int)$portal['dealer'], $portal['customer']);
+    $values = json_decode((string)dealer_order($portal['order'])['details'], true);
+    $d = portal_submit_order($user, $customer, $check, portal_offer($check, (int)$portal['fttc']), $values);
+    $before = count(sent_mails());
+    dealer_order_reject($d, 'Customer is already with us');
+    $d = dealer_order((int)$d['id']);
+    eq(['rejected', 'Customer is already with us'], [$d['status'], $d['decision_note']]);
+    eq('cancelled', dealer_order_agreement($d)['status'], 'its agreement can no longer be signed');
+    usleep(300000);
+    ok((bool)array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains(mail_body($m), 'Customer is already with us')), 'the dealer is told why');
+    [$html] = portal_req('order', ['id' => $d['id']]);
+    ok(str_contains($html, 'Not accepted') && str_contains($html, 'Customer is already with us'));
+    portal_seen($html, 'order (turned down)');
+
+    $d = portal_submit_order($user, $customer, $check, portal_offer($check, (int)$portal['fttc']), $values);
+    [, $loc] = portal_req('order', ['id' => $d['id']], ['action' => 'withdraw']);
+    eq('withdrawn', dealer_order((int)$d['id'])['status']);
+    eq('cancelled', dealer_order_agreement(dealer_order((int)$d['id']))['status']);
+    // Another dealer can't see or withdraw it.
+    $mine = $_SESSION['portal_user_id'];
+    $_SESSION['portal_user_id'] = $portal['otherUser'];
+    [$html] = portal_req('order', ['id' => $portal['order']]);
+    ok(str_contains($html, 'Order not found'), "another dealer's order can't be opened");
+    [$html] = portal_req('orders');
+    ok(!str_contains($html, 'DO-'), "another dealer's orders aren't listed");
+    $_SESSION['portal_user_id'] = $mine;
+    [$html] = portal_req('nonsense');
+    ok(str_contains($html, 'Orders'), 'unknown pages show the orders');
+    [$html] = portal_req('order', ['id' => 999999]);
+    portal_seen($html, 'not found');
+});
+
+test('portal: staff pages list dealer orders, portal users and master terms', function () use (&$portal) {
+    ob_start(); $_GET = ['show' => 'all']; dealer_orders_controller(); $html = ob_get_clean(); $_GET = [];
+    ok(str_contains($html, dealer_order($portal['order'])['reference']) && str_contains($html, 'Northern Comms Ltd'));
+    ob_start(); render('_dealer_portal', ['account' => db_one('SELECT * FROM accounts WHERE id = ?', [$portal['dealer']]), 'canEdit' => true, 'portal' => dealer_portal_summary((int)$portal['dealer'])]); $html = ob_get_clean();
+    ok(str_contains($html, 'dee@northern.example') && str_contains($html, 'CON-MSA1') && str_contains($html, 'Give portal access'));
+    ok(dealer_portal_in_use());
+    eq(0, dealer_orders_waiting());
+    // The portal's script never names the supplier either.
+    ok(!preg_match('/giacom/i', file_get_contents(APP_ROOT . '/public/assets/app.js')), 'app.js does not name the supplier');
+    unset($_SESSION['portal_user_id']);
+
+});
+
 proc_terminate($gProc);
 @unlink($gState);
 foreach (['giacom_username', 'giacom_password', 'giacom_events_since', 'giacom_last_sync_at'] as $k) { set_setting($k, null); }
-
 
 echo "Ticket pick-up alerts\n";
 test('tickets waiting too long alert admins once; per-group limits', function () {

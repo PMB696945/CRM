@@ -279,6 +279,11 @@ function contract_mark_signed(array $contract, ?string $signedFile, string $how)
             order_notify_team(db_one('SELECT * FROM customer_orders WHERE id = ?', [$order['id']]));
         }
     }
+    try {
+        dealer_order_agreement_signed($contract);
+    } catch (Throwable $e) {
+        error_log('Dealer order after signing failed: ' . $e->getMessage());
+    }
     if ($contract['quote_id'] && ($quote = db_one('SELECT * FROM quotes WHERE id = ?', [$contract['quote_id']]))) {
         quote_notify_staff($quote, "Contract {$contract['reference']} signed", "{$contract['signer_name']} signed contract {$contract['reference']} for quote {$quote['reference']}.");
     }

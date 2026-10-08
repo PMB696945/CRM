@@ -47,7 +47,7 @@ document.querySelectorAll('form[data-entity="products"], form[data-entity="suppl
   });
 });
 
-// Find an address by postcode (Giacom) on customer and site forms, and fill in the address fields.
+// Find an address by postcode on customer and site forms, and fill in the address fields.
 document.querySelectorAll('form[data-address-lookup]').forEach((form) => {
   const line1 = form.querySelector('[name="address"]');
   if (!line1) return;
@@ -266,7 +266,7 @@ if (bulkForm) {
   update();
 }
 
-// Giacom order form: show the full broadband username as it's typed.
+// Broadband order form: show the full broadband username as it's typed.
 document.querySelectorAll('[data-full-username]').forEach((out) => {
   const form = out.closest('form');
   const get = (n) => (form.querySelector(`[name="${n}"]`)?.value || '').trim();
@@ -383,23 +383,23 @@ document.addEventListener('change', (e) => {
   e.target.form?.querySelectorAll('input[type="checkbox"][name="ids[]"]').forEach((b) => { b.checked = e.target.checked; });
 });
 
-// Giacom FTTP orders: a new service (provide) gets a new ONT; taking over (migrate) keeps the existing one.
+// FTTP orders: a new service (provide) gets a new ONT; taking over (migrate) keeps the existing one.
 document.querySelectorAll('select[data-ont-follows-order-type]').forEach((select) => {
   select.form?.querySelectorAll('input[name="order_type"]').forEach((radio) => {
     radio.addEventListener('change', () => { if (radio.checked) select.value = radio.value === 'migrate' ? 'N' : 'Y'; });
   });
 });
 
-// Giacom orders: the install dates depend on the engineer visit, so ask Giacom again when it changes.
+// Broadband orders: the install dates depend on the engineer visit, so fetch them again when it changes.
 const refreshDates = (select) => {
   const button = select.form?.querySelector('[data-refresh-dates]');
   if (!button) return;
-  select.form.querySelectorAll('[data-dates-note]').forEach((n) => { n.textContent = 'Getting Giacom\'s dates for this visit…'; });
+  select.form.querySelectorAll('[data-dates-note]').forEach((n) => { n.textContent = 'Getting the dates for this visit…'; });
   button.click();
 };
 document.querySelectorAll('[data-refresh-dates]').forEach((b) => { b.hidden = true; });
 
-// Giacom orders: only offer engineer visits at or above the minimum Giacom gives for the order type.
+// Broadband orders: only offer engineer visits at or above the minimum for the order type.
 document.querySelectorAll('select[data-min-provide]').forEach((select) => {
   const order = ['NO_SITE_VISIT', 'STANDARD', 'PREMIUM'];
   const apply = (type) => {
@@ -420,7 +420,7 @@ document.querySelectorAll('select[data-min-provide]').forEach((select) => {
   select.addEventListener('change', () => refreshDates(select));
 });
 
-// Giacom orders: the appointment slots shown follow the required-by date (none set if Giacom offers none that day).
+// Broadband orders: the appointment slots shown follow the required-by date (none set if none are offered that day).
 document.querySelectorAll('input[data-appointment-date]').forEach((input) => {
   const box = input.form?.querySelector('[data-appointment-slots]');
   if (!box) return;
@@ -443,7 +443,7 @@ document.querySelectorAll('input[data-appointment-date]').forEach((input) => {
   sync();
 });
 
-// Giacom orders: copy the customer (main contact) details into the site contact.
+// Broadband orders: copy the customer (main contact) details into the site contact.
 document.querySelectorAll('[data-copy-contact]').forEach((button) => {
   button.addEventListener('click', () => {
     const form = button.closest('form');

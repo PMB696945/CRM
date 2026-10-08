@@ -28,6 +28,11 @@ if (schema_version() < latest_schema_version()) {
     }
 }
 
+// The dealer portal (its own subdomain, or portal.php) is a separate site with its own sign-in.
+if (portal_requested()) {
+    portal_dispatch();
+}
+
 start_session();
 
 $page = query('page', 'dashboard');
@@ -105,6 +110,7 @@ match (true) {
     $page === 'supplier_invoices' => supplier_invoices_controller(),
     $page === 'error_log' => error_log_controller(),
     $page === 'mail_log'  => mail_log_controller(),
+    $page === 'dealer_orders' => dealer_orders_controller(),
     $page === 'purchase_orders' => purchase_orders_controller(),
     $page === 'price_import' => price_import_controller(),
     $page === 'abillity'  => abillity_controller(),

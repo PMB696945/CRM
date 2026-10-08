@@ -401,5 +401,6 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
         </table></div>
       <?php else: ?><p class="muted">No customers under this dealer yet.</p><?php endif; ?>
     </section>
+    <?php render('_dealer_portal', ['account' => $account, 'canEdit' => $canEdit, 'portal' => dealer_portal_summary((int)$account['id'])]); ?>
 
 <?php endif; ?>

@@ -95,6 +95,15 @@
       <div class="help">Leave blank to email everyone whose role can raise purchase orders.</div></div>
   </section>
 
+  <section class="card form-grid" id="portal">
+    <h2 class="wide">Dealer portal</h2>
+    <p class="wide muted">Dealers sign in to the portal to check availability and send orders for your approval. Give dealer staff access from the dealer's page (Portal users).</p>
+    <div class="field"><label for="s_ph">Portal address</label><input id="s_ph" name="portal_host" value="<?= $v('portal_host') ?>" placeholder="partners.yourcompany.co.uk">
+      <div class="help">A subdomain pointed at the same folder as the CRM (in cPanel → Domains, set its document root to the CRM's <code>public</code> folder). Leave blank to use <code><?= h(app_url()) ?>/portal.php</code>.</div></div>
+    <div class="field"><label>Portal link</label><p><a href="<?= h(portal_public_url('login')) ?>" target="_blank" rel="noopener"><?= h(portal_public_url('login')) ?></a></p>
+      <div class="help">Products show on the portal when they have a dealer price and supplier product IDs (under Products &amp; tariffs).</div></div>
+  </section>
+
   <section class="card form-grid">
     <h2 class="wide">Orders</h2>
     <p class="wide muted">When a quote is accepted an order is created and the team below is alerted. As they move it through the steps, the customer is emailed with the message for that step (which can be changed each time).</p>

@@ -14,7 +14,8 @@ $nav = [
     'Sales' => [
         'quotes'        => ['document', 'Quotes'],
         'customer_orders' => ['inbox', 'Orders'],
-    ] + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : []) + [
+    ] + (can('orders.check') && giacom_configured() ? ['giacom' => ['bolt', 'Broadband orders']] : [])
+      + (can('orders.check') && dealer_portal_in_use() ? ['dealer_orders' => ['cart', 'Dealer orders']] : []) + [
         'contracts'     => ['signature', 'Contracts'],
         'pipeline'      => ['pipeline', 'Pipeline'],
         'opportunities' => ['pound', 'Opportunities'],
@@ -78,7 +79,7 @@ $flash = flash();
         <h3 class="menu-group-title"><?= h($group) ?></h3>
         <div class="menu">
           <?php foreach ($items as $key => [$ico, $label]): ?>
-            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?><?php if ($key === 'supplier_invoices' && ($toCheck = invoices_attention_count())): ?><span class="menu-count" title="Need checking"><?= $toCheck ?></span><?php endif; ?><?php if ($key === 'customer_orders' && can('onboarding.edit') && ($waiting = orders_waiting_count())): ?><span class="menu-count" title="Waiting to be picked up"><?= $waiting ?></span><?php endif; ?></a>
+            <a href="<?= h(url($key)) ?>" class="menu-item <?= $current === $key ? 'active' : '' ?>"<?= $current === $key ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?><?php if ($key === 'approvals' && $pendingApprovals): ?><span class="menu-count"><?= $pendingApprovals ?></span><?php endif; ?><?php if ($key === 'queue' && ($queued = ticket_queue_count())): ?><span class="menu-count"><?= $queued ?></span><?php endif; ?><?php if ($key === 'supplier_invoices' && ($toCheck = invoices_attention_count())): ?><span class="menu-count" title="Need checking"><?= $toCheck ?></span><?php endif; ?><?php if ($key === 'dealer_orders' && ($dw = dealer_orders_waiting())): ?><span class="menu-count" title="Waiting for approval"><?= $dw ?></span><?php endif; ?><?php if ($key === 'customer_orders' && can('onboarding.edit') && ($waiting = orders_waiting_count())): ?><span class="menu-count" title="Waiting to be picked up"><?= $waiting ?></span><?php endif; ?></a>
           <?php endforeach; ?>
         </div>
       <?php endforeach; ?>
