@@ -442,3 +442,16 @@ document.querySelectorAll('input[data-appointment-date]').forEach((input) => {
   input.addEventListener('input', sync);
   sync();
 });
+
+// Giacom orders: copy the customer (main contact) details into the site contact.
+document.querySelectorAll('[data-copy-contact]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const form = button.closest('form');
+    button.dataset.copyContact.split(',').forEach((pair) => {
+      const [from, to] = pair.split(':');
+      const source = form.querySelector(`[name="${from}"]`);
+      const target = form.querySelector(`[name="${to}"]`);
+      if (source && target) { target.value = source.value; target.dispatchEvent(new Event('input', { bubbles: true })); }
+    });
+  });
+});

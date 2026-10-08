@@ -73,7 +73,9 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <?= $f('telephone', 'Phone', 'tel', '', true) ?>
   <?= $f('email', 'Email', 'email') ?>
 
-  <div class="form-section wide"><h2>Site contact</h2><p class="help">Who Giacom and the engineer contact for access and appointments at the address. Filled in from the <?= $site && $site['contact_id'] ? 'site' : 'main' ?> contact.</p></div>
+  <div class="form-section wide"><div class="card-head"><h2>Site contact</h2>
+      <button type="button" class="btn btn-sm" data-copy-contact="title:site_title,forename:site_forename,surname:site_surname,telephone:site_telephone,email:site_email">Use the main contact</button></div>
+    <p class="help">Who Giacom and the engineer contact for access and appointments at the address. Filled in from the <?= $site && $site['contact_id'] ? 'site' : 'main' ?> contact.</p></div>
   <?= $f('site_title', 'Title') ?>
   <?= $f('site_forename', 'First name', 'text', '', true) ?>
   <?= $f('site_surname', 'Surname', 'text', '', true) ?>
