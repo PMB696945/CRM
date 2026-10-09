@@ -39,7 +39,7 @@ $nav = ['home' => ['dashboard', 'Overview'], 'services' => ['signal', 'Services'
     <nav aria-label="Main">
       <h3 class="menu-group-title">Your account</h3>
       <div class="menu">
-        <?php foreach ($nav as $key => [$ico, $label]): $active = $go === $key; ?>
+        <?php foreach ($nav as $key => [$ico, $label]): $active = $go === $key || ($key === 'tickets' && in_array($go, ['ticket', 'ticket_new'], true)); ?>
           <a href="<?= h(portal_url($key)) ?>" class="menu-item <?= $active ? 'active' : '' ?>"<?= $active ? ' aria-current="page"' : '' ?>><?= icon($ico) ?><?= h($label) ?></a>
         <?php endforeach; ?>
       </div>

@@ -277,8 +277,52 @@ function customer_portal_dispatch(): never
             exit;
 
         case 'tickets':
-            $tickets = db_all('SELECT reference, subject, category, status, created_at, resolved_at FROM tickets WHERE account_id = ? ORDER BY id DESC LIMIT 100', [$accountId]);
+            $tickets = db_all('SELECT id, reference, subject, category, status, created_at, updated_at, resolved_at FROM tickets WHERE account_id = ? ORDER BY id DESC LIMIT 100', [$accountId]);
             customer_page('tickets', ['user' => $user, 'tickets' => $tickets], 'Support tickets');
+
+        case 'ticket_new':
+            $v = ['category' => 'fault', 'service_id' => (string)($_GET['service'] ?? ''), 'urgency' => 'normal', 'subject' => '', 'description' => ''];
+            $errors = [];
+            if (is_post()) {
+                verify_csrf();
+                foreach ($v as $k => $_) {
+                    $v[$k] = trim((string)($_POST[$k] ?? ''));
+                }
+                if (!isset(CUSTOMER_TICKET_CATEGORIES[$v['category']])) {
+                    $errors['category'] = 'Choose what it\'s about.';
+                }
+                if ($v['subject'] === '') {
+                    $errors['subject'] = 'Give it a short summary.';
+                }
+                if (mb_strlen($v['description']) < 10) {
+                    $errors['description'] = 'Please tell us a bit more.';
+                }
+                if (!$errors) {
+                    $t = customer_raise_ticket($user, $v);
+                    flash("Thank you. Your request is logged as {$t['reference']} and we'll be in touch.");
+                    customer_redirect('ticket', ['id' => $t['id']]);
+                }
+            }
+            customer_page('ticket_form', ['user' => $user, 'v' => $v, 'errors' => $errors, 'services' => customer_services($accountId)], 'Raise a support ticket');
+
+        case 'ticket':
+            $t = db_one('SELECT t.*, s.identifier AS service_identifier FROM tickets t LEFT JOIN services s ON s.id = t.service_id WHERE t.id = ? AND t.account_id = ?',
+                [(int)($_GET['id'] ?? 0), $accountId]) ?? customer_not_found('That ticket wasn\'t found.');
+            if (is_post()) {
+                verify_csrf();
+                $body = trim((string)($_POST['body'] ?? ''));
+                if ($body === '') {
+                    flash('Type your update first.', 'error');
+                } else {
+                    customer_ticket_reply($user, $t, $body);
+                    flash('Thanks, your update has been added.');
+                }
+                customer_redirect('ticket', ['id' => $t['id']]);
+            }
+            $updates = db_all('SELECT c.body, c.created_at, c.customer_user_id, u.name AS staff_name, cu.name AS customer_name FROM ticket_comments c
+                LEFT JOIN users u ON u.id = c.user_id LEFT JOIN customer_users cu ON cu.id = c.customer_user_id
+                WHERE c.ticket_id = ? AND c.is_internal = 0 ORDER BY c.created_at, c.id', [$t['id']]);
+            customer_page('ticket', ['user' => $user, 't' => $t, 'updates' => $updates], $t['reference']);
 
         case 'home':
         default:
@@ -303,6 +347,104 @@ function customer_not_found(string $message): never
         http_response_code(404);
     }
     customer_page('message', ['title' => 'Not found', 'message' => $message], 'Not found');
+}
+
+/* -------------------------------------------------------------- Tickets --- */
+
+const CUSTOMER_TICKET_CATEGORIES = ['fault' => 'Fault or problem', 'billing' => 'Billing', 'order' => 'An order', 'porting' => 'Moving a number to us', 'general' => 'Something else'];
+const CUSTOMER_TICKET_STATUSES = ['open' => 'Open', 'in_progress' => 'In progress', 'awaiting_customer' => 'Waiting for you', 'awaiting_carrier' => 'With the network', 'resolved' => 'Resolved', 'closed' => 'Closed'];
+
+/** A customer raises a ticket: routed like any other (by category to its group), the team told, the customer emailed the reference. */
+function customer_raise_ticket(array $user, array $v): array
+{
+    $service = $v['service_id'] !== '' ? db_one("SELECT id FROM services WHERE id = ? AND account_id = ?", [(int)$v['service_id'], $user['account_id']]) : null;
+    $contact = db_one('SELECT id FROM contacts WHERE account_id = ? AND email = ? LIMIT 1', [$user['account_id'], $user['email']]);
+    $id = insert_row('tickets', [
+        'account_id' => $user['account_id'], 'service_id' => $service['id'] ?? null, 'contact_id' => $contact['id'] ?? null,
+        'subject' => mb_substr($v['subject'], 0, 200), 'category' => $v['category'], 'priority' => $v['urgency'] === 'down' ? 'P2' : 'P3',
+        'status' => 'open', 'group_id' => null, 'assigned_to' => null, 'carrier_ref' => null,
+        'description' => $v['description'] . "\n\n(Raised on the customer portal by {$user['name']} <{$user['email']}>)",
+    ]);
+    db_exec('UPDATE tickets SET raised_by_customer_user_id = ? WHERE id = ?', [$user['id'], $id]);
+    $t = db_one('SELECT * FROM tickets WHERE id = ?', [$id]);
+    audit('create', "Ticket {$t['reference']} raised on the customer portal by {$user['name']}: {$t['subject']}", 'tickets', $id, null, null, (int)$user['account_id']);
+    log_activity((int)$user['account_id'], 'task', "Ticket {$t['reference']} raised on the customer portal: {$t['subject']}");
+    if ($t['group_id']) {
+        ticket_notify_group($id);
+    } else {
+        customer_ticket_notify_staff($t, 'New ticket from the customer portal', 'has been raised on the customer portal');
+    }
+    customer_ticket_email_customer($user, $t, 'We\'ve received your support request', '<p>Thank you, we\'ve logged your request as <b>' . h($t['reference']) . '</b> and will be in touch.</p>');
+    return $t;
+}
+
+/** Email whoever has a ticket (or, if nobody, its group or the company inbox) about something the customer did. */
+function customer_ticket_notify_staff(array $t, string $title, string $what): void
+{
+    if (!mail_configured()) {
+        return;
+    }
+    $to = [];
+    if ($t['assigned_to'] && ($u = db_one('SELECT name, email FROM users WHERE id = ? AND active = 1', [$t['assigned_to']]))) {
+        $to[] = $u;
+    } elseif ($t['group_id'] && ($g = db_one('SELECT name, email FROM ticket_groups WHERE id = ?', [$t['group_id']]))) {
+        $to = $g['email'] ? [$g] : db_all('SELECT u.name, u.email FROM ticket_group_members m JOIN users u ON u.id = m.user_id WHERE m.group_id = ? AND u.active = 1', [$t['group_id']]);
+    }
+    if (!$to && ($ours = setting('company_email') ?: setting('mail_from_email'))) {
+        $to = [['email' => $ours, 'name' => company('name', config('app_name'))]];
+    }
+    $account = (string)db_value('SELECT name FROM accounts WHERE id = ?', [$t['account_id']]);
+    $body = '<p><b>' . h($t['reference']) . '</b> for ' . h($account) . ' ' . h($what) . ': ' . h($t['subject']) . '.</p>'
+        . email_button(app_url() . '/' . url('tickets', ['action' => 'view', 'id' => $t['id']]), 'Open the ticket');
+    foreach ($to as $u) {
+        try {
+            send_mail($u['email'], $u['name'], "{$t['reference']}: $title", email_layout($title, $body));
+        } catch (IntegrationException $e) {
+            error_log('Ticket email failed: ' . $e->getMessage());
+        }
+    }
+}
+
+/** Email the customer user about their ticket, with a link to it on the portal. */
+function customer_ticket_email_customer(array $user, array $t, string $title, string $html): void
+{
+    if (!mail_configured()) {
+        return;
+    }
+    try {
+        send_mail($user['email'], $user['name'], "{$t['reference']}: " . $t['subject'], email_layout($title, $html
+            . email_button(customer_portal_public_url('ticket', ['id' => $t['id']]), 'View your ticket')));
+    } catch (IntegrationException $e) {
+        error_log('Ticket email failed: ' . $e->getMessage());
+    }
+}
+
+/** Staff added a customer-facing update: if the ticket was raised on the portal, email the person who raised it. */
+function customer_ticket_staff_update(int $ticketId, string $body): void
+{
+    $t = db_one('SELECT * FROM tickets WHERE id = ?', [$ticketId]);
+    if (!$t || empty($t['raised_by_customer_user_id']) || !($cu = db_one('SELECT * FROM customer_users WHERE id = ? AND active = 1', [$t['raised_by_customer_user_id']]))) {
+        return;
+    }
+    customer_ticket_email_customer($cu, $t, 'An update on your support request', '<p>There\'s an update on <b>' . h($t['reference']) . '</b> (' . h($t['subject']) . '):</p>'
+        . '<blockquote style="margin:12px 0;padding:8px 12px;border-left:3px solid #465fff;background:#f9fafb">' . nl2br(h($body)) . '</blockquote>'
+        . '<p>Status: <b>' . h(CUSTOMER_TICKET_STATUSES[$t['status']] ?? humanize($t['status'])) . '</b></p>');
+}
+
+/** The customer adds an update to their ticket. A ticket waiting for them, or closed, opens again. */
+function customer_ticket_reply(array $user, array $t, string $body): void
+{
+    db_exec('INSERT INTO ticket_comments (ticket_id, user_id, customer_user_id, body, is_internal) VALUES (?, NULL, ?, ?, 0)', [$t['id'], $user['id'], mb_substr($body, 0, 5000)]);
+    if (in_array($t['status'], ['awaiting_customer', 'resolved', 'closed'], true)) {
+        $data = array_intersect_key($t, array_flip(['account_id', 'service_id', 'contact_id', 'subject', 'category', 'priority', 'group_id', 'assigned_to', 'carrier_ref', 'description']));
+        update_row('tickets', (int)$t['id'], ['status' => 'open'] + $data);
+        db_exec('INSERT INTO ticket_comments (ticket_id, user_id, body, is_internal) VALUES (?, NULL, ?, 1)',
+            [$t['id'], 'Reopened by the customer\'s update (was ' . humanize($t['status']) . ').']);
+    } else {
+        db_exec('UPDATE tickets SET updated_at = NOW() WHERE id = ?', [$t['id']]);
+    }
+    audit('ticket_update', "Ticket {$t['reference']}: customer update from {$user['name']} on the customer portal", 'tickets', (int)$t['id'], null, null, (int)$t['account_id']);
+    customer_ticket_notify_staff(db_one('SELECT * FROM tickets WHERE id = ?', [$t['id']]), 'Customer update', 'has a new update from ' . $user['name']);
 }
 
 /* ---------------------------------------------------------- Staff side --- */

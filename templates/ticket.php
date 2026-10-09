@@ -36,7 +36,7 @@
         <?= csrf_field() ?>
         <textarea name="body" rows="3" placeholder="Add an update…"></textarea>
         <div class="comment-actions">
-          <label><input type="checkbox" name="is_internal" value="1" checked> Internal note</label>
+          <label><input type="checkbox" name="is_internal" value="1" checked> Internal note</label><?php if (!empty($ticket['raised_by_customer_user_id'])): ?><span class="help">Untick to show it to the customer on their portal and email it to them.</span><?php endif; ?>
           <label>Status
             <select name="status">
               <?php foreach ($entity['fields']['status']['options'] as $k => $label): ?>

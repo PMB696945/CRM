@@ -5,7 +5,8 @@
   <tbody>
   <?php foreach ($services as $s): $l = service_login($s); ?>
     <tr>
-      <td><b><?= h($s['identifier']) ?></b><div class="muted small"><?= h(implode(' · ', array_filter([(string)$s['product_name'], (string)$s['site_name']]))) ?></div></td>
+      <td><b><?= h($s['identifier']) ?></b><div class="muted small"><?= h(implode(' · ', array_filter([(string)$s['product_name'], (string)$s['site_name']]))) ?></div>
+        <a class="small" href="<?= h(portal_url('ticket_new', ['service' => $s['id']])) ?>">Report a problem</a></td>
       <td><?= h(SERVICE_TYPES[$s['service_type']] ?? ucfirst((string)$s['service_type'])) ?></td>
       <td><span class="badge badge-<?= h(['active' => 'active', 'pending' => 'pending', 'suspended' => 'suspended'][$s['status']] ?? 'pending') ?>"><?= h(['active' => 'Live', 'pending' => 'Being set up', 'suspended' => 'Suspended'][$s['status']] ?? ucfirst($s['status'])) ?></span></td>
       <td class="whitespace-nowrap"><?= $s['monthly_price'] !== null ? h(money($s['monthly_price'])) : '<span class="muted">—</span>' ?></td>

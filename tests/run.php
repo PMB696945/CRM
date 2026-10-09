@@ -2559,6 +2559,38 @@ test('customer portal: customers sign in and see only their own account, service
     [$dl] = customer_req('document', ['id' => (string)$cid, 'file' => '../config.php']);
     ok(str_contains($dl, 'wasn&#039;t found') || str_contains($dl, "wasn't found"), 'only the agreement\'s own files');
 
+    // Support tickets: raised on the portal, routed like any other, both sides told; updates go back and forth.
+    [$html] = customer_req('ticket_new', [], ['category' => 'fault', 'service_id' => (string)$svc['id'], 'urgency' => 'down', 'subject' => '', 'description' => 'x']);
+    ok(str_contains($html, 'short summary') && str_contains($html, 'bit more'), 'validated');
+    $before = count(sent_mails());
+    [, $loc] = customer_req('ticket_new', [], ['category' => 'fault', 'service_id' => (string)$svc['id'], 'urgency' => 'down', 'subject' => 'Broadband down', 'description' => 'No internet since this morning.']);
+    ok((bool)preg_match('/go=ticket&id=(\d+)/', (string)$loc, $tm), (string)$loc);
+    $t = db_one('SELECT * FROM tickets WHERE id = ?', [$tm[1]]);
+    eq([$acc, (int)$svc['id'], 'P2', 'open', 'fault', $uid], [(int)$t['account_id'], (int)$t['service_id'], $t['priority'], $t['status'], $t['category'], (int)$t['raised_by_customer_user_id']]);
+    ok(str_starts_with((string)$t['reference'], 'TCK-') && $t['sla_due_at'] !== null, 'a normal ticket with an SLA');
+    usleep(300000);
+    $mails = array_slice(sent_mails(), $before);
+    ok((bool)array_filter($mails, fn($m) => str_contains($m, 'X-Rcpt: rita@canal.example') && str_contains(mail_body($m), $t['reference'])), 'the customer is emailed the reference');
+    ok(count($mails) >= 2, 'and the team is told');
+    // Staff reply on the customer-facing side: the customer is emailed and sees it.
+    db_exec("INSERT INTO ticket_comments (ticket_id, user_id, body, is_internal) VALUES (?, 1, 'An engineer is looking at the line.', 0)", [$t['id']]);
+    db_exec("UPDATE tickets SET status = 'awaiting_customer' WHERE id = ?", [$t['id']]);
+    $before = count(sent_mails());
+    customer_ticket_staff_update((int)$t['id'], 'An engineer is looking at the line.');
+    usleep(300000);
+    ok((bool)array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'X-Rcpt: rita@canal.example') && str_contains(mail_body($m), 'An engineer is looking')), 'customer emailed the update');
+    [$html] = customer_req('ticket', ['id' => (string)$t['id']]);
+    ok(str_contains($html, 'An engineer is looking') && str_contains($html, 'Waiting for you') && str_contains($html, 'No internet since this morning.'), 'customer sees the update');
+    ok(!str_contains($html, 'Raised on the customer portal'), 'our note isn\'t shown back to them');
+    db_exec("INSERT INTO ticket_comments (ticket_id, user_id, body, is_internal) VALUES (?, 1, 'Internal: carrier ref 123', 1)", [$t['id']]);
+    [$html] = customer_req('ticket', ['id' => (string)$t['id']]);
+    ok(!str_contains($html, 'carrier ref 123'), 'internal notes stay internal');
+    customer_req('ticket', ['id' => (string)$t['id']], ['body' => 'Router lights are red.']);
+    eq('open', db_value('SELECT status FROM tickets WHERE id = ?', [$t['id']]), 'their update reopens a ticket waiting for them');
+    ok(str_contains((string)db_value('SELECT GROUP_CONCAT(body) FROM ticket_comments WHERE ticket_id = ? AND customer_user_id = ?', [$t['id'], $uid]), 'Router lights'));
+    [$html] = customer_req('tickets');
+    ok(str_contains($html, 'Broadband down') && str_contains($html, 'Raise a ticket'));
+
     // Someone at another customer sees only theirs.
     $other = create('accounts', ['name' => 'Other Customer Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
     db_exec('INSERT INTO customer_users (account_id, name, email, password_hash, must_change_password) VALUES (?, ?, ?, ?, 0)', [$other, 'Olly Other', 'olly@other.example', password_hash('Other-pass-123', PASSWORD_DEFAULT)]);
@@ -2570,6 +2602,10 @@ test('customer portal: customers sign in and see only their own account, service
     ok(!str_contains($html, h($l['username'])), "not another customer's services");
     [$dl] = customer_req('document', ['id' => (string)$cid, 'file' => $file]);
     ok(!str_starts_with($dl, 'FILE:'), "not another customer's documents");
+    [$html] = customer_req('ticket', ['id' => (string)$t['id']]);
+    ok(str_contains($html, 'wasn&#039;t found') || str_contains($html, "wasn't found"), "not another customer's tickets");
+    customer_req('ticket', ['id' => (string)$t['id']], ['body' => 'sneaky']);
+    eq(0, (int)db_value("SELECT COUNT(*) FROM ticket_comments WHERE body = 'sneaky'"), "can't add to another customer's ticket");
     $_SESSION['customer_user_id'] = $mine;
     // Staff: the card on the customer's page.
     ob_start(); render('_customer_portal', ['account' => db_one('SELECT * FROM accounts WHERE id = ?', [$acc]), 'canEdit' => true]); $html = ob_get_clean();

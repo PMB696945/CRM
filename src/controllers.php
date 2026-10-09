@@ -848,8 +848,8 @@ function account_view(array $entity, array $account): void
 
 function ticket_view(array $entity, array $ticket): void
 {
-    $comments = db_all('SELECT c.*, u.name AS user_name FROM ticket_comments c LEFT JOIN users u ON u.id = c.user_id
-        WHERE c.ticket_id = ? ORDER BY c.created_at, c.id', [$ticket['id']]);
+    $comments = db_all('SELECT c.*, COALESCE(u.name, CONCAT(cu.name, \' (customer)\')) AS user_name FROM ticket_comments c LEFT JOIN users u ON u.id = c.user_id
+        LEFT JOIN customer_users cu ON cu.id = c.customer_user_id WHERE c.ticket_id = ? ORDER BY c.created_at, c.id', [$ticket['id']]);
     page('ticket', compact('entity', 'ticket', 'comments'), $ticket['reference'] . ' ' . $ticket['subject']);
 }
 
@@ -871,6 +871,9 @@ function ticket_comment(int $id): void
             [$id, current_user()['id'], 'Status changed from ' . humanize($ticket['status']) . ' to ' . humanize($status) . '.']);
     } else {
         db_exec('UPDATE tickets SET updated_at = NOW() WHERE id = ?', [$id]);
+    }
+    if ($body !== '' && empty($_POST['is_internal'])) {
+        customer_ticket_staff_update($id, $body);
     }
     audit('ticket_update', "Ticket {$ticket['reference']}: " . ($body !== '' ? (empty($_POST['is_internal']) ? 'customer-visible' : 'internal') . ' note added' : 'updated')
         . ($status !== '' && $status !== $ticket['status'] && isset($statuses[$status]) ? ', status ' . humanize($ticket['status']) . ' → ' . humanize($status) : ''), 'tickets', $id);

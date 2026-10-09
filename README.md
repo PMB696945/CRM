@@ -511,12 +511,12 @@ Dealers can sign in to their own portal to check broadband availability for thei
 
 ## Customer portal
 
-Customers can sign in to see **their own account**. It's read-only apart from their own portal password:
+Customers can sign in to see **their own account**. Apart from support tickets and their own portal password, it's read-only:
 - **Overview:** company details, contacts, sites, and counts of live services, orders in progress, open tickets and agreements to sign.
 - **Services:** each line and service with its status, monthly price, contract end and **setup details**: username, password (shown on request) and IP address(es) once live.
 - **Orders:** broadband orders with their progress and install date, and other orders with a link to their tracking page.
 - **Agreements:** signed agreements and their documents to download, and any waiting to be signed.
-- **Support tickets:** their tickets and where each one is up to.
+- **Support tickets:** their tickets and where each one is up to. They can **raise a ticket** (what it's about, which service, and for a fault whether it's completely down, which makes it P2) and add updates. Tickets are routed to a group by category like any other, the team is emailed, and the customer gets the reference by email. On the staff side, an update with *Internal note* unticked appears on their portal and is emailed to them; internal notes never show. A customer's update on a ticket that's waiting for them, resolved or closed opens it again and alerts whoever has it.
 
 Nothing on it names the wholesale supplier.
 

@@ -1070,4 +1070,13 @@ return [
             CONSTRAINT fk_cu_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     },
+    34 => function (): void {
+        // Ticket updates written by the customer on the customer portal (who wrote them).
+        if (!column_exists('ticket_comments', 'customer_user_id')) {
+            db()->exec('ALTER TABLE ticket_comments ADD COLUMN customer_user_id INT UNSIGNED NULL AFTER user_id');
+        }
+        if (!column_exists('tickets', 'raised_by_customer_user_id')) {
+            db()->exec('ALTER TABLE tickets ADD COLUMN raised_by_customer_user_id INT UNSIGNED NULL');
+        }
+    },
 ];
