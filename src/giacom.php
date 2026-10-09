@@ -566,7 +566,12 @@ function giacom_place_order(array $check, array $product, array $o): int
             'start_date' => null, 'term_months' => null, 'contract_end_date' => null,
             'install_address' => $check['site_id'] ? null : mb_substr((string)$check['address_label'], 0, 255),
             'notes' => "Giacom $type order $orderId: {$product['name']}" . ($fullUsername ? "\nBroadband username: $fullUsername" : ''),
+            'login_username' => $fullUsername ?: null,
+            'ip_details' => giacom_ip_pending_label($o['ip_option'] ?? null),
         ]);
+        if ($o['bb_password'] !== '') {
+            db_exec('UPDATE services SET login_password = ? WHERE id = ?', [encrypt_secret((string)$o['bb_password']), $serviceId]);
+        }
         db_exec('INSERT INTO giacom_orders (account_id, site_id, service_id, check_id, order_type, giacom_order_id, giacom_service_id, cli, product_id, product_name,
                 technology_type, broadband_username, address_label, crd, client_ref, status, status_updated_at, details, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)', [
@@ -624,22 +629,63 @@ function giacom_request_ip_block(array $order): array
     return $details;
 }
 
-/** The broadband login and IP details for a placed order (for the customer, the dealer and staff). */
+/** What's known about the IP address before the service is live (static addresses are only allocated then). */
+function giacom_ip_pending_label(?string $option): ?string
+{
+    if ($option === null || !isset(GIACOM_IP_OPTIONS[$option])) {
+        return null;
+    }
+    return $option === 'dynamic' ? 'Dynamic' : GIACOM_IP_OPTIONS[$option][0] . ' (allocated when the service goes live)';
+}
+
+/** The broadband login and IP details for a placed order (for the customer, the dealer and staff), from its service. */
 function giacom_setup_details(array $order): array
 {
+    $svc = $order['service_id'] ? db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]) : null;
     $details = json_decode((string)$order['details'], true) ?: [];
-    $ip = $details['ip_option'] ?? null;
-    $ipText = match (true) {
-        $ip === null || !isset(GIACOM_IP_OPTIONS[$ip]) => '',
-        $ip === 'dynamic' => 'Dynamic (assigned automatically)',
-        default => GIACOM_IP_OPTIONS[$ip][0] . (!empty($details['ip_block']) ? ': ' . $details['ip_block']
-            : (!empty($details['ip_address']) ? ': ' . $details['ip_address'] : ' (we\'ll confirm the address once it\'s allocated)')),
-    };
+    $ip = (string)($svc['ip_details'] ?? '') ?: (string)giacom_ip_pending_label($details['ip_option'] ?? null);
+    if (str_contains($ip, 'allocated when')) {
+        $ip = str_replace('(allocated when the service goes live)', '(the addresses are confirmed when your service goes live)', $ip);
+    }
     return array_filter([
-        'Broadband username' => (string)$order['broadband_username'],
-        'Broadband password' => (string)(decrypt_secret($details['bb_password'] ?? null) ?? ''),
-        'IP address' => $ipText,
+        'Broadband username' => (string)(($svc['login_username'] ?? '') ?: $order['broadband_username']),
+        'Broadband password' => (string)(decrypt_secret(($svc['login_password'] ?? null) ?: ($details['bb_password'] ?? null)) ?? ''),
+        'IP address' => $ip,
     ], fn($v) => $v !== '');
+}
+
+/** When an order goes live: the service's IP address(es) and login as Giacom now has them (service_details). */
+function giacom_fetch_live_details(array $order): void
+{
+    if (!$order['giacom_service_id'] || !$order['service_id']) {
+        return;
+    }
+    $r = giacom_call('service_details', ['service-id' => $order['giacom_service_id'], 'detailed' => 'Y']);
+    $sd = $r['service-details'] ?? [];
+    $details = json_decode((string)$order['details'], true) ?: [];
+    $ip = trim((string)($sd['ip-address'] ?? ''));
+    $block = (string)($details['ip_block'] ?? '');
+    $ipText = $ip !== '' ? $ip . ($block !== '' && !str_starts_with($block, $ip) ? ' (block ' . $block . ')' : '') : (($details['ip_option'] ?? 'dynamic') === 'dynamic' ? 'Dynamic' : null);
+    $sets = [];
+    $params = [];
+    if ($ipText !== null) {
+        $sets[] = 'ip_details = ?';
+        $params[] = mb_substr($ipText, 0, 255);
+    }
+    if (($pw = (string)($sd['password'] ?? '')) !== '') {
+        $sets[] = 'login_password = ?';
+        $params[] = encrypt_secret($pw);
+    }
+    if (($user = trim((string)($sd['username'] ?? ''))) !== '' && str_contains($user, '@')) {
+        $sets[] = 'login_username = ?';
+        $params[] = mb_substr($user, 0, 190);
+    }
+    if ($sets) {
+        db_exec('UPDATE services SET ' . implode(', ', $sets) . ' WHERE id = ?', [...$params, $order['service_id']]);
+    }
+    if ($ip !== '') {
+        giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'ip', 'Live with IP ' . $ipText);
+    }
 }
 
 /** Setup details as an email table. */
@@ -755,6 +801,11 @@ function giacom_set_status(array $order, string $status, ?string $crd = null, ?s
                 db_exec("UPDATE services SET status = 'active', start_date = COALESCE(start_date, CURDATE()) WHERE id = ?", [$svc['id']]);
                 service_changed((int)$svc['id'], $svc); // live: billing starts from the real date
             }
+        }
+        try {
+            giacom_fetch_live_details(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$order['id']]));
+        } catch (GiacomException $e) {
+            giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'ip', 'Couldn\'t fetch the live IP details: ' . mb_substr($e->getMessage(), 0, 300));
         }
         if ($order['account_id']) {
             log_activity((int)$order['account_id'], 'note', "Giacom order {$order['giacom_order_id']} completed: {$order['product_name']}");

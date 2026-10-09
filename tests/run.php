@@ -2044,7 +2044,11 @@ test('Giacom: the customer is emailed an order confirmation in our name', functi
     ok(str_contains($body, 'Hi Rita') && str_contains($body, 'Unit 2') && str_contains($body, 'Your broadband order is confirmed'), 'product, address and greeting');
     ok(stripos($raw, 'giacom') === false && stripos($body, 'giacom') === false, 'the supplier is not named');
     ok(str_contains($body, 'acc10001-1@isp.example') && str_contains($body, 'Pa55word!'), 'broadband username and password included');
-    ok(str_contains($body, '1 static IP'), 'IP address included');
+    ok(str_contains($body, '1 static IP (the addresses are confirmed when your service goes live)'), 'static IP: addresses follow when live');
+    $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
+    eq(['acc10001-1@isp.example', 'Pa55word!', '1 static IP (allocated when the service goes live)'], array_values(service_login($svc)), 'the login is kept on the service');
+    ok(!str_contains((string)$svc['login_password'], 'Pa55word'), 'encrypted');
+    ok(service_has_login($svc));
     ok((bool)db_value("SELECT id FROM giacom_order_events WHERE order_id = ? AND name = 'email'", [$order['id']]), 'recorded on the order');
     $noEmail = ['details' => json_encode(['contact' => 'X'])] + $order;
     try { giacom_email_confirmation($noEmail); throw new Exception('expected failure'); }
@@ -2061,7 +2065,7 @@ test('Giacom: a static IP block is requested once the order is placed, and can b
     $id = giacom_place_order($check, $product, $o);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
     ok(str_contains((string)$order['last_error'], 'static IP block couldn'), 'the order stands; the problem is shown: ' . $order['last_error']);
-    eq('Block of 16 static IPs (/28) (we\'ll confirm the address once it\'s allocated)', giacom_setup_details($order)['IP address']);
+    eq('Block of 16 static IPs (/28) (the addresses are confirmed when your service goes live)', giacom_setup_details($order)['IP address']);
     try { giacom_request_ip_block($order); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'Allocation size'), $e->getMessage()); }
     $details = json_decode((string)$order['details'], true);
     $details['ip_option'] = 'block4';
@@ -2070,7 +2074,7 @@ test('Giacom: a static IP block is requested once the order is placed, and can b
     eq('89.145.253.136/30', $d['ip_block']);
     $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
     eq(null, $order['last_error']);
-    eq('Block of 4 static IPs (/30): 89.145.253.136/30', giacom_setup_details($order)['IP address']);
+    ok(str_contains(giacom_setup_details($order)['IP address'], 'confirmed when your service goes live'), 'addresses only once live');
     eq('N', (function () use ($check, $product, $o) { giacom_place_order($check, $product, ['ip_option' => 'dynamic', 'bb_username' => 'acc10001-10'] + $o); return g_state()['last']['provide']['order']['attributes']['fixed-ip']; })(), 'dynamic IP');
 });
 
@@ -2087,6 +2091,23 @@ test('Giacom: status updates are picked up; completion makes the service live', 
     eq('Completed', $order['status']); ok($order['completed_at'] !== null);
     $svc = db_one('SELECT * FROM services WHERE id = ?', [$order['service_id']]);
     eq('active', $svc['status']); eq(date('Y-m-d'), $svc['start_date']);
+    eq('81.2.69.160', $svc['ip_details'], 'the live IP address is fetched when the service goes live');
+    eq('Pa55word!', service_login($svc)['password'], 'login kept');
+    // Staff change the password and email the setup details.
+    try { service_set_password($svc, 'a b'); throw new Exception('expected failure'); } catch (IntegrationException) {}
+    service_set_password($svc, 'NewPass-2026');
+    $svc = db_one('SELECT * FROM services WHERE id = ?', [$svc['id']]);
+    eq('NewPass-2026', service_login($svc)['password']);
+    $before = count(sent_mails());
+    eq('rita@canal.example', service_email_login($svc, 'rita@canal.example', 'Rita Reception'));
+    usleep(300000);
+    $all = sent_mails();
+    eq($before + 1, count($all));
+    $body = mail_body(end($all));
+    ok(str_contains($body, 'NewPass-2026') && str_contains($body, '81.2.69.160') && str_contains($body, 'acc10001-1@isp.example') && str_contains($body, 'Hi Rita'), 'setup details emailed');
+    ok(stripos($body, 'giacom') === false);
+    ob_start(); render('_service_login', ['service' => $svc]); $html = ob_get_clean();
+    ok(str_contains($html, 'NewPass-2026') && str_contains($html, 'Change the password'), 'shown on the service');
     ok(setting('giacom_events_since') !== null);
     eq(['events' => 0, 'status_changes' => 0], giacom_sync(), 'events already seen are not applied again');
     eq('Completed', db_value('SELECT status FROM giacom_orders WHERE id = ?', [$g['order']]));
@@ -2407,7 +2428,7 @@ test('portal: orders need signed master terms, and each has its own agreement wi
     ok(count($accepted) === 1 && str_contains(mail_body($accepted[0]), 'accepted and placed'), 'the dealer is told');
     $setup = giacom_setup_details(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$d['giacom_order_id']]));
     ok(str_contains(mail_body($accepted[0]), $setup['Broadband username']) && str_contains(mail_body($accepted[0]), $setup['Broadband password'])
-        && str_contains(mail_body($accepted[0]), '89.145.253.136/29'), 'the dealer gets the setup details: login and IP block');
+        && str_contains(mail_body($accepted[0]), 'Block of 8 static IPs (/29) (the addresses are confirmed when your service goes live)'), 'the dealer gets the setup details: login, and the IP block to come');
     ok(!preg_match('/giacom|700\d{3}/i', $accepted[0] . mail_body($accepted[0])), "no supplier name or supplier order number in the dealer's email");
     [$html] = portal_req('order', ['id' => $portal['order']]);
     ok(str_contains($html, 'In progress') && str_contains($html, 'Install'), 'progress shown');

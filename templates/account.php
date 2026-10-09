@@ -292,6 +292,22 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
     <section class="card">
       <div class="card-head"><h2>Services &amp; lines</h2><?php if (can('services.edit')): ?><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a><?php endif; ?></div>
       <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => $sites ? ['identifier', 'service_type', 'site_id', 'carrier', 'status', 'monthly_price', 'contract_end_date'] : ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
+      <?php $withLogin = array_filter($services, 'service_has_login'); if ($withLogin): ?>
+        <h3 class="small muted" style="margin-top:1rem">Logins &amp; IP addresses</h3>
+        <div class="table-wrap"><table class="table compact">
+          <thead><tr><th>Service</th><th>Username</th><th>Password</th><th>IP address(es)</th></tr></thead>
+          <tbody>
+          <?php foreach ($withLogin as $s): $l = service_login($s); ?>
+            <tr>
+              <td><a href="<?= h(url('services', ['action' => 'view', 'id' => $s['id']])) ?>#login"><?= h($s['identifier']) ?></a></td>
+              <td><?= $l['username'] !== '' ? '<code>' . h($l['username']) . '</code>' : '<span class="muted">—</span>' ?></td>
+              <td><?= $l['password'] !== '' ? '<details><summary class="small">Show</summary><code>' . h($l['password']) . '</code></details>' : '<span class="muted">—</span>' ?></td>
+              <td><?= $l['ip'] !== '' ? h($l['ip']) : '<span class="muted">—</span>' ?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table></div>
+      <?php endif; ?>
     </section>
 
     <?php if (can('orders.check') && (giacom_configured() || $giacomOrders)): ?>

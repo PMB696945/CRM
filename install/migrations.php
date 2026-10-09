@@ -1037,4 +1037,18 @@ return [
             db()->exec('ALTER TABLE dealer_orders ADD COLUMN contract_id INT UNSIGNED NULL AFTER giacom_order_id');
         }
     },
+    32 => function (): void {
+        // Each service's login (e.g. broadband username and password, the password encrypted) and IP addresses.
+        foreach (['login_username' => 'VARCHAR(190) NULL', 'login_password' => 'TEXT NULL', 'ip_details' => 'VARCHAR(255) NULL'] as $col => $def) {
+            if (!column_exists('services', $col)) {
+                db()->exec("ALTER TABLE services ADD COLUMN $col $def");
+            }
+        }
+        // Broadband orders placed before this: copy their login onto the service.
+        foreach (db_all('SELECT service_id, broadband_username, details FROM giacom_orders WHERE service_id IS NOT NULL') as $o) {
+            $d = json_decode((string)$o['details'], true) ?: [];
+            db_exec('UPDATE services SET login_username = COALESCE(login_username, ?), login_password = COALESCE(login_password, ?) WHERE id = ?',
+                [$o['broadband_username'] ?: null, $d['bb_password'] ?? null, $o['service_id']]);
+        }
+    },
 ];

@@ -27,6 +27,7 @@
     <?php endforeach; ?>
   </dl>
 </div>
+<?php if ($name === 'services') render('_service_login', ['service' => $row]); ?>
 <?php if ($name === 'products' && can('suppliers.view')): $prices = product_supplier_prices((int)$row['id']); ?>
 <section class="card">
   <div class="card-head"><h2>Suppliers</h2>

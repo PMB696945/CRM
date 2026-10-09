@@ -176,6 +176,8 @@ switch ($call) {
         ]]);
     case 'address_match':
         reply(['addresses' => [['addressRef' => 'A00012345679', 'uprn' => '77001234', 'postCode' => 'M1 3HE']]]);
+    case 'service_details':
+        reply(['service-details' => ['service-id' => $req['service-id'] ?? '', 'ip-address' => '81.2.69.160', 'password' => $state['live_password'] ?? '', 'live' => 'Y']]);
     case 'change_ips':
         $state['change_ips'][] = $req;
         $save();
