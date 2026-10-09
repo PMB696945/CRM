@@ -1559,7 +1559,7 @@ test('billing cycles, cost price, margin and monthly equivalents', function () {
     ok(!field_enabled(entity('products')['fields']['cost_price']), 'cost price hidden without permission');
     ok(!in_array('cost_price', entity('products')['list'], true) && !isset(entity('products')['computed']['_margin']));
     as_role('sales');
-    ok(field_enabled(entity('products')['fields']['cost_price']) && !empty(entity('products')['fields']['cost_price']['readonly']), 'sales see cost but can\'t change it');
+    ok(!field_enabled(entity('products')['fields']['cost_price']) && !isset(entity('products')['computed']['_margin']), 'sales see neither cost nor margin');
     [$data] = validate(entity('products'), ['cost_price' => '1'] + find('products', $id));
     ok(!array_key_exists('cost_price', $data), 'cost price not taken from the form');
     as_role('manager');
@@ -3681,6 +3681,9 @@ test('staff don\'t see revenue totals, balances, debt or Direct Debit status; ad
     $acct = (int)db_value("SELECT id FROM accounts ORDER BY id LIMIT 1");
     ob_start(); $_GET = ['tab' => 'customer']; account_view(entity('accounts'), find('accounts', $acct)); $html = ob_get_clean(); $_GET = [];
     ok(!str_contains($html, 'kpi-label">MRR') && !str_contains($html, 'Xero balance'), 'not on the customer page');
+    as_role('sales');
+    ok(!can('costs.view') && !can('costs.edit'), 'sales: no costs or margins');
+    ok(!isset(entity('services')['computed']['_margin']) && !in_array('_margin', entity('products')['list'], true), 'no margins for sales');
     foreach (['admin', 'finance', 'manager'] as $role) {
         as_role($role);
         ok(can('revenue.view'), "$role sees revenue");
@@ -3694,6 +3697,9 @@ test('staff don\'t see revenue totals, balances, debt or Direct Debit status; ad
     (require migrations_file())[36]();
     set_setting('role_permissions', json_encode(array_merge(json_decode((string)setting('role_permissions'), true), ['staff' => ['customers.edit', 'costs.view']])));
     (require migrations_file())[38]();
+    set_setting('role_permissions', json_encode(array_merge(json_decode((string)setting('role_permissions'), true), ['sales' => ['sales.edit', 'costs.view']])));
+    (require migrations_file())[39]();
+    ok(!in_array('costs.view', role_permissions()['sales'], true), 'costs taken off a saved sales role');
     ok(!in_array('costs.view', role_permissions()['staff'], true), 'costs taken off a saved staff role');
     $perms = role_permissions();
     ok(!in_array('finance.view', $perms['staff'], true) && !in_array('revenue.view', $perms['staff'], true) && in_array('revenue.view', $perms['admin'], true));

@@ -1115,4 +1115,12 @@ return [
             set_setting('role_permissions', json_encode($saved));
         }
     },
+    39 => function (): void {
+        // Sales no longer see cost prices and margins by default: take it off a saved sales role too.
+        $saved = json_decode((string)setting('role_permissions', ''), true);
+        if (is_array($saved) && is_array($saved['sales'] ?? null) && array_intersect(['costs.view', 'costs.edit'], $saved['sales'])) {
+            $saved['sales'] = array_values(array_diff($saved['sales'], ['costs.view', 'costs.edit']));
+            set_setting('role_permissions', json_encode($saved));
+        }
+    },
 ];

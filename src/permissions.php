@@ -79,7 +79,7 @@ const DEFAULT_ROLE_PERMISSIONS = [
     'manager'   => ['onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
                     'records.delete', 'export', 'finance.view', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'marketing.send'],
     'staff'     => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit'],
-    'sales'     => ['orders.check', 'customers.edit', 'sales.edit', 'tickets.edit', 'costs.view'],
+    'sales'     => ['orders.check', 'customers.edit', 'sales.edit', 'tickets.edit'],
     'support'   => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit'],
     'finance'   => ['suppliers.view', 'suppliers.edit', 'purchasing.edit', 'customers.edit', 'finance.view', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'export'],
     'read_only' => [],
