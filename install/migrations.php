@@ -1101,4 +1101,10 @@ return [
             set_setting('role_permissions', json_encode($saved));
         }
     },
+    37 => function (): void {
+        // Contact type: a company can be a customer, a supplier and/or a dealer. Existing records stay customers.
+        if (!column_exists('accounts', 'is_customer')) {
+            db()->exec('ALTER TABLE accounts ADD COLUMN is_customer TINYINT(1) NOT NULL DEFAULT 1 AFTER status');
+        }
+    },
 ];

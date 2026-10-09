@@ -197,8 +197,9 @@ function entities(): array
             'search'  => ['name', 'account_number', 'email', 'phone', 'postcode', 'company_number'],
             'filters' => ['status', 'type', 'owner_id', 'parent_id'],
             'presets' => [
+                'customers' => ['label' => 'Customers', 'sql' => 't.is_customer = 1'],
                 'dealers' => ['label' => 'Dealers', 'sql' => 't.is_dealer = 1'],
-                'suppliers' => ['label' => 'Also suppliers', 'sql' => 'EXISTS (SELECT 1 FROM suppliers su WHERE su.account_id = t.id)'],
+                'suppliers' => ['label' => 'Suppliers', 'sql' => 'EXISTS (SELECT 1 FROM suppliers su WHERE su.account_id = t.id)'],
             ],
             'default_sort' => ['name', 'asc'],
             'computed' => [

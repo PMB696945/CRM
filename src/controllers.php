@@ -87,7 +87,7 @@ function dashboard_controller(): void
 {
     $window = (int)config('renewal_window_days');
     $stats = [
-        'customers' => (int)db_value("SELECT COUNT(*) FROM accounts WHERE status = 'active'"),
+        'customers' => (int)db_value("SELECT COUNT(*) FROM accounts WHERE status = 'active' AND is_customer = 1"),
         'prospects' => (int)db_value("SELECT COUNT(*) FROM accounts WHERE status = 'prospect'"),
         'mrr'       => can('revenue.view') ? (float)db_value("SELECT COALESCE(SUM(monthly_price),0) FROM services WHERE status = 'active'") : null,
         'lines'     => (int)db_value("SELECT COUNT(*) FROM services WHERE status = 'active'"),
@@ -1445,4 +1445,55 @@ function mail_log_controller(): void
     $rows = db_all('SELECT * FROM mail_log' . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY id DESC LIMIT 300', $params);
     $failures = (int)db_value("SELECT COUNT(*) FROM mail_log WHERE status = 'failed' AND created_at > NOW() - INTERVAL 7 DAY");
     page('mail_log', compact('rows', 'q', 'failed', 'failures'), 'Email log');
+}
+
+/**
+ * Set a company's contact type: customer, supplier and/or dealer. $supplier is null to leave it as it is.
+ * Returns what changed ([label => [from, to]]); throws IntegrationException if it can't be done.
+ */
+function account_set_types(array $account, bool $customer, ?bool $supplier, bool $dealer): array
+{
+    $wasSupplier = (bool)account_supplier((int)$account['id']);
+    $supplier ??= $wasSupplier;
+    if (!$customer && !$dealer && !$supplier) {
+        throw new IntegrationException('Tick at least one: customer, supplier or dealer.');
+    }
+    if (!$dealer && $account['is_dealer'] && ($n = (int)db_value('SELECT COUNT(*) FROM accounts WHERE parent_id = ?', [$account['id']]))) {
+        throw new IntegrationException("{$account['name']} has $n customer" . ($n === 1 ? '' : 's') . ' under them as a dealer. Move them to another dealer first.');
+    }
+    $changes = [];
+    foreach (['Customer' => [(bool)$account['is_customer'], $customer], 'Supplier' => [$wasSupplier, $supplier], 'Dealer' => [(bool)$account['is_dealer'], $dealer]] as $label => [$was, $now]) {
+        if ($was !== $now) {
+            $changes[$label] = ['from' => $was ? 'Yes' : 'No', 'to' => $now ? 'Yes' : 'No'];
+        }
+    }
+    if (!$changes) {
+        return [];
+    }
+    db_exec('UPDATE accounts SET is_customer = ?, is_dealer = ? WHERE id = ?', [$customer ? 1 : 0, $dealer ? 1 : 0, $account['id']]);
+    if ($supplier !== $wasSupplier) {
+        account_set_supplier((int)$account['id'], $supplier);
+    }
+    audit('update', "Contact type of {$account['name']} changed", 'accounts', (int)$account['id'], null, $changes, (int)$account['id']);
+    return $changes;
+}
+
+/** Contact type (from the customer's page). */
+function account_types_controller(): void
+{
+    require_permission('customers.edit');
+    if (!is_post()) {
+        redirect(url('accounts'));
+    }
+    verify_csrf();
+    $account = db_one('SELECT * FROM accounts WHERE id = ?', [query_int('id') ?? 0]) ?? not_found('Customer not found.');
+    try {
+        $changed = account_set_types($account, !empty($_POST['is_customer']), can('suppliers.edit') ? !empty($_POST['is_supplier']) : null, !empty($_POST['is_dealer']));
+        if ($changed) {
+            flash('Contact type saved.');
+        }
+    } catch (IntegrationException $e) {
+        flash($e->getMessage(), 'error');
+    }
+    redirect(url('accounts', ['action' => 'view', 'id' => $account['id']]));
 }

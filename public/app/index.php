@@ -118,6 +118,7 @@ match (true) {
     $page === 'service_login' => service_login_controller(),
     $page === 'customer_portal_users' => customer_portal_users_controller(),
     $page === 'broadband_prices' => broadband_prices_controller(),
+    $page === 'account_types' => account_types_controller(),
     $page === 'purchase_orders' => purchase_orders_controller(),
     $page === 'price_import' => price_import_controller(),
     $page === 'abillity'  => abillity_controller(),

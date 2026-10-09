@@ -3692,6 +3692,27 @@ test('staff don\'t see revenue totals, balances, debt or Direct Debit status; ad
     set_setting('role_permissions', null);
 });
 
+test('contact type: a company can be a customer, a supplier and/or a dealer', function () {
+    $id = create('accounts', ['name' => 'Typeset Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    $a = fn() => db_one('SELECT * FROM accounts WHERE id = ?', [$id]);
+    eq('1', (string)$a()['is_customer'], 'customers by default');
+    eq(['Supplier' => ['from' => 'No', 'to' => 'Yes'], 'Dealer' => ['from' => 'No', 'to' => 'Yes']], account_set_types($a(), true, true, true));
+    ok((bool)account_supplier($id) && $a()['is_dealer'], 'now a supplier (with its supplier record) and a dealer');
+    eq(['Customer' => ['from' => 'Yes', 'to' => 'No']], account_set_types($a(), false, null, true), 'supplier left alone when not given');
+    ok(!in_array($id, array_column(list_rows('accounts', ['preset' => 'customers', 'per_page' => 0])['rows'], 'id'), true), 'not listed as a customer');
+    ok(in_array($id, array_column(list_rows('accounts', ['preset' => 'suppliers', 'per_page' => 0])['rows'], 'id'), true), 'listed as a supplier');
+    try { account_set_types($a(), false, false, false); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'at least one')); }
+    $child = create('accounts', ['name' => 'Under Typeset', 'type' => 'business', 'status' => 'active', 'parent_id' => (string)$id, 'parent_relationship' => 'referral', 'billing_same' => '1']);
+    try { account_set_types($a(), true, true, false); throw new Exception('expected failure'); }
+    catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'Move them to another dealer'), $e->getMessage()); }
+    db_exec('DELETE FROM accounts WHERE id = ?', [$child]);
+    eq([], account_set_types($a(), false, true, true), 'nothing changed');
+    ok(str_contains((string)db_value("SELECT changes FROM audit_log WHERE entity = 'accounts' AND entity_id = ? AND summary LIKE 'Contact type%' ORDER BY id DESC LIMIT 1", [$id]), 'Customer'), 'audited');
+    ob_start(); account_view(entity('accounts'), find('accounts', $id)); $html = ob_get_clean();
+    ok(str_contains($html, 'Contact type') && str_contains($html, 'name="is_customer"') && !str_contains($html, 'What they are to us'));
+});
+
 echo "Demo data\n";
 test('demo data loads', function () {
     require_once APP_ROOT . '/install/demo_data.php';

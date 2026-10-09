@@ -125,19 +125,25 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
 <div class="grid-side">
   <div>
     <section class="card">
-      <div class="card-head"><h2>What they are to us</h2></div>
-      <ul class="contact-list">
-        <li><a href="<?= h($tabUrl('customer')) ?>"><strong>Customer</strong></a> <?= badge($account['status']) ?>
-          <div class="small muted"><?= (int)$activeCount ?> live service<?= $activeCount === 1 ? '' : 's' ?><?= can('revenue.view') ? ' · ' . h(money($mrr)) . '/mo' : '' ?> · <?= (int)$openTickets ?> open ticket<?= $openTickets === 1 ? '' : 's' ?></div></li>
-        <li><?php if ($supplier): ?><?= isset($tabs['supplier']) ? '<a href="' . h($tabUrl('supplier')) . '"><strong>Supplier</strong></a>' : '<strong>Supplier</strong>' ?>
-            <?= $supplier['active'] ? '' : badge('disabled') ?><div class="small muted"><?= h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') ?><?= $supplier['account_number'] ? ' · our account ' . h($supplier['account_number']) : '' ?></div>
-          <?php else: ?><strong class="muted">Not a supplier</strong>
-            <?php if ($canEdit && can('suppliers.edit')): ?><div class="small">Tick “also a supplier” when you <a href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id])) ?>">edit the customer</a> to add a Supplier tab.</div><?php endif; ?>
-          <?php endif; ?></li>
-        <li><?php if ($account['is_dealer']): ?><a href="<?= h($tabUrl('dealer')) ?>"><strong>Dealer</strong></a>
-            <div class="small muted"><?= count($children) ?> customer<?= count($children) === 1 ? '' : 's' ?> under them<?= $account['dealer_commission_pct'] !== null ? ' · ' . h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) . '% commission' : '' ?></div>
-          <?php else: ?><strong class="muted">Not a dealer</strong><?php endif; ?></li>
-      </ul>
+      <div class="card-head"><h2>Contact type</h2></div>
+      <?php $canSupplier = can('suppliers.edit'); ?>
+      <form method="post" action="<?= h(url('account_types', ['id' => $id])) ?>">
+        <?= csrf_field() ?>
+        <ul class="contact-list">
+          <li><label class="check"><input type="checkbox" name="is_customer" value="1" <?= $account['is_customer'] ? 'checked' : '' ?> <?= $canEdit ? '' : 'disabled' ?>>
+              <strong>Customer</strong></label> <?= $account['is_customer'] ? badge($account['status']) : '' ?>
+            <div class="small muted"><?php if ($account['is_customer']): ?><a href="<?= h($tabUrl('customer')) ?>"><?= (int)$activeCount ?> live service<?= $activeCount === 1 ? '' : 's' ?></a><?= can('revenue.view') ? ' · ' . h(money($mrr)) . '/mo' : '' ?> · <?= (int)$openTickets ?> open ticket<?= $openTickets === 1 ? '' : 's' ?><?php else: ?>Not a customer<?php endif; ?></div></li>
+          <li><label class="check"><input type="checkbox" name="is_supplier" value="1" <?= $supplier ? 'checked' : '' ?> <?= $canEdit && $canSupplier ? '' : 'disabled' ?>>
+              <strong>Supplier</strong></label> <?= $supplier && !$supplier['active'] ? badge('disabled') : '' ?>
+            <div class="small muted"><?php if ($supplier): ?><?= isset($tabs['supplier']) ? '<a href="' . h($tabUrl('supplier')) . '">' . h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') . '</a>' : h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') ?><?= $supplier['account_number'] ? ' · our account ' . h($supplier['account_number']) : '' ?>
+              <?php else: ?>Ticking this adds a Supplier tab for their products, purchase orders and invoices<?php endif; ?></div></li>
+          <li><label class="check"><input type="checkbox" name="is_dealer" value="1" <?= $account['is_dealer'] ? 'checked' : '' ?> <?= $canEdit ? '' : 'disabled' ?>>
+              <strong>Dealer</strong></label>
+            <div class="small muted"><?php if ($account['is_dealer']): ?><a href="<?= h($tabUrl('dealer')) ?>"><?= count($children) ?> customer<?= count($children) === 1 ? '' : 's' ?> under them</a><?= $account['dealer_commission_pct'] !== null ? ' · ' . h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) . '% commission' : '' ?>
+              <?php else: ?>Ticking this lets other customers sit under them, and adds a Dealer tab<?php endif; ?></div></li>
+        </ul>
+        <?php if ($canEdit): ?><div style="margin-top:.75rem"><button class="btn btn-sm">Save contact type</button></div><?php endif; ?>
+      </form>
     </section>
 
     <section class="card">
