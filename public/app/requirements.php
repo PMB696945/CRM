@@ -33,6 +33,11 @@ function crm_fail_page($title, $html)
 
 function crm_php_handler_saved_file()
 {
+    // storage/ is never replaced by an upload, so prefer it; public/app/ for older installs.
+    $storage = dirname(dirname(dirname(__FILE__))) . '/storage';
+    if (is_dir($storage) && (is_writable($storage) || is_file($storage . '/php-handler.json'))) {
+        return $storage . '/php-handler.json';
+    }
     return dirname(__FILE__) . '/php-handler.json';
 }
 
@@ -82,6 +87,9 @@ function crm_php_handler_remember()
 function crm_php_handler_restore()
 {
     $saved = crm_php_handler_saved_file();
+    if (!is_file($saved)) {
+        $saved = dirname(__FILE__) . '/php-handler.json';
+    }
     $found = is_file($saved) ? json_decode((string)@file_get_contents($saved), true) : null;
     if (!is_array($found)) {
         return false;

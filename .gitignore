@@ -8,3 +8,4 @@ storage/
 app.key
 install/setup-code.txt
 public/app/php-handler.json
+storage/php-handler.json
