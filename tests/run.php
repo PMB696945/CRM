@@ -2427,6 +2427,7 @@ test('portal: orders need signed master terms, and each has its own agreement wi
     eq('Y', $sent['order']['attributes']['fixed-ip'], 'static IP ordered');
     eq(['service-id' => $go['giacom_service_id'], 'fixed-ip' => 'Y', 'routed-ip' => 'Y', 'allocation-size' => '8'], array_diff_key(end(g_state()['change_ips']), ['auth' => 1]), 'block of 8 requested');
     eq((int)$portal['fttc'], (int)db_value('SELECT product_id FROM services WHERE id = ?', [$go['service_id']]), 'the pending service is our product');
+    eq('29.50', db_value('SELECT monthly_price FROM services WHERE id = ?', [$go['service_id']]), 'billed to the dealer at the dealer price');
     eq($slots[0]['date'], $go['crd'], 'the chosen appointment was booked');
     usleep(300000);
     $accepted = array_values(array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'X-Rcpt: dee@northern.example')));
@@ -3624,6 +3625,44 @@ test('broadband prices: edit in place, download and upload a CSV with a preview,
     as_role('admin');
     ob_start(); render('broadband_prices', ['products' => bb_products(), 'showInactive' => false, 'canCost' => true, 'canEditCost' => true]); $html = ob_get_clean();
     ok(str_contains($html, 'name="p[' . $a . '][monthly_price]"') && str_contains($html, 'data-bb-margin') && str_contains($html, 'p[new][sku]'), 'the editable page');
+});
+
+echo "Costs recorded on sales\n";
+test('the cost price at the time of ordering is kept on services and quote lines, even when the product cost changes', function () {
+    $acct = create('accounts', ['name' => 'Cost History Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    $prod = create('products', ['sku' => 'COST-T-1', 'name' => 'Costed Fibre', 'category' => 'broadband', 'monthly_price' => '39.99', 'cost_price' => '24.50', 'term_months' => '24', 'active' => '1']);
+    $s1 = insert_row('services', ['account_id' => $acct, 'product_id' => $prod, 'identifier' => 'COST-LINE-1', 'status' => 'active']);
+    eq(['39.99', '24.50'], array_values(db_one('SELECT monthly_price, cost_price FROM services WHERE id = ?', [$s1])), 'cost recorded when it was sold');
+    db_exec('UPDATE products SET cost_price = 26.00 WHERE id = ?', [$prod]);
+    eq('24.50', db_value('SELECT cost_price FROM services WHERE id = ?', [$s1]), 'a later product cost change leaves sold services alone');
+    $s2 = insert_row('services', ['account_id' => $acct, 'product_id' => $prod, 'identifier' => 'COST-LINE-2', 'status' => 'active']);
+    eq('26.00', db_value('SELECT cost_price FROM services WHERE id = ?', [$s2]), 'new sales use the new cost');
+    $s3 = insert_row('services', ['account_id' => $acct, 'product_id' => $prod, 'identifier' => 'COST-LINE-3', 'status' => 'active', 'cost_price' => 20.00]);
+    eq('20.00', db_value('SELECT cost_price FROM services WHERE id = ?', [$s3]), 'a cost given explicitly is kept');
+    // A yearly-billed product's cost is recorded per month, like its price.
+    $yearly = create('products', ['sku' => 'COST-T-Y', 'name' => 'Yearly thing', 'category' => 'other', 'billing_frequency' => 'yearly', 'monthly_price' => '120', 'cost_price' => '60', 'term_months' => '12', 'active' => '1']);
+    $s4 = insert_row('services', ['account_id' => $acct, 'product_id' => $yearly, 'identifier' => 'COST-Y', 'status' => 'active']);
+    eq('5.00', db_value('SELECT cost_price FROM services WHERE id = ?', [$s4]));
+    // A changed cost on a service (supplier put the price up) goes in the billing diary.
+    $before = db_one('SELECT * FROM services WHERE id = ?', [$s1]);
+    update_row('services', $s1, ['cost_price' => 25.00]);
+    eq(['39.99', '25.00', 'broadband'], array_values(db_one('SELECT monthly_price, cost_price, service_type FROM services WHERE id = ?', [$s1])), 'changing only the cost leaves the price alone');
+    service_diary_record($s1, $before);
+    $c = db_one("SELECT * FROM service_changes WHERE service_id = ? AND change_type = 'cost' ORDER BY id DESC LIMIT 1", [$s1]);
+    eq(['£24.50/mo', '£25.00/mo', null], [$c['from_value'], $c['to_value'], $c['monthly_change']], 'cost change recorded; it isn\'t a billing change');
+    // Quote lines: cost noted when quoted, then recorded again at the moment it's ordered; services made from them carry it.
+    $line = db_one('SELECT l.* FROM quote_lines l JOIN quotes q ON q.id = l.quote_id WHERE l.product_id IS NOT NULL ORDER BY l.id LIMIT 1');
+    ok($line !== null, 'a quote line with a product exists');
+    db_exec('UPDATE products SET cost_price = 3.21 WHERE id = ?', [$line['product_id']]);
+    quote_record_costs((int)$line['quote_id']);
+    $freq = db_value('SELECT billing_frequency FROM products WHERE id = ?', [$line['product_id']]);
+    eq(number_format(monthly_equivalent(3.21, $freq), 2), db_value('SELECT cost_price FROM quote_lines WHERE id = ?', [$line['id']]), 'the cost when ordered');
+    db_exec('UPDATE products SET cost_price = 9.99 WHERE id = ?', [$line['product_id']]);
+    eq(number_format(monthly_equivalent(3.21, $freq), 2), db_value('SELECT cost_price FROM quote_lines WHERE id = ?', [$line['id']]), 'kept after the product cost changes');
+    // Margins on the customer's services.
+    $rows = list_rows('services', ['filters' => ['account_id' => $acct], 'per_page' => 0])['rows'];
+    $m = array_column($rows, '_margin', 'identifier');
+    eq('37.5', (string)$m['COST-LINE-1'], 'margin from the recorded cost: (39.99 − 25) ÷ 39.99');
 });
 
 echo "Demo data\n";

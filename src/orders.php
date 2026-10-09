@@ -142,6 +142,7 @@ function order_create_from_quote(array $quote, bool $notify = true): array
     if ($existing = db_one('SELECT * FROM customer_orders WHERE quote_id = ?', [$quote['id']])) {
         return $existing;
     }
+    quote_record_costs((int)$quote['id']);
     $totals = quote_totals(quote_lines((int)$quote['id']));
     db_exec('INSERT INTO customer_orders (quote_id, account_id, title, contact_name, contact_email, token, monthly_total, setup_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
         $quote['id'], $quote['account_id'], mb_substr((string)$quote['title'], 0, 200),

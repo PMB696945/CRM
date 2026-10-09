@@ -343,7 +343,7 @@ function contract_create_services(array $contract): int
             $ids[] = insert_row('services', [
                 'account_id' => $contract['account_id'], 'product_id' => $l['product_id'], 'service_type' => $l['service_type'],
                 'identifier' => 'TBC – ' . $l['description'] . ((int)$l['quantity'] > 1 ? " #$n" : ''),
-                'carrier' => null, 'status' => 'pending', 'monthly_price' => $l['monthly_price'], 'setup_fee' => $l['setup_fee'],
+                'carrier' => null, 'status' => 'pending', 'monthly_price' => $l['monthly_price'], 'cost_price' => $l['cost_price'] ?? null, 'setup_fee' => $l['setup_fee'],
                 'start_date' => null, 'term_months' => $l['term_months'], 'contract_end_date' => null, 'install_address' => null,
                 'notes' => "From contract {$contract['reference']}",
             ]);

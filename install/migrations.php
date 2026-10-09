@@ -1079,4 +1079,18 @@ return [
             db()->exec('ALTER TABLE tickets ADD COLUMN raised_by_customer_user_id INT UNSIGNED NULL');
         }
     },
+    35 => function (): void {
+        // The cost price at the time each service (and quote line) was sold, kept even when the product's cost changes later.
+        if (!column_exists('services', 'cost_price')) {
+            db()->exec('ALTER TABLE services ADD COLUMN cost_price DECIMAL(10,2) NULL AFTER monthly_price');
+        }
+        if (!column_exists('quote_lines', 'cost_price')) {
+            db()->exec('ALTER TABLE quote_lines ADD COLUMN cost_price DECIMAL(10,2) NULL AFTER monthly_price');
+        }
+        // Existing services and quotes: today's product cost is the best record there is.
+        db()->exec('UPDATE services s JOIN products p ON p.id = s.product_id SET s.cost_price = ' . billing_monthly_sql('p.cost_price', 'p.billing_frequency')
+            . ' WHERE s.cost_price IS NULL AND p.cost_price IS NOT NULL');
+        db()->exec('UPDATE quote_lines l JOIN products p ON p.id = l.product_id SET l.cost_price = ' . billing_monthly_sql('p.cost_price', 'p.billing_frequency')
+            . ' WHERE l.cost_price IS NULL AND p.cost_price IS NOT NULL');
+    },
 ];

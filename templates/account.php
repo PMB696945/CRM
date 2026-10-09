@@ -291,7 +291,15 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
   <div>
     <section class="card">
       <div class="card-head"><h2>Services &amp; lines</h2><?php if (can('services.edit')): ?><a class="btn btn-sm" href="<?= h($new('services', ['status' => 'active'])) ?>">+ Add service</a><?php endif; ?></div>
-      <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => $sites ? ['identifier', 'service_type', 'site_id', 'carrier', 'status', 'monthly_price', 'contract_end_date'] : ['identifier', 'service_type', 'carrier', 'status', 'monthly_price', 'contract_end_date']]); ?>
+      <?php render('_table', ['entity' => entity('services'), 'name' => 'services', 'rows' => $services, 'columns' => array_values(array_filter(['identifier', 'service_type', $sites ? 'site_id' : null, 'carrier', 'status', 'monthly_price', can('costs.view') ? 'cost_price' : null, can('costs.view') ? '_margin' : null, 'contract_end_date']))]); ?>
+      <?php if (can('costs.view')):
+          $live = array_filter($services, fn($s) => $s['status'] === 'active');
+          $costed = array_filter($live, fn($s) => $s['cost_price'] !== null);
+          $rev = array_sum(array_map(fn($s) => (float)$s['monthly_price'], $costed));
+          $cost = array_sum(array_map(fn($s) => (float)$s['cost_price'], $costed));
+          $unknown = count($live) - count($costed); ?>
+        <?php if ($costed): ?><p class="small muted" style="margin-top:.5rem">Live services with a recorded cost: <?= h(money($rev)) ?>/mo, cost <?= h(money($cost)) ?>/mo, margin <b><?= h(money($rev - $cost)) ?>/mo</b><?= $rev > 0 ? ' (' . number_format(($rev - $cost) / $rev * 100, 1) . '%)' : '' ?><?= $unknown ? ' · ' . $unknown . ' more without a recorded cost' : '' ?>.</p><?php endif; ?>
+      <?php endif; ?>
       <?php $withLogin = array_filter($services, 'service_has_login'); if ($withLogin): ?>
         <h3 class="small muted" style="margin-top:1rem">Logins &amp; IP addresses</h3>
         <div class="table-wrap"><table class="table compact">

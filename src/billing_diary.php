@@ -13,6 +13,7 @@ const SERVICE_CHANGE_TYPES = [
     'live'        => 'Went live',
     'price'       => 'Price change',
     'setup'       => 'Setup fee change',
+    'cost'        => 'Cost change',
     'product'     => 'Product change',
     'number'      => 'Number / circuit change',
     'start_date'  => 'Start date change',
@@ -92,6 +93,9 @@ function service_diary_record(int $serviceId, ?array $before): int
         $billedNow = service_is_billed($now) && service_is_billed($was);
         if (round($wasMonthly, 2) !== round($monthly, 2) && !($statusChanged && in_array($now, ['ceased'], true))) {
             $add('price', $name, money($wasMonthly) . '/mo', money($monthly) . '/mo', $billedNow ? round($monthly - $wasMonthly, 2) : null);
+        }
+        if (array_key_exists('cost_price', $before) && ($before['cost_price'] === null ? null : round((float)$before['cost_price'], 2)) !== ($a['cost_price'] === null ? null : round((float)$a['cost_price'], 2))) {
+            $add('cost', $name, $before['cost_price'] === null ? '—' : money((float)$before['cost_price']) . '/mo', $a['cost_price'] === null ? '—' : money((float)$a['cost_price']) . '/mo');
         }
         if (round((float)$before['setup_fee'], 2) !== round((float)$a['setup_fee'], 2)) {
             $add('setup', $name, money((float)$before['setup_fee']), money((float)$a['setup_fee']));

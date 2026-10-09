@@ -580,7 +580,7 @@ function giacom_place_order(array $check, array $product, array $o): int
         $serviceId = insert_row('services', [
             'account_id' => $account['id'], 'site_id' => $check['site_id'] ?: null, 'product_id' => $o['crm_product_id'] ?: null,
             'service_type' => giacom_service_type($product['technology']), 'identifier' => $o['cli'] ?: $fullUsername,
-            'carrier' => 'Giacom', 'status' => 'pending', 'monthly_price' => null, 'setup_fee' => null,
+            'carrier' => 'Giacom', 'status' => 'pending', 'monthly_price' => $o['service_monthly_price'] ?? null, 'setup_fee' => $o['service_setup_fee'] ?? null,
             'start_date' => null, 'term_months' => null, 'contract_end_date' => null,
             'install_address' => $check['site_id'] ? null : mb_substr((string)$check['address_label'], 0, 255),
             'notes' => "Giacom $type order $orderId: {$product['name']}" . ($fullUsername ? "\nBroadband username: $fullUsername" : ''),

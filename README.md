@@ -410,6 +410,16 @@ The SKU becomes the Xero item code (Xero allows up to 30 characters), the name i
 
 For bulk changes, **Download CSV**, edit it in Excel and upload it. You see every change (old and new price) before pressing **Apply**. Rows are matched by **SKU**: a new SKU adds a broadband product, a blank cell leaves that value alone, and rows for non-broadband products or with invalid prices are listed and skipped. Every change is in the audit trail. A product linked to a preferred supplier price has its buy price kept in step with that supplier's price list.
 
+## Cost and margin on each sale
+
+Every service keeps the **monthly cost** it had when it was ordered, alongside the price it was sold at. Changing a product's cost or price later (on Broadband prices, a supplier price list, or the product) only affects new sales.
+
+- **Quotes:** each line notes the product's cost when quoted, then records it again when the quote is accepted (that's when it's ordered). The services created when the agreement is signed carry that cost.
+- **Broadband orders:** the service records the product's cost when the order is placed with Giacom. Dealer orders are billed at the dealer price.
+- **Services added by hand:** the product's cost at that moment, unless you enter one.
+- If a supplier puts up the price of an existing line, change that service's **Monthly cost**. The change is listed in the billing diary as a cost change, not a billing change.
+- Services show their cost and **margin** to roles that can see costs, and a customer's *Services & lines* card totals the monthly margin of their live services. Services that existed before this was added were given the product's cost at the time of the update, which is the best record available.
+
 ## Giacom: broadband availability and orders
 
 **Set up** (Admin → Giacom): enter the API username and password Giacom gave you (and client ID if you have one), your broadband realm (for usernames like `acc10001-1@yourisp.net`) and default care level. The login is tested with Giacom before it's saved, and the password is stored encrypted. The server's PHP needs the `dom` and `simplexml` extensions (standard on almost all hosting).

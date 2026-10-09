@@ -71,12 +71,30 @@ function quote_parse_lines(array $post): array
     return [$lines, $errors];
 }
 
+/** A product's cost per month today (null if it has none). */
+function product_monthly_cost(?int $productId): ?float
+{
+    $p = $productId ? db_one('SELECT cost_price, billing_frequency FROM products WHERE id = ?', [$productId]) : null;
+    return $p && $p['cost_price'] !== null ? monthly_equivalent($p['cost_price'], $p['billing_frequency']) : null;
+}
+
+/** When a quote is ordered (accepted), record each line's cost as it is now: that's what the sale costs us. */
+function quote_record_costs(int $quoteId): void
+{
+    foreach (db_all('SELECT id, product_id FROM quote_lines WHERE quote_id = ? AND product_id IS NOT NULL', [$quoteId]) as $l) {
+        if (($cost = product_monthly_cost((int)$l['product_id'])) !== null) {
+            db_exec('UPDATE quote_lines SET cost_price = ? WHERE id = ?', [$cost, $l['id']]);
+        }
+    }
+}
+
 function quote_save_lines(int $quoteId, array $lines): void
 {
     db_exec('DELETE FROM quote_lines WHERE quote_id = ?', [$quoteId]);
     foreach (array_values($lines) as $i => $l) {
-        db_exec('INSERT INTO quote_lines (quote_id, product_id, service_type, description, quantity, monthly_price, setup_fee, term_months, sort)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [$quoteId, $l['product_id'], $l['service_type'], $l['description'], $l['quantity'], $l['monthly_price'], $l['setup_fee'], $l['term_months'], $i]);
+        db_exec('INSERT INTO quote_lines (quote_id, product_id, service_type, description, quantity, monthly_price, cost_price, setup_fee, term_months, sort)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$quoteId, $l['product_id'], $l['service_type'], $l['description'], $l['quantity'], $l['monthly_price'],
+            product_monthly_cost($l['product_id']), $l['setup_fee'], $l['term_months'], $i]);
     }
 }
 

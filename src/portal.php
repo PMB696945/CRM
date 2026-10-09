@@ -433,6 +433,10 @@ function dealer_order_approve(array $d): array
         'crm_product_id' => (string)$d['product_id'], 'appointment' => '',
     ];
     $o['client_ref'] = trim($d['reference'] . ' ' . ($v['client_ref'] ?? ''));
+    // Billed to the dealer at their price (recorded with today's cost on the service).
+    $ours = db_one('SELECT dealer_price, dealer_setup_fee FROM products WHERE id = ?', [$d['product_id']]);
+    $o['service_monthly_price'] = $ours['dealer_price'] ?? null;
+    $o['service_setup_fee'] = $ours['dealer_setup_fee'] ?? null;
     db_exec('UPDATE dealer_orders SET last_error = NULL WHERE id = ?', [$d['id']]);
     try {
         $giacomId = giacom_place_order($check, $product, $o);

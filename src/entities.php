@@ -324,6 +324,8 @@ function entities(): array
                 'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
                 'status'            => ['label' => 'Status', 'type' => 'select', 'options' => opts(['pending', 'active', 'suspended', 'ceased']), 'required' => true],
                 'monthly_price'     => ['label' => 'Monthly price', 'type' => 'money'],
+                'cost_price'        => ['label' => 'Monthly cost', 'type' => 'money', 'help' => 'What it costs you per month, recorded when it was ordered (from the product). Change it only when the supplier\'s price for this line changes',
+                    'if' => fn() => can('costs.view'), 'readonly' => !can('costs.edit')],
                 'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money'],
                 'start_date'        => ['label' => 'Contract start', 'type' => 'date'],
                 'term_months'       => ['label' => 'Term', 'type' => 'term'],
@@ -605,6 +607,9 @@ function entities(): array
 
     // Cost prices and margins only for people allowed to see them.
     if (can('costs.view')) {
+        $entities['services']['computed']['_margin'] = ['label' => 'Margin', 'type' => 'percent',
+            'sql' => '(CASE WHEN t.cost_price IS NULL OR t.monthly_price = 0 THEN NULL ELSE ROUND((t.monthly_price - t.cost_price) / t.monthly_price * 100, 1) END)'];
+        array_splice($entities['services']['list'], array_search('monthly_price', $entities['services']['list'], true) + 1, 0, ['cost_price', '_margin']);
         $entities['products']['computed']['_margin'] = ['label' => 'Margin', 'type' => 'percent',
             'sql' => '(CASE WHEN t.cost_price IS NULL OR t.monthly_price = 0 THEN NULL ELSE ROUND((t.monthly_price - t.cost_price) / t.monthly_price * 100, 1) END)'];
     } else {
@@ -748,11 +753,18 @@ function before_save(string $name, array $data, ?array $existing): array
                     $data['monthly_price'] ??= monthly_equivalent($product['monthly_price'], $product['billing_frequency'] ?? 'monthly');
                     $data['setup_fee'] ??= $product['setup_fee'];
                     $data['term_months'] ??= $product['term_months'];
+                    // The cost when it was ordered: kept, whatever the product's cost does later.
+                    if ($existing === null && ($data['cost_price'] ?? null) === null && $product['cost_price'] !== null) {
+                        $data['cost_price'] = monthly_equivalent($product['cost_price'], $product['billing_frequency'] ?? 'monthly');
+                    }
                 }
             }
-            $data['service_type'] = $data['service_type'] ?: 'other';
-            $data['monthly_price'] ??= 0;
-            $data['setup_fee'] ??= 0;
+            // Defaults for a new service, or for fields being saved (a partial update leaves the others alone).
+            foreach (['service_type' => 'other', 'monthly_price' => 0, 'setup_fee' => 0] as $col => $default) {
+                if ($existing === null || array_key_exists($col, $data)) {
+                    $data[$col] = ($data[$col] ?? null) ?: ($col === 'service_type' ? $default : ($data[$col] ?? $default));
+                }
+            }
             if (empty($data['contract_end_date']) && !empty($data['start_date']) && !empty($data['term_months'])) {
                 $data['contract_end_date'] = contract_end_date($data['start_date'], (int)$data['term_months']);
             }
