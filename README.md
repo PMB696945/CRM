@@ -38,7 +38,7 @@ You don't need root or SSH access. Pick whichever of these fits your hosting.
 
 ### Option A: shared hosting (cPanel, Plesk, DirectAdmin…), no SSH needed
 
-1. **Check your PHP version.** You need PHP 8.1 or newer, with the `pdo_mysql` extension (it's on by default almost everywhere). In cPanel, check under *MultiPHP Manager* or *Select PHP Version*.
+1. **Check your PHP version.** You need PHP 8.1 or newer, with the `pdo_mysql` extension (it's on by default almost everywhere). In cPanel, check under *MultiPHP Manager* or *Select PHP Version*. cPanel keeps this setting as a few lines in the site's `.htaccess`, which uploading the CRM's files replaces. Once the CRM has run on PHP 8.1 it remembers those lines and puts them back by itself after an upload (you'll see a "One moment" page that reloads). If you see "PHP 8.1 or newer is required" anyway, choose another version in MultiPHP Manager and then 8.1 again.
 2. **Create a database.** In cPanel open *MySQL® Databases* (or use the *MySQL Database Wizard*). Create a database and a user, then add the user to the database with **All Privileges**. Write down the full names, which cPanel prefixes with your account name (e.g. `myaccount_crm`), and the password.
    - **Privileges:** *All Privileges* is the simple choice and is safe here, because cPanel limits it to this one database. For the minimum, tick `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `INDEX`, `ALTER` and `REFERENCES`. (`REFERENCES` is needed on MySQL 8.0.22+ for the foreign keys between tables.)
    - After installing, you can tighten it further to just `SELECT`, `INSERT`, `UPDATE`, `DELETE`. The CRM runs fine that way. Grant the others back temporarily before an upgrade that changes the database structure.

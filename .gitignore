@@ -7,3 +7,4 @@ error_log
 storage/
 app.key
 install/setup-code.txt
+public/app/php-handler.json

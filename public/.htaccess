@@ -1,6 +1,6 @@
 Options -Indexes
 DirectoryIndex index.php
 
-<FilesMatch "(\.log|^error_log)$">
+<FilesMatch "(\.log|^error_log|^php-handler\.json)$">
     Require all denied
 </FilesMatch>
