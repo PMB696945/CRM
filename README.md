@@ -404,6 +404,12 @@ Products & tariffs can be created in Xero as **items**, so they can be picked on
 
 The SKU becomes the Xero item code (Xero allows up to 30 characters), the name its name (first 50 characters), the sale price its sales price and the cost price its purchase price. Each product's **sales and purchases nominal codes** become the item's accounts (the codes on the Xero page are defaults for new products). Press **Load nominal codes from Xero** to have product forms offer your chart of accounts and reject codes that don't exist. The description notes the billing cycle. Sending again updates the same item. The product list shows whether each product is in Xero, has changed since it was sent, or had a problem, with tabs to find them. Xero's reason is shown on the product.
 
+## Broadband prices
+
+**Products → Broadband prices** lists every broadband product with its **buy** (cost) price, **sell** price, margin, setup fee, **dealer** price and our margin on it, all per month ex VAT. Edit any cell and press **Save prices**; margins update as you type, and a blank row at the bottom adds a product. Buy prices are only shown to roles that can see costs, and only editable by those that can edit them.
+
+For bulk changes, **Download CSV**, edit it in Excel and upload it. You see every change (old and new price) before pressing **Apply**. Rows are matched by **SKU**: a new SKU adds a broadband product, a blank cell leaves that value alone, and rows for non-broadband products or with invalid prices are listed and skipped. Every change is in the audit trail. A product linked to a preferred supplier price has its buy price kept in step with that supplier's price list.
+
 ## Giacom: broadband availability and orders
 
 **Set up** (Admin → Giacom): enter the API username and password Giacom gave you (and client ID if you have one), your broadband realm (for usernames like `acc10001-1@yourisp.net`) and default care level. The login is tested with Giacom before it's saved, and the password is stored encrypted. The server's PHP needs the `dom` and `simplexml` extensions (standard on almost all hosting).

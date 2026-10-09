@@ -496,3 +496,18 @@ document.querySelectorAll('form[data-live-search]').forEach((form) => {
     if (document.activeElement === input) { e.preventDefault(); clearTimeout(timer); last = null; run(); }
   });
 });
+
+// Broadband prices: margins update as prices are typed.
+document.querySelectorAll('tr[data-bb-row]').forEach((tr) => {
+  const num = (el) => { const v = parseFloat(String(el ? (el.value ?? el.dataset.bbBuy) : '').replace(/[£,\s]/g, '')); return Number.isFinite(v) ? v : null; };
+  const buyEl = () => tr.querySelector('[data-bb="buy"]') || tr.querySelector('[data-bb-buy]');
+  const pct = (price, cost) => (price !== null && cost !== null && price > 0 ? (((price - cost) / price) * 100).toFixed(1) + '%' : '—');
+  const update = () => {
+    const buy = num(buyEl());
+    const m = tr.querySelector('[data-bb-margin]');
+    const dm = tr.querySelector('[data-bb-dealer-margin]');
+    if (m) m.textContent = pct(num(tr.querySelector('[data-bb="sell"]')), buy);
+    if (dm) dm.textContent = pct(num(tr.querySelector('[data-bb="dealer"]')), buy);
+  };
+  tr.addEventListener('input', update);
+});

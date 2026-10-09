@@ -24,7 +24,7 @@ $nav = [
     ],
     'Products' => [
         'products'      => ['cube', 'Products & tariffs'],
-    ] + (can('suppliers.view') || can('suppliers.edit') ? ['supplier_products' => ['pound', 'Supplier prices']] : []),
+    ] + (can('products.edit') ? ['broadband_prices' => ['signal', 'Broadband prices']] : []) + (can('suppliers.view') || can('suppliers.edit') ? ['supplier_products' => ['pound', 'Supplier prices']] : []),
     'Support' => [
         'tickets'       => ['ticket', 'Support tickets'],
     ] + (can('tickets.edit') && ticket_queue_group_ids() ? ['queue' => ['inbox', 'Ticket queue']] : []),

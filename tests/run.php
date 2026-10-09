@@ -3579,6 +3579,53 @@ test('billing diary: every service change is recorded with its effect on billing
     eq(date('Y-m'), billing_diary_month('2026-13'));
 });
 
+echo "Broadband prices\n";
+test('broadband prices: edit in place, download and upload a CSV with a preview, and only broadband products', function () {
+    $a = create('products', ['sku' => 'BB-T-80', 'name' => 'Test Fibre 80', 'category' => 'broadband', 'monthly_price' => '30', 'term_months' => '24', 'active' => '1']);
+    $b = create('products', ['sku' => 'BB-T-1000', 'name' => 'Test Fibre 1000', 'category' => 'broadband', 'monthly_price' => '49.99', 'term_months' => '24', 'active' => '1']);
+    create('products', ['sku' => 'MOB-T-1', 'name' => 'Test SIM', 'category' => 'mobile', 'monthly_price' => '10', 'term_months' => '24', 'active' => '1']);
+    // Editing on the page: every field of a row, blank optional fields clear.
+    $plan = bb_plan([['line' => 'Test Fibre 80', 'id' => $a, 'values' => ['sku' => 'BB-T-80', 'name' => 'Test Fibre 80', 'supplier_product_ids' => '34350', 'term_months' => '24',
+        'cost_price' => '24.50', 'monthly_price' => '£30.99', 'setup_fee' => '', 'dealer_price' => '27.99', 'dealer_setup_fee' => '', 'active' => '1']]], true);
+    eq([], $plan['errors']);
+    eq(['24.50', '30.99', '27.99', '34350'], [(string)$plan['changes'][$a]['cost_price'][1] === '24.5' ? '24.50' : '?', number_format($plan['changes'][$a]['monthly_price'][1], 2), number_format($plan['changes'][$a]['dealer_price'][1], 2), $plan['changes'][$a]['supplier_product_ids'][1]]);
+    eq([1, 0], bb_apply($plan, 'edited'));
+    $p = db_one('SELECT * FROM products WHERE id = ?', [$a]);
+    eq(['24.50', '30.99', '27.99', '34350'], [$p['cost_price'], $p['monthly_price'], $p['dealer_price'], $p['supplier_product_ids']]);
+    eq(0.2094, round(bb_margin($p['monthly_price'], $p['cost_price']), 4));
+    ok(str_contains((string)db_value("SELECT changes FROM audit_log WHERE entity = 'products' AND entity_id = ? ORDER BY id DESC LIMIT 1", [$a]), '30.99'), 'audited with what changed: ' . db_value("SELECT CONCAT(summary, ' ', COALESCE(changes,'')) FROM audit_log WHERE entity = 'products' AND entity_id = ? ORDER BY id DESC LIMIT 1", [$a]));
+    // Download: broadband only.
+    $csv = bb_csv(bb_products());
+    ok(str_contains($csv, 'BB-T-80') && str_contains($csv, '30.99') && !str_contains($csv, 'MOB-T-1'), 'CSV of broadband products');
+    // Upload: matched by SKU, aliases for headers, blank cells leave values, new SKUs added, bad rows reported.
+    $file = tempnam(sys_get_temp_dir(), 'bb') . '.csv';
+    file_put_contents($file, "SKU,Product,Buy,Sell (monthly),Dealer price\nBB-T-80,,,31.99,\nBB-T-1000,,40.50,50.99,45.99\nBB-T-NEW,Test Fibre 330,30.00,37.99,33.99\nBB-T-BAD,Bad,abc,10,\nMOB-T-1,,,12,\nBB-T-1000,,1,1,1\n");
+    $rows = price_file_rows($file, 'prices.csv');
+    $map = bb_csv_map($rows[0]);
+    eq(['sku' => 0, 'name' => 1, 'cost_price' => 2, 'monthly_price' => 3, 'dealer_price' => 4], $map);
+    $items = [];
+    foreach (array_slice($rows, 1) as $i => $r) { $items[] = ['line' => 'Row ' . ($i + 2), 'id' => null, 'values' => array_map(fn($idx) => (string)($r[$idx] ?? ''), $map)]; }
+    $plan = bb_plan($items, false);
+    eq(['monthly_price'], array_keys($plan['changes'][$a]), 'blank cells leave values as they are');
+    eq(['cost_price', 'monthly_price', 'dealer_price'], array_keys($plan['changes'][$b]));
+    eq(1, count($plan['new']));
+    eq(['BB-T-NEW', 'Test Fibre 330', 37.99], [$plan['new'][0]['sku'], $plan['new'][0]['name'], $plan['new'][0]['monthly_price']]);
+    eq(3, count($plan['errors']), implode(' | ', $plan['errors']));
+    ok(stripos(implode(' ', $plan['errors']), 'mobile product, not broadband') !== false && str_contains(implode(' ', $plan['errors']), 'more than once'), implode(' | ', $plan['errors']));
+    eq([2, 1], bb_apply($plan, 'CSV prices.csv'));
+    eq(['50.99', '40.50', '45.99'], array_values(db_one('SELECT monthly_price, cost_price, dealer_price FROM products WHERE id = ?', [$b])));
+    eq(['broadband', '24', '1'], array_values(db_one("SELECT category, term_months, active FROM products WHERE sku = 'BB-T-NEW'")));
+    eq('10.00', db_value("SELECT monthly_price FROM products WHERE sku = 'MOB-T-1'"), 'other products untouched');
+    // Someone who can't edit costs can't change buy prices.
+    as_role('support');
+    $plan = bb_plan([['line' => 'x', 'id' => $a, 'values' => ['cost_price' => '1.00', 'monthly_price' => '32.99']]], false);
+    eq(['monthly_price'], array_keys($plan['changes'][$a]), 'buy price needs "edit costs"');
+    ok(!str_contains(bb_csv(bb_products()), 'Buy'), 'buy prices hidden from roles that can\'t see costs');
+    as_role('admin');
+    ob_start(); render('broadband_prices', ['products' => bb_products(), 'showInactive' => false, 'canCost' => true, 'canEditCost' => true]); $html = ob_get_clean();
+    ok(str_contains($html, 'name="p[' . $a . '][monthly_price]"') && str_contains($html, 'data-bb-margin') && str_contains($html, 'p[new][sku]'), 'the editable page');
+});
+
 echo "Demo data\n";
 test('demo data loads', function () {
     require_once APP_ROOT . '/install/demo_data.php';

@@ -334,6 +334,10 @@
   .table tbody tr:hover td { @apply bg-gray-50 dark:bg-white/[0.02]; }
   .table .num { @apply text-right tabular-nums; }
   .table.compact th, .table.compact td { @apply px-4 py-2.5; }
+  .bb-prices td { @apply px-2! py-1.5! align-top; }
+  .bb-prices input:not([type=checkbox]), .bb-prices select { @apply min-w-0 px-2 py-1 text-theme-sm; }
+  .bb-prices input.num { @apply w-20 text-right; }
+  .bb-prices td:first-child { @apply min-w-48; }
   .row-link { @apply whitespace-nowrap font-medium text-gray-800 hover:text-brand-500 dark:text-white/90 dark:hover:text-brand-400; }
   .empty-row { @apply py-10! text-center; }
   .row-done td { @apply opacity-60; }
