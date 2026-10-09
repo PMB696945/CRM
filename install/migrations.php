@@ -1093,4 +1093,12 @@ return [
         db()->exec('UPDATE quote_lines l JOIN products p ON p.id = l.product_id SET l.cost_price = ' . billing_monthly_sql('p.cost_price', 'p.billing_frequency')
             . ' WHERE l.cost_price IS NULL AND p.cost_price IS NOT NULL');
     },
+    36 => function (): void {
+        // Staff no longer see balances, debt or Direct Debit status by default: take it off a saved staff role too.
+        $saved = json_decode((string)setting('role_permissions', ''), true);
+        if (is_array($saved) && is_array($saved['staff'] ?? null) && in_array('finance.view', $saved['staff'], true)) {
+            $saved['staff'] = array_values(array_diff($saved['staff'], ['finance.view']));
+            set_setting('role_permissions', json_encode($saved));
+        }
+    },
 ];

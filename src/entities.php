@@ -136,7 +136,7 @@ function entities(): array
     // Cached per request, keyed on the features that change the definitions.
     static $cache = [];
     $key = (xero_connected() ? 'xero' : '') . '|' . (gc_configured() ? 'gc' : '') . '|' . (can('finance.view') ? 'fin' : '')
-        . '|' . (can('costs.view') ? 'cv' : '') . (can('costs.edit') ? 'ce' : '') . (can('products.edit') ? 'pe' : '') . (can('suppliers.edit') ? 'se' : '');
+        . '|' . (can('costs.view') ? 'cv' : '') . (can('revenue.view') ? 'rv' : '') . (can('costs.edit') ? 'ce' : '') . (can('products.edit') ? 'pe' : '') . (can('suppliers.edit') ? 'se' : '');
     if (isset($cache[$key])) {
         return $cache[$key];
     }
@@ -605,6 +605,11 @@ function entities(): array
         ],
     ];
 
+    // Revenue totals only for people allowed to see them.
+    if (!can('revenue.view')) {
+        unset($entities['accounts']['computed']['_mrr']);
+        $entities['accounts']['list'] = array_values(array_diff($entities['accounts']['list'], ['_mrr']));
+    }
     // Cost prices and margins only for people allowed to see them.
     if (can('costs.view')) {
         $entities['services']['computed']['_margin'] = ['label' => 'Margin', 'type' => 'percent',

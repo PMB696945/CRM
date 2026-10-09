@@ -1,4 +1,4 @@
-<?php $maxMrr = max(1, ...array_map(fn($r) => (float)$r['mrr'], $mrrByType ?: [['mrr' => 1]])); ?>
+<?php $revenue = can('revenue.view'); $barKey = $revenue ? 'mrr' : 'n'; $maxMrr = max(1, ...array_map(fn($r) => (float)$r[$barKey], $mrrByType ?: [[$barKey => 1]])); ?>
 <div class="page-head"><h1>Dashboard</h1><span class="muted"><?= h(date('l j F Y')) ?></span></div>
 
 <div class="kpis">
@@ -7,11 +7,18 @@
     <span class="kpi-value"><?= number_format($stats['customers']) ?></span>
     <span class="kpi-sub"><?= number_format($stats['prospects']) ?> prospects</span>
   </a>
+  <?php if ($revenue): ?>
   <a class="kpi" href="<?= h(url('services', ['status' => 'active'])) ?>">
     <span class="kpi-label">Monthly recurring revenue</span>
     <span class="kpi-value"><?= h(money($stats['mrr'])) ?></span>
     <span class="kpi-sub"><?= number_format($stats['lines']) ?> active services · ARR <?= h(money($stats['mrr'] * 12)) ?></span>
   </a>
+  <?php else: ?>
+  <a class="kpi" href="<?= h(url('services', ['status' => 'active'])) ?>">
+    <span class="kpi-label">Active services</span>
+    <span class="kpi-value"><?= number_format($stats['lines']) ?></span>
+  </a>
+  <?php endif; ?>
   <a class="kpi <?= $stats['breached'] ? 'kpi-alert' : '' ?>" href="<?= h(url('tickets', ['preset' => $stats['breached'] ? 'breached' : 'open'])) ?>">
     <span class="kpi-label">Open tickets</span>
     <span class="kpi-value"><?= number_format($stats['open_tickets']) ?></span>
@@ -49,17 +56,17 @@
     <?php if (!$renewals): ?><p class="muted">No contracts ending in the next <?= (int)$window ?> days.</p><?php else: ?>
     <div class="table-wrap">
     <table class="table compact">
-      <thead><tr><th>Customer</th><th class="num">Services</th><th class="num">MRR</th><th>First ends</th><th></th></tr></thead>
+      <thead><tr><th>Customer</th><th class="num">Services</th><?php if ($revenue): ?><th class="num">MRR</th><?php endif; ?><th>First ends</th><th></th></tr></thead>
       <tbody>
       <?php foreach ($renewals as $r): ?>
         <tr>
           <td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $r['account_id']])) ?>"><?= h($r['name']) ?></a></td>
           <td class="num"><?= (int)$r['services'] ?></td>
-          <td class="num"><?= h(money($r['mrr'])) ?></td>
+          <?php if ($revenue): ?><td class="num"><?= h(money($r['mrr'])) ?></td><?php endif; ?>
           <td><?= contract_end_html($r['first_end']) ?></td>
           <td class="right">
             <?php if ($r['open_renewals']): ?><span class="badge badge-qualified">In progress</span>
-            <?php else: ?><a class="btn btn-sm" href="<?= h(url('opportunities', ['action' => 'new', 'account_id' => $r['account_id'], 'opp_type' => 'renewal', 'stage' => 'qualified', 'title' => 'Contract renewal', 'monthly_value' => $r['mrr']])) ?>">Start renewal</a><?php endif; ?>
+            <?php else: ?><a class="btn btn-sm" href="<?= h(url('opportunities', ['action' => 'new', 'account_id' => $r['account_id'], 'opp_type' => 'renewal', 'stage' => 'qualified', 'title' => 'Contract renewal'] + ($revenue ? ['monthly_value' => $r['mrr']] : []))) ?>">Start renewal</a><?php endif; ?>
           </td>
         </tr>
       <?php endforeach; ?>
@@ -70,14 +77,14 @@
   </section>
 
   <section class="card">
-    <div class="card-head"><h2>Revenue by service type</h2></div>
+    <div class="card-head"><h2><?= $revenue ? 'Revenue by service type' : 'Live services by type' ?></h2></div>
     <?php if (!$mrrByType): ?><p class="muted">No active services yet.</p><?php endif; ?>
     <div class="bars">
       <?php foreach ($mrrByType as $r): ?>
         <div class="bar-row">
           <span class="bar-label"><?= h(SERVICE_TYPES[$r['service_type']] ?? $r['service_type']) ?> <small class="muted">(<?= (int)$r['n'] ?>)</small></span>
-          <span class="bar"><span style="width: <?= round((float)$r['mrr'] / $maxMrr * 100, 1) ?>%"></span></span>
-          <span class="bar-value"><?= h(money($r['mrr'])) ?></span>
+          <span class="bar"><span style="width: <?= round((float)$r[$barKey] / $maxMrr * 100, 1) ?>%"></span></span>
+          <span class="bar-value"><?= $revenue ? h(money($r['mrr'])) : (int)$r['n'] ?></span>
         </div>
       <?php endforeach; ?>
     </div>

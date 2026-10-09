@@ -57,6 +57,7 @@ const PERMISSIONS = [
     ],
     'Money' => [
         'finance.view'  => 'See balances, credit and Direct Debit status',
+        'revenue.view'  => 'See revenue totals (monthly recurring revenue, by customer and overall)',
         'xero.open'     => 'Open records in Xero (links to contacts and bills there)',
         'products.edit' => 'Manage products & tariffs',
         'costs.view'    => 'See cost prices and margins',
@@ -74,19 +75,19 @@ const PERMISSIONS = [
 
 const DEFAULT_ROLE_PERMISSIONS = [
     'admin'     => ['onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.alerts', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'customers.delete', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
-                    'records.delete', 'export', 'finance.view', 'xero.open', 'products.edit', 'costs.view', 'costs.edit', 'marketing.send', 'settings.manage', 'users.manage'],
+                    'records.delete', 'export', 'finance.view', 'revenue.view', 'xero.open', 'products.edit', 'costs.view', 'costs.edit', 'marketing.send', 'settings.manage', 'users.manage'],
     'manager'   => ['onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
-                    'records.delete', 'export', 'finance.view', 'xero.open', 'costs.view', 'costs.edit', 'marketing.send'],
-    'staff'     => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'finance.view', 'costs.view'],
+                    'records.delete', 'export', 'finance.view', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'marketing.send'],
+    'staff'     => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'costs.view'],
     'sales'     => ['orders.check', 'customers.edit', 'sales.edit', 'tickets.edit', 'costs.view'],
     'support'   => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit'],
-    'finance'   => ['suppliers.view', 'suppliers.edit', 'purchasing.edit', 'customers.edit', 'finance.view', 'xero.open', 'costs.view', 'costs.edit', 'export'],
+    'finance'   => ['suppliers.view', 'suppliers.edit', 'purchasing.edit', 'customers.edit', 'finance.view', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'export'],
     'read_only' => [],
 ];
 
 /** Permissions added after the Roles page existed: roles saved before then get the defaults for these. */
 const PERMISSIONS_ADDED_LATER = ['costs.view', 'costs.edit', 'orders.check', 'orders.place', 'tickets.all', 'tickets.alerts',
-    'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'onboarding.edit', 'xero.open'];
+    'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'onboarding.edit', 'xero.open', 'revenue.view'];
 
 /** Built-in roles plus any custom roles created on the Roles page: [key => label]. */
 function roles(): array

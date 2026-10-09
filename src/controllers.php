@@ -89,7 +89,7 @@ function dashboard_controller(): void
     $stats = [
         'customers' => (int)db_value("SELECT COUNT(*) FROM accounts WHERE status = 'active'"),
         'prospects' => (int)db_value("SELECT COUNT(*) FROM accounts WHERE status = 'prospect'"),
-        'mrr'       => (float)db_value("SELECT COALESCE(SUM(monthly_price),0) FROM services WHERE status = 'active'"),
+        'mrr'       => can('revenue.view') ? (float)db_value("SELECT COALESCE(SUM(monthly_price),0) FROM services WHERE status = 'active'") : null,
         'lines'     => (int)db_value("SELECT COUNT(*) FROM services WHERE status = 'active'"),
         'open_tickets' => (int)db_value("SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved','closed')"),
         'breached'  => (int)db_value("SELECT COUNT(*) FROM tickets WHERE status NOT IN ('resolved','closed') AND sla_due_at < NOW()"),

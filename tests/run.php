@@ -467,7 +467,7 @@ test('customers already in the CRM can take their Xero account numbers', functio
 
 test('only roles allowed to open Xero get links to it; others still see the balance', function () {
     as_role('staff');
-    ok(can('finance.view') && !can('xero.open'), 'staff see balances but not Xero itself');
+    ok(!can('finance.view') && !can('xero.open'), 'staff see neither balances nor Xero itself');
     eq('Harbour', xero_link('https://go.xero.com/x', 'Harbour'), 'just the text');
     foreach (['finance', 'manager', 'admin'] as $role) {
         as_role($role);
@@ -1591,7 +1591,7 @@ test('role permissions: defaults, changes on the Roles page, super admin always 
     ok(can('approvals.decide') && can('customers.close') && !can('customers.delete'));
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit', 'audit.view', 'not.a.permission']]));
     ok(can('audit.view') && !can('approvals.decide'), 'saved matrix wins');
-    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'xero.open', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
+    eq(['customers.edit', 'orders.check', 'orders.place', 'tickets.all', 'onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'audit.view'], role_permissions()['manager'], 'unknown permissions dropped; newer permissions keep defaults');
     set_setting('role_permissions', json_encode(['manager' => ['customers.edit'], '_known' => all_permissions()]));
     eq(['customers.edit'], role_permissions()['manager'], 'once saved with the new permissions, the saved grid wins');
     set_setting('role_permissions', json_encode(['super_admin' => []]));
@@ -3663,6 +3663,33 @@ test('the cost price at the time of ordering is kept on services and quote lines
     $rows = list_rows('services', ['filters' => ['account_id' => $acct], 'per_page' => 0])['rows'];
     $m = array_column($rows, '_margin', 'identifier');
     eq('37.5', (string)$m['COST-LINE-1'], 'margin from the recorded cost: (39.99 − 25) ÷ 39.99');
+});
+
+echo "Role visibility\n";
+test('staff don\'t see revenue totals, balances, debt or Direct Debit status; admins and finance do', function () {
+    as_role('staff');
+    ok(!can('finance.view') && !can('revenue.view'), 'staff: no balances or revenue');
+    ob_start(); dashboard_controller(); $html = ob_get_clean();
+    ok(!str_contains($html, 'Monthly recurring revenue') && !str_contains($html, 'Overdue debt') && !str_contains($html, 'No Direct Debit'), 'not on the dashboard');
+    ok(str_contains($html, 'Active services') && str_contains($html, 'Live services by type'), 'counts instead');
+    ok(!array_key_exists('_mrr', entity('accounts')['computed'] ?? []) && !in_array('_mrr', entity('accounts')['list'], true), 'no MRR column on customers');
+    ok(!array_intersect(['_balance', '_overdue', '_dd'], entity('accounts')['list']), 'no balance, overdue or Direct Debit columns on the customer list');
+    $acct = (int)db_value("SELECT id FROM accounts ORDER BY id LIMIT 1");
+    ob_start(); $_GET = ['tab' => 'customer']; account_view(entity('accounts'), find('accounts', $acct)); $html = ob_get_clean(); $_GET = [];
+    ok(!str_contains($html, 'kpi-label">MRR') && !str_contains($html, 'Xero balance'), 'not on the customer page');
+    foreach (['admin', 'finance', 'manager'] as $role) {
+        as_role($role);
+        ok(can('revenue.view'), "$role sees revenue");
+    }
+    as_role('admin');
+    ob_start(); dashboard_controller(); $html = ob_get_clean();
+    ok(str_contains($html, 'Monthly recurring revenue'), 'admins still see MRR');
+    // A staff role saved on the Roles page before this change loses balances; revenue follows the default.
+    set_setting('role_permissions', json_encode(['staff' => ['customers.edit', 'finance.view'], '_known' => array_diff(all_permissions(), ['revenue.view'])]));
+    (require migrations_file())[36]();
+    $perms = role_permissions();
+    ok(!in_array('finance.view', $perms['staff'], true) && !in_array('revenue.view', $perms['staff'], true) && in_array('revenue.view', $perms['admin'], true));
+    set_setting('role_permissions', null);
 });
 
 echo "Demo data\n";

@@ -91,7 +91,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
 
 <?php if ($tab === 'overview' || $tab === 'customer'): ?>
 <div class="kpis kpis-sm">
-  <div class="kpi"><span class="kpi-label">MRR</span><span class="kpi-value"><?= h(money($mrr)) ?></span></div>
+  <?php if (can('revenue.view')): ?><div class="kpi"><span class="kpi-label">MRR</span><span class="kpi-value"><?= h(money($mrr)) ?></span></div><?php endif; ?>
   <div class="kpi"><span class="kpi-label">Active services</span><span class="kpi-value"><?= (int)$activeCount ?></span></div>
   <div class="kpi <?= $openTickets ? 'kpi-warn' : '' ?>"><span class="kpi-label">Open tickets</span><span class="kpi-value"><?= (int)$openTickets ?></span></div>
   <div class="kpi"><span class="kpi-label">Account manager</span><span class="kpi-value kpi-text"><?= h($account['owner_id__label'] ?? '—') ?></span></div>
@@ -128,7 +128,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
       <div class="card-head"><h2>What they are to us</h2></div>
       <ul class="contact-list">
         <li><a href="<?= h($tabUrl('customer')) ?>"><strong>Customer</strong></a> <?= badge($account['status']) ?>
-          <div class="small muted"><?= (int)$activeCount ?> live service<?= $activeCount === 1 ? '' : 's' ?> · <?= h(money($mrr)) ?>/mo · <?= (int)$openTickets ?> open ticket<?= $openTickets === 1 ? '' : 's' ?></div></li>
+          <div class="small muted"><?= (int)$activeCount ?> live service<?= $activeCount === 1 ? '' : 's' ?><?= can('revenue.view') ? ' · ' . h(money($mrr)) . '/mo' : '' ?> · <?= (int)$openTickets ?> open ticket<?= $openTickets === 1 ? '' : 's' ?></div></li>
         <li><?php if ($supplier): ?><?= isset($tabs['supplier']) ? '<a href="' . h($tabUrl('supplier')) . '"><strong>Supplier</strong></a>' : '<strong>Supplier</strong>' ?>
             <?= $supplier['active'] ? '' : badge('disabled') ?><div class="small muted"><?= h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') ?><?= $supplier['account_number'] ? ' · our account ' . h($supplier['account_number']) : '' ?></div>
           <?php else: ?><strong class="muted">Not a supplier</strong>
@@ -402,16 +402,16 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
 
 <?php elseif ($tab === 'dealer'): ?>
     <?php
-        $groupMrr = array_sum(array_map(fn($c) => (float)$c['_mrr'], $children));
+        $groupMrr = array_sum(array_map(fn($c) => (float)($c['_mrr'] ?? 0), $children));
         $commission = $account['dealer_commission_pct'] !== null ? $groupMrr * (float)$account['dealer_commission_pct'] / 100 : null; ?>
     <section class="card">
       <div class="card-head"><h2>Dealer's customers <span class="count"><?= count($children) ?></span></h2>
         <?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a><?php endif; ?></div>
-      <p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
-        <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p>
+      <?php if (can('revenue.view')): ?><p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
+        <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p><?php endif; ?>
       <?php if ($children): ?>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Customer</th><th>Status</th><th>Relationship</th><th>MSA</th><th class="num">MRR</th></tr></thead>
+          <thead><tr><th>Customer</th><th>Status</th><th>Relationship</th><th>MSA</th><?php if (can('revenue.view')): ?><th class="num">MRR</th><?php endif; ?></tr></thead>
           <tbody>
           <?php foreach ($children as $c): ?>
             <tr>
@@ -419,7 +419,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
               <td><?= badge($c['status']) ?></td>
               <td><?= $c['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referral' ?></td>
               <td><?= $c['msa_covered'] ? '✔' : '<span class="muted">—</span>' ?></td>
-              <td class="num"><?= h(money($c['_mrr'])) ?></td>
+              <?php if (can('revenue.view')): ?><td class="num"><?= h(money($c['_mrr'] ?? 0)) ?></td><?php endif; ?>
             </tr>
           <?php endforeach; ?>
           </tbody>
