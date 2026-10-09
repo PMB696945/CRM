@@ -305,6 +305,8 @@
   .btn-primary { @apply bg-brand-500 hover:bg-brand-600 border-brand-500 hover:border-brand-600 text-white hover:text-white dark:border-brand-500 dark:bg-brand-500 dark:text-white dark:hover:bg-brand-600 dark:hover:text-white; }
   .btn-danger { @apply text-error-600 hover:bg-error-50 hover:text-error-700 dark:text-error-500 dark:hover:bg-error-500/15; }
   .btn:disabled { @apply cursor-not-allowed opacity-50; }
+  .card.is-collapsed > .card-head { @apply mb-0 border-b-0; }
+  .collapse-toggle { @apply ml-auto; }
   .btn-ghost { @apply border-transparent bg-transparent shadow-none dark:border-transparent dark:bg-transparent; }
   .btn-sm { @apply px-3 py-2 text-theme-xs; }
   .btn-block { @apply w-full; }

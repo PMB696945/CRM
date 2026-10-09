@@ -146,8 +146,8 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
       </form>
     </section>
 
-    <section class="card">
-      <div class="card-head"><h2>Activity</h2></div>
+    <section class="card" data-collapsible="account-activity">
+      <div class="card-head"><h2>Activity <span class="count"><?= count($activities) ?></span></h2></div>
       <?php if ($canEdit): ?>
       <form method="post" action="<?= h(url('activities', ['action' => 'new'])) ?>" class="quick-log">
         <?= csrf_field() ?>
@@ -173,7 +173,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
     </section>
 
     <?php if (can('audit.view')): ?>
-    <section class="card">
+    <section class="card" data-collapsible="account-history">
       <div class="card-head"><h2>History</h2><a href="<?= h(url('audit', ['account_id' => $id])) ?>">Full audit trail →</a></div>
       <?php if ($history): ?>
         <ul class="feed">

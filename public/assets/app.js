@@ -511,3 +511,26 @@ document.querySelectorAll('tr[data-bb-row]').forEach((tr) => {
   };
   tr.addEventListener('input', update);
 });
+
+// Cards that can be hidden and shown again (remembered in this browser): <section data-collapsible="key">.
+document.querySelectorAll('[data-collapsible]').forEach((card) => {
+  const head = card.querySelector('.card-head');
+  if (!head) return;
+  const key = 'collapsed:' + card.dataset.collapsible;
+  const body = () => [...card.children].filter((el) => el !== head);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-sm btn-ghost collapse-toggle';
+  const set = (hidden, save) => {
+    body().forEach((el) => { el.hidden = hidden; });
+    card.classList.toggle('is-collapsed', hidden);
+    button.textContent = hidden ? 'Show' : 'Hide';
+    button.setAttribute('aria-expanded', hidden ? 'false' : 'true');
+    if (save) { try { hidden ? localStorage.setItem(key, '1') : localStorage.removeItem(key); } catch (e) { /* storage unavailable */ } }
+  };
+  button.addEventListener('click', () => set(button.getAttribute('aria-expanded') === 'true', true));
+  head.appendChild(button);
+  let start = false;
+  try { start = localStorage.getItem(key) === '1'; } catch (e) { /* storage unavailable */ }
+  set(start, false);
+});
