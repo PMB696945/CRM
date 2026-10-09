@@ -60,11 +60,15 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <?php endif; ?>
 
   <div class="form-section wide"><h2>Broadband login</h2></div>
+  <div class="field <?= isset($errors['ip_option']) ? 'has-error' : '' ?>"><label for="g_ip">IP address</label>
+    <select id="g_ip" name="ip_option"><?php foreach (GIACOM_IP_OPTIONS as $k => [$l]): ?><option value="<?= $k ?>" <?= $values['ip_option'] === $k ? 'selected' : '' ?>><?= h($l) ?></option><?php endforeach; ?></select>
+    <?php if (isset($errors['ip_option'])): ?><div class="error"><?= h($errors['ip_option']) ?></div><?php endif; ?>
+    <div class="help">A block of static IPs is requested from Giacom as soon as the order is placed.</div></div>
   <?= $f('bb_username', 'Username', 'text', 'e.g. joebloggs', true) ?>
   <?= $f('bb_password', 'Password', 'text', 'Saved with Giacom only. Give it to the customer or put it on the router.', true) ?>
   <div class="field wide"><div class="help">Full username sent to Giacom: <b data-full-username data-suffix="<?= h($values['bb_suffix']) ?>" data-realm="<?= h($values['realm']) ?>"><?= h(giacom_full_username($values['bb_username'] ?: 'username', $values['bb_suffix'], $values['realm'] ?: 'realm')) ?></b>
     <br>The part after the username is set for your Giacom account<?= can('settings.manage') ? ' under <a href="' . h(url('giacom', ['action' => 'settings'])) . '">Admin → Giacom</a>' : '' ?>.</div></div>
-  <?= $f('client_ref', 'Your reference (optional)', 'text', 'Added after the account number, e.g. a PO or quote reference') ?>
+  <?= $f('client_ref', 'Order reference (optional)', 'text', 'Giacom\'s reference for this order, e.g. a PO or quote reference. Leave blank to use the account number (' . $account['account_number'] . ')') ?>
 
   <div class="form-section wide"><h2>Customer</h2><p class="help">The end user Giacom registers the service to. Filled in from the main contact.</p></div>
   <?= $f('title', 'Title') ?>
@@ -91,7 +95,7 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
     <div class="help">Sets the price and term on the new service.</div></div>
 
   <div class="field field-check wide"><label><input type="checkbox" name="send_confirmation" value="1" <?= $values['send_confirmation'] === '1' ? 'checked' : '' ?>> Email the customer an order confirmation</label>
-    <div class="help">Sent to the customer email above once the order is placed: the product, address and install date, in your company's name.</div></div>
+    <div class="help">Sent to the customer email above once the order is placed: the product, address, install date and broadband setup details (username, password and IP), in your company's name.</div></div>
 
   <div class="form-actions wide">
     <button class="btn btn-primary">Place order with Giacom</button>

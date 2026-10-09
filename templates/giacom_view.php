@@ -16,14 +16,19 @@
         <dt>Order type</dt><dd><?= h(ucfirst($order['order_type'])) ?></dd>
         <dt>Address</dt><dd><?= h($order['address_label']) ?><?= $order['site_name'] ? ' <span class="muted">(' . h($order['site_name']) . ')</span>' : '' ?></dd>
         <?php if ($order['cli']): ?><dt>Line</dt><dd><?= h($order['cli']) ?></dd><?php endif; ?>
+<?php $setup = giacom_setup_details($order); $dd = json_decode((string)$order['details'], true) ?: []; ?>
         <dt>Broadband username</dt><dd><?= h($order['broadband_username'] ?: '—') ?></dd>
+        <?php if (isset($setup['Broadband password']) && can('orders.place')): ?><dt>Broadband password</dt><dd><details><summary class="small">Show</summary><code><?= h($setup['Broadband password']) ?></code></details></dd><?php endif; ?>
+        <?php if (isset($setup['IP address'])): ?><dt>IP address</dt><dd><?= h($setup['IP address']) ?>
+          <?php if ((GIACOM_IP_OPTIONS[$dd['ip_option'] ?? ''][1] ?? 0) > 1 && empty($dd['ip_block']) && can('orders.place')): ?>
+            <form method="post" class="inline" action="<?= h(url('giacom', ['action' => 'view', 'id' => $order['id'], 'do' => 'ips'])) ?>"><?= csrf_field() ?><button class="btn btn-sm">Request the IP block</button></form><?php endif; ?></dd><?php endif; ?>
 <?php $appt = (json_decode((string)$order['details'], true) ?: [])['appointment'] ?? null; ?>
         <dt><?= $appt ? 'Install appointment' : 'Required by' ?></dt><dd><?= h(fmt_date($order['crd'])) ?><?= $appt && $appt['slot'] ? ' ' . h($appt['slot']) : '' ?></dd>
 <?php $d = json_decode((string)$order['details'], true) ?: []; ?>
         <dt>Customer contact</dt><dd><?= h(($d['contact'] ?? '') ?: '—') ?><?php foreach (['telephone', 'email'] as $k): if (($d[$k] ?? '') !== ''): ?><br><span class="muted"><?= h($d[$k]) ?></span><?php endif; endforeach; ?>
           <?php if (($d['email'] ?? '') === ''): ?><br><span class="text-danger small">No email was sent to Giacom with this order.</span><?php endif; ?></dd>
         <?php if (($d['site_contact'] ?? '') !== ''): ?><dt>Site contact</dt><dd><?= h($d['site_contact']) ?><?php foreach (['site_telephone', 'site_email'] as $k): if (($d[$k] ?? '') !== ''): ?><br><span class="muted"><?= h($d[$k]) ?></span><?php endif; endforeach; ?></dd><?php endif; ?>
-        <dt>Your reference</dt><dd><?= h($order['client_ref']) ?></dd>
+        <dt>Order reference</dt><dd><?= h($order['client_ref']) ?></dd>
         <dt>Giacom service ID</dt><dd><?= h($order['giacom_service_id'] ?: '—') ?></dd>
         <dt>Placed</dt><dd><?= h(fmt_datetime($order['created_at'])) ?> by <?= h($order['user_name'] ?? '—') ?></dd>
         <dt>Status updated</dt><dd><?= h(fmt_datetime($order['status_updated_at'])) ?></dd>
@@ -71,7 +76,7 @@
           <?= csrf_field() ?>
           <label>Email to<input type="email" name="email" value="<?= h((string)((json_decode((string)$order['details'], true) ?: [])['email'] ?? '')) ?>" required></label>
           <button class="btn">Email order confirmation</button>
-          <p class="help">The product, address and install date, in your company's name. Sent automatically when the order is placed; use this to send it again (e.g. after changing the appointment).</p>
+          <p class="help">The product, address, install date and broadband setup details (username, password and IP), in your company's name. Sent automatically when the order is placed; use this to send it again (e.g. after changing the appointment).</p>
         </form>
       </section>
       <section class="card">

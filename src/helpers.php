@@ -207,8 +207,8 @@ function initials(string $name): string
 }
 
 /** <head> snippet shared by every page: fonts/CSS and the saved light/dark theme. */
-function theme_head(): string
+function theme_head(string $css = 'assets/app.css'): string
 {
-    return '<link rel="stylesheet" href="assets/app.css">'
+    return '<link rel="stylesheet" href="' . h($css) . '">'
         . '<script nonce="' . csp_nonce() . '">' . "try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}</script>";
 }

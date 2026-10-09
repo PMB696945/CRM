@@ -12,7 +12,7 @@ $msaWaiting = $msaMissing ? dealer_msa_waiting((int)$user['account_id']) : null;
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title><?= h(($title ? $title . ' · ' : '') . portal_name()) ?></title>
-<?= theme_head() ?>
+<?= theme_head(portal_asset_url('app.css')) ?>
 </head>
 <body>
 <?php if (!$user): ?>
@@ -73,6 +73,6 @@ $msaWaiting = $msaMissing ? dealer_msa_waiting((int)$user['account_id']) : null;
   </div>
 </div>
 <?php endif; ?>
-<script src="assets/app.js"></script>
+<script src="<?= h(portal_asset_url('app.js')) ?>"></script>
 </body>
 </html>

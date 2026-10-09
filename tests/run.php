@@ -1999,7 +1999,7 @@ test('Giacom: placing an order sends the right details and adds a pending servic
     $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
     $product = json_decode($check['result'], true)['products'][0];
     $o = ['order_type' => 'provide', 'cli' => '', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-1', 'bb_password' => 'Pa55word!',
-        'realm' => 'isp.example', 'care_level' => 'enhanced', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => 'PO 77', 'force_new_ont' => '',
+        'realm' => 'isp.example', 'care_level' => 'enhanced', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => 'PO 77', 'force_new_ont' => '', 'ip_option' => 'static',
         'title' => '', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '0161 496 0000', 'email' => 'rita@canal.example', 'crm_product_id' => ''];
     try { giacom_place_order($check, $product, $o); throw new Exception('expected failure'); }
     catch (GiacomException $e) { ok(str_contains($e->getMessage(), '[Site Contact] Forename not present'), 'Giacom requires a site contact: ' . $e->getMessage()); }
@@ -2011,7 +2011,9 @@ test('Giacom: placing an order sends the right details and adds a pending servic
     $sent = g_state()['last']['provide'];
     eq('34350', $sent['order']['prod-id']); eq('A00012345679', $sent['order']['address-reference']);
     eq('enhanced', $sent['order']['attributes']['care-level']); eq('Pa55word!', $sent['order']['attributes']['password']);
-    ok(str_starts_with($sent['order']['client-ref'], 'ACC-') && str_ends_with($sent['order']['client-ref'], ' PO 77'));
+    eq('PO 77', $sent['order']['client-ref'], 'the reference given is the order reference');
+    eq('Y', $sent['order']['attributes']['fixed-ip']);
+    ok(!str_contains((string)db_value('SELECT details FROM giacom_orders WHERE id = ?', [$g['order']]), 'Pa55word'), 'the password is stored encrypted');
     eq('M1 3HE', $sent['customer']['postcode'], 'Giacom needs the space in the postcode');
     eq('acc10001-1@isp.example', $sent['order']['username'], 'Giacom finds the realm from the username'); eq('isp.example', $sent['order']['attributes']['realm']);
     eq('Canal Street Clinic', $sent['customer']['company']); eq('01614960000', $sent['customer']['telephone']); eq('Unit 2', $sent['customer']['sub-premise']);
@@ -2041,10 +2043,35 @@ test('Giacom: the customer is emailed an order confirmation in our name', functi
     ok(str_contains($raw, 'X-Rcpt: rita@canal.example'));
     ok(str_contains($body, 'Hi Rita') && str_contains($body, 'Unit 2') && str_contains($body, 'Your broadband order is confirmed'), 'product, address and greeting');
     ok(stripos($raw, 'giacom') === false && stripos($body, 'giacom') === false, 'the supplier is not named');
+    ok(str_contains($body, 'acc10001-1@isp.example') && str_contains($body, 'Pa55word!'), 'broadband username and password included');
+    ok(str_contains($body, '1 static IP'), 'IP address included');
     ok((bool)db_value("SELECT id FROM giacom_order_events WHERE order_id = ? AND name = 'email'", [$order['id']]), 'recorded on the order');
     $noEmail = ['details' => json_encode(['contact' => 'X'])] + $order;
     try { giacom_email_confirmation($noEmail); throw new Exception('expected failure'); }
     catch (IntegrationException $e) { ok(str_contains($e->getMessage(), 'no customer email'), $e->getMessage()); }
+});
+
+test('Giacom: a static IP block is requested once the order is placed, and can be asked for again', function () use (&$g) {
+    $check = db_one('SELECT * FROM giacom_checks WHERE id = ?', [$g['check']]);
+    $product = json_decode($check['result'], true)['products'][0];
+    $o = ['order_type' => 'provide', 'cli' => '', 'crd' => date('Y-m-d', strtotime('+20 days')), 'bb_username' => 'acc10001-9', 'bb_password' => 'Pa55word!',
+        'realm' => 'isp.example', 'care_level' => '', 'site_visit_reason' => 'NO_SITE_VISIT', 'access_line_id' => '', 'client_ref' => '', 'force_new_ont' => '', 'ip_option' => 'block16',
+        'title' => '', 'forename' => 'Rita', 'surname' => 'Reception', 'telephone' => '0161 496 0000', 'email' => 'rita@canal.example', 'crm_product_id' => '',
+        'site_forename' => 'Sam', 'site_surname' => 'Site', 'site_telephone' => '07700 900 111'];
+    $id = giacom_place_order($check, $product, $o);
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
+    ok(str_contains((string)$order['last_error'], 'static IP block couldn'), 'the order stands; the problem is shown: ' . $order['last_error']);
+    eq('Block of 16 static IPs (/28) (we\'ll confirm the address once it\'s allocated)', giacom_setup_details($order)['IP address']);
+    try { giacom_request_ip_block($order); throw new Exception('expected failure'); } catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'Allocation size'), $e->getMessage()); }
+    $details = json_decode((string)$order['details'], true);
+    $details['ip_option'] = 'block4';
+    db_exec('UPDATE giacom_orders SET details = ? WHERE id = ?', [json_encode($details), $id]);
+    $d = giacom_request_ip_block(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]));
+    eq('89.145.253.136/30', $d['ip_block']);
+    $order = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]);
+    eq(null, $order['last_error']);
+    eq('Block of 4 static IPs (/30): 89.145.253.136/30', giacom_setup_details($order)['IP address']);
+    eq('N', (function () use ($check, $product, $o) { giacom_place_order($check, $product, ['ip_option' => 'dynamic', 'bb_username' => 'acc10001-10'] + $o); return g_state()['last']['provide']['order']['attributes']['fixed-ip']; })(), 'dynamic IP');
 });
 
 test('Giacom: status updates are picked up; completion makes the service live', function () use (&$g, &$gPort) {
@@ -2106,6 +2133,8 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
         'site_forename' => 'Rita', 'site_surname' => 'Reception', 'site_telephone' => '01614960000'];
     $id = giacom_place_order($check, $product, $o);
     eq('01614960001', g_state()['last']['migrate']['order']['cli']);
+    ok(!isset(g_state()['last']['migrate']['order']['attributes']['fixed-ip']), 'no IP choice: nothing sent');
+    ok(str_starts_with(g_state()['last']['migrate']['order']['client-ref'], 'ACC-'), 'no reference given: the account number');
     eq('acc10001-2-public@GreatDSL', g_state()['last']['migrate']['order']['username']);
     eq('-public@GreatDSL', g_state()['last']['migrate']['order']['attributes']['realm'], 'realm sent as Giacom lists it');
     // Asking for dates: Giacom wants the line type (SOGEA as new or existing) and the visit.
@@ -2314,7 +2343,7 @@ test('portal: orders need signed master terms, and each has its own agreement wi
     ok(str_contains($html, 'Order Business Fibre 80') && str_contains($html, 'hal@harbour.example'), 'the order form, filled in from the customer');
     ok(str_contains($html, 'data-min-provide') && str_contains($html, 'data-appointment-date'), 'same date and visit behaviour as the staff form');
     portal_seen($html, 'order form');
-    $form = ['order_type' => 'provide', 'cli' => '', 'site_visit_reason' => 'PREMIUM', 'crd' => '', 'appointment' => '', 'force_new_ont' => '', 'client_ref' => 'NC-77',
+    $form = ['order_type' => 'provide', 'cli' => '', 'site_visit_reason' => 'PREMIUM', 'crd' => '', 'appointment' => '', 'force_new_ont' => '', 'client_ref' => 'NC-77', 'ip_option' => 'block8',
         'title' => '', 'forename' => 'Hal', 'surname' => 'Harbour', 'telephone' => '0161 496 0123', 'email' => '',
         'site_title' => '', 'site_forename' => 'Hal', 'site_surname' => 'Harbour', 'site_telephone' => '0161 496 0123', 'site_email' => '',
         'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => ''];
@@ -2365,14 +2394,20 @@ test('portal: orders need signed master terms, and each has its own agreement wi
     $go = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$d['giacom_order_id']]);
     $sent = g_state()['last']['provide'];
     ok(str_contains($sent['order']['client-ref'], $d['reference']) && str_contains($sent['order']['client-ref'], 'NC-77'), 'our reference and the dealer\'s go with the order');
+    ok(!str_contains($sent['order']['client-ref'], 'ACC-'), 'not prefixed with the account number');
     eq(['Hal', 'hal@harbour.example', '01614960123'], [$sent['customer']['forename'], $sent['customer']['email'], $sent['customer']['telephone']]);
     ok(str_ends_with($sent['order']['username'], '@isp.example'), 'broadband login made from the account settings');
     eq('PREMIUM', $sent['order']['attributes']['site-visit-reason']);
+    eq('Y', $sent['order']['attributes']['fixed-ip'], 'static IP ordered');
+    eq(['service-id' => $go['giacom_service_id'], 'fixed-ip' => 'Y', 'routed-ip' => 'Y', 'allocation-size' => '8'], array_diff_key(end(g_state()['change_ips']), ['auth' => 1]), 'block of 8 requested');
     eq((int)$portal['fttc'], (int)db_value('SELECT product_id FROM services WHERE id = ?', [$go['service_id']]), 'the pending service is our product');
     eq($slots[0]['date'], $go['crd'], 'the chosen appointment was booked');
     usleep(300000);
     $accepted = array_values(array_filter(array_slice(sent_mails(), $before), fn($m) => str_contains($m, 'X-Rcpt: dee@northern.example')));
     ok(count($accepted) === 1 && str_contains(mail_body($accepted[0]), 'accepted and placed'), 'the dealer is told');
+    $setup = giacom_setup_details(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$d['giacom_order_id']]));
+    ok(str_contains(mail_body($accepted[0]), $setup['Broadband username']) && str_contains(mail_body($accepted[0]), $setup['Broadband password'])
+        && str_contains(mail_body($accepted[0]), '89.145.253.136/29'), 'the dealer gets the setup details: login and IP block');
     ok(!preg_match('/giacom|700\d{3}/i', $accepted[0] . mail_body($accepted[0])), "no supplier name or supplier order number in the dealer's email");
     [$html] = portal_req('order', ['id' => $portal['order']]);
     ok(str_contains($html, 'In progress') && str_contains($html, 'Install'), 'progress shown');
@@ -2425,6 +2460,14 @@ test('portal: staff pages list dealer orders, portal users and master terms', fu
     eq(0, dealer_orders_waiting());
     // The portal's script never names the supplier either.
     ok(!preg_match('/giacom/i', file_get_contents(APP_ROOT . '/public/assets/app.js')), 'app.js does not name the supplier');
+    // Wherever the portal is hosted, its stylesheet, script and fonts load (through the portal if need be).
+    [$css] = portal_req('asset', ['f' => 'app.css']);
+    ok(strlen($css) > 1000 && str_contains($css, 'go=asset&amp;f=fonts%2Foutfit') === false && str_contains($css, 'go=asset&f=fonts%2Foutfit-latin-wght-normal.woff2'), 'fonts served the same way');
+    [$js] = portal_req('asset', ['f' => 'app.js']);
+    ok(str_contains($js, 'data-copy-contact'));
+    [$none] = portal_req('asset', ['f' => '../config.php']);
+    eq('', $none, 'only the portal\'s own assets');
+    ok(str_contains(portal_asset_url('app.css'), 'go=asset'), 'no assets folder beside the page: served through the portal');
     unset($_SESSION['portal_user_id']);
 
 });

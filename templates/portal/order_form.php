@@ -49,6 +49,9 @@ $earliest = $appointments ? $appointments[0]['date'] : $lead;
       <div class="help">Appointments are requested when we place the order, and confirmed if still available.</div>
     </div>
   <?php endif; ?>
+  <div class="field <?= isset($errors['ip_option']) ? 'has-error' : '' ?>"><label for="p_ip">IP address</label>
+    <select id="p_ip" name="ip_option"><?php foreach (GIACOM_IP_OPTIONS as $k => [$l]): ?><option value="<?= $k ?>" <?= $values['ip_option'] === $k ? 'selected' : '' ?>><?= h($l) ?></option><?php endforeach; ?></select>
+    <?php if (isset($errors['ip_option'])): ?><div class="error"><?= h($errors['ip_option']) ?></div><?php endif; ?></div>
   <?php if (giacom_is_fttp($sp)): ?>
   <div class="field"><label for="p_ont">Fibre box (ONT)</label>
     <select id="p_ont" name="force_new_ont" data-ont-follows-order-type><option value="Y" <?= $values['force_new_ont'] === 'Y' ? 'selected' : '' ?>>New ONT</option><option value="N" <?= $values['force_new_ont'] === 'N' ? 'selected' : '' ?>>Use existing ONT</option></select>

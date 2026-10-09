@@ -33,6 +33,8 @@ $appt = !empty($v['appointment']) ? explode('|', (string)$v['appointment']) : nu
       <dt><?= $appt ? 'Appointment requested' : 'Required by' ?></dt><dd><?= h(fmt_date((string)($v['crd'] ?? ''))) ?><?= $appt && !empty($appt[1]) ? ' ' . h($appt[1]) : '' ?></dd>
       <dt>Customer contact</dt><dd><?= h(trim(($v['forename'] ?? '') . ' ' . ($v['surname'] ?? ''))) ?><br><span class="muted"><?= h(implode(' · ', array_filter([$v['telephone'] ?? '', $v['email'] ?? '']))) ?></span></dd>
       <dt>Site contact</dt><dd><?= h(trim(($v['site_forename'] ?? '') . ' ' . ($v['site_surname'] ?? ''))) ?><br><span class="muted"><?= h(implode(' · ', array_filter([$v['site_telephone'] ?? '', $v['site_email'] ?? '']))) ?></span></dd>
+      <?php if (!isset($setup['IP address'])): ?><dt>IP address</dt><dd><?= h(GIACOM_IP_OPTIONS[$v['ip_option'] ?? 'dynamic'][0] ?? 'Dynamic IP') ?></dd><?php endif; ?>
+      <?php foreach ($setup as $label => $value): ?><dt><?= h($label) ?></dt><dd><?= $label === 'Broadband password' ? '<details><summary class="small">Show</summary><code>' . h($value) . '</code></details>' : h($value) ?></dd><?php endforeach; ?>
       <?php if (!empty($v['client_ref'])): ?><dt>Your reference</dt><dd><?= h($v['client_ref']) ?></dd><?php endif; ?>
       <dt>Placed</dt><dd><?= h(fmt_datetime($d['created_at'])) ?> by <?= h((string)$d['user_name']) ?></dd>
       <?php if ($d['status'] === 'rejected' && $d['decision_note']): ?><dt>Reason</dt><dd><?= h($d['decision_note']) ?></dd><?php endif; ?>

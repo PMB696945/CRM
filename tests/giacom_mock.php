@@ -176,6 +176,13 @@ switch ($call) {
         ]]);
     case 'address_match':
         reply(['addresses' => [['addressRef' => 'A00012345679', 'uprn' => '77001234', 'postCode' => 'M1 3HE']]]);
+    case 'change_ips':
+        $state['change_ips'][] = $req;
+        $save();
+        if (($req['allocation-size'] ?? '') === '16') {
+            reply([], 1, 'Allocation size not available');
+        }
+        reply(['ip-address' => '89.145.195.160', 'cidr' => '89.145.253.136/' . (32 - (int)log((int)($req['allocation-size'] ?? 1), 2))]);
     case 'amend_order':
         $state['orders'][$req['order-id']]['appointment'] = $req;
         $save();

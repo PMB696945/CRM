@@ -22,6 +22,7 @@ $canPlace = can('orders.place');
         <dt>Product</dt><dd><?= h((string)$d['product_name']) ?> <span class="muted small">supplier product <?= h((string)$d['supplier_product']) ?></span></dd>
         <dt>Address</dt><dd><?= h((string)($check['address_label'] ?? '—')) ?><?php if ($check): ?> · <a href="<?= h(url('giacom', ['action' => 'result', 'id' => $check['id']])) ?>">availability</a><?php endif; ?></dd>
         <dt>Order type</dt><dd><?= ($v['order_type'] ?? '') === 'migrate' ? 'Migrate (take over)' : 'Provide (new)' ?><?= !empty($v['cli']) ? ' · line ' . h($v['cli']) : '' ?></dd>
+        <dt>IP address</dt><dd><?= h(GIACOM_IP_OPTIONS[$v['ip_option'] ?? 'dynamic'][0] ?? 'Dynamic IP') ?></dd>
         <dt>Engineer visit</dt><dd><?= h($visits[$v['site_visit_reason'] ?? ''] ?? '—') ?></dd>
         <dt><?= $appt ? 'Appointment wanted' : 'Required by' ?></dt><dd><?= h(fmt_date((string)($v['crd'] ?? ''))) ?><?= $appt && !empty($appt[1]) ? ' ' . h($appt[1]) : '' ?></dd>
         <dt>Customer contact</dt><dd><?= h(trim(($v['title'] ?? '') . ' ' . ($v['forename'] ?? '') . ' ' . ($v['surname'] ?? ''))) ?><br><span class="muted"><?= h(implode(' · ', array_filter([$v['telephone'] ?? '', $v['email'] ?? '']))) ?></span></dd>

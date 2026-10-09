@@ -408,6 +408,15 @@ function giacom_visit_code(mixed $v): ?string
     };
 }
 
+/** IP address options on an order: dynamic, one static IP, or a routed block of static IPs (its size). */
+const GIACOM_IP_OPTIONS = [
+    'dynamic' => ['Dynamic IP', 0],
+    'static'  => ['1 static IP', 1],
+    'block4'  => ['Block of 4 static IPs (/30)', 4],
+    'block8'  => ['Block of 8 static IPs (/29)', 8],
+    'block16' => ['Block of 16 static IPs (/28)', 16],
+];
+
 const GIACOM_VISITS = ['NO_SITE_VISIT' => 'Not needed', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install'];
 
 /** The least engineer visit Giacom says the address needs for this kind of order (null if it didn't say). */
@@ -490,7 +499,8 @@ function giacom_place_order(array $check, array $product, array $o): int
     $account = db_one('SELECT * FROM accounts WHERE id = ?', [$check['account_id']]) ?? throw new GiacomException('Customer not found.');
     $address = json_decode((string)$check['address'], true) ?: [];
     $type = $o['order_type'] === 'migrate' ? 'migrate' : 'provide';
-    $clientRef = mb_substr($account['account_number'] . ($o['client_ref'] !== '' ? ' ' . $o['client_ref'] : ''), 0, 60);
+    // Giacom's reference for the order: the one given on the order, or else the customer's account number.
+    $clientRef = mb_substr(trim((string)$o['client_ref']) !== '' ? trim((string)$o['client_ref']) : (string)$account['account_number'], 0, 60);
 
     $fullUsername = giacom_full_username($o['bb_username'], $o['bb_suffix'] ?? '', $o['realm']);
     if (!str_contains($fullUsername, '@')) {
@@ -503,6 +513,7 @@ function giacom_place_order(array $check, array $product, array $o): int
         'care-level' => $o['care_level'] ?: null,
         'site-visit-reason' => $o['site_visit_reason'] ?: null,
         'force-new-ont' => ($o['force_new_ont'] ?? '') ?: (giacom_is_fttp($product) ? giacom_default_ont($type) : null),
+        'fixed-ip' => isset(GIACOM_IP_OPTIONS[$o['ip_option'] ?? '']) ? (($o['ip_option'] ?? '') === 'dynamic' ? 'N' : 'Y') : null,
     ], fn($v) => $v !== null && $v !== '');
     $order = array_filter([
         'client-ref' => $clientRef,
@@ -565,6 +576,9 @@ function giacom_place_order(array $check, array $product, array $o): int
             json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email'],
                 'site_contact' => trim(($o['site_forename'] ?? '') . ' ' . ($o['site_surname'] ?? '')), 'site_telephone' => $o['site_telephone'] ?? '',
                 'site_email' => $o['site_email'] ?? '',
+                'ip_option' => $o['ip_option'] ?? null,
+                // Kept (encrypted) so the customer's setup details can be emailed again.
+                'bb_password' => $o['bb_password'] !== '' ? encrypt_secret((string)$o['bb_password']) : null,
                 'site_visit_reason' => $o['site_visit_reason'] ?? null]),
             current_user()['id'] ?? null,
         ]);
@@ -579,7 +593,68 @@ function giacom_place_order(array $check, array $product, array $o): int
         'accounts', (int)$account['id'], null, ['Product' => ['from' => '', 'to' => $product['name']], 'Required by' => ['from' => '', 'to' => (string)$o['crd']]]);
     log_activity((int)$account['id'], 'note', "Giacom $type order $orderId placed: {$product['name']}");
     service_changed($serviceId, null);
+    if ((GIACOM_IP_OPTIONS[$o['ip_option'] ?? ''][1] ?? 0) > 1) {
+        try {
+            giacom_request_ip_block(db_one('SELECT * FROM giacom_orders WHERE id = ?', [$id]));
+        } catch (GiacomException $e) {
+            // The order stands: the block can be asked for again from the order page.
+            db_exec('UPDATE giacom_orders SET last_error = ? WHERE id = ?', ['Order placed, but the static IP block couldn\'t be requested: '
+                . mb_substr($e->getMessage(), 0, 380) . ' Request it again from this page.', $id]);
+        }
+    }
     return $id;
+}
+
+/** Ask Giacom for the order's routed block of static IPs (its size from the order), and keep the addresses it gives. */
+function giacom_request_ip_block(array $order): array
+{
+    $details = json_decode((string)$order['details'], true) ?: [];
+    $size = GIACOM_IP_OPTIONS[$details['ip_option'] ?? ''][1] ?? 0;
+    if ($size < 2) {
+        throw new GiacomException('This order isn\'t for a block of static IPs.');
+    }
+    if (!$order['giacom_service_id']) {
+        throw new GiacomException('Giacom hasn\'t given this order a service ID yet. Refresh the order and try again.');
+    }
+    $r = giacom_call('change_ips', ['service-id' => $order['giacom_service_id'], 'fixed-ip' => 'Y', 'routed-ip' => 'Y', 'allocation-size' => (string)$size]);
+    $details['ip_address'] = (string)($r['ip-address'] ?? '') ?: null;
+    $details['ip_block'] = (string)($r['cidr'] ?? '') ?: null;
+    db_exec('UPDATE giacom_orders SET details = ?, last_error = NULL WHERE id = ?', [json_encode($details), $order['id']]);
+    giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'ip', 'Static IP block of ' . $size . ' requested' . ($details['ip_block'] ? ': ' . $details['ip_block'] : ''));
+    return $details;
+}
+
+/** The broadband login and IP details for a placed order (for the customer, the dealer and staff). */
+function giacom_setup_details(array $order): array
+{
+    $details = json_decode((string)$order['details'], true) ?: [];
+    $ip = $details['ip_option'] ?? null;
+    $ipText = match (true) {
+        $ip === null || !isset(GIACOM_IP_OPTIONS[$ip]) => '',
+        $ip === 'dynamic' => 'Dynamic (assigned automatically)',
+        default => GIACOM_IP_OPTIONS[$ip][0] . (!empty($details['ip_block']) ? ': ' . $details['ip_block']
+            : (!empty($details['ip_address']) ? ': ' . $details['ip_address'] : ' (we\'ll confirm the address once it\'s allocated)')),
+    };
+    return array_filter([
+        'Broadband username' => (string)$order['broadband_username'],
+        'Broadband password' => (string)(decrypt_secret($details['bb_password'] ?? null) ?? ''),
+        'IP address' => $ipText,
+    ], fn($v) => $v !== '');
+}
+
+/** Setup details as an email table. */
+function giacom_setup_details_html(array $order): string
+{
+    $rows = giacom_setup_details($order);
+    if (!$rows) {
+        return '';
+    }
+    $html = '<p style="margin-top:20px"><b>Your broadband setup details</b></p><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:8px 0;background:#f9fafb;border:1px solid #e4e7ec;border-radius:8px">';
+    foreach ($rows as $label => $value) {
+        $mono = $label !== 'IP address' ? 'font-family:monospace;font-size:15px;' : '';
+        $html .= '<tr><td style="padding:8px 12px;color:#667085;white-space:nowrap">' . h($label) . '</td><td style="padding:8px 12px;' . $mono . '">' . h($value) . '</td></tr>';
+    }
+    return $html . '</table><p style="color:#667085;font-size:13px">If your router wasn\'t supplied ready to use, enter the username and password in its broadband (PPP) settings. Please keep these details safe.</p>';
 }
 
 /** Is this an FTTP product (which has an ONT on the wall)? */
@@ -949,6 +1024,7 @@ function giacom_email_confirmation(array $order, ?string $to = null): string
     $company = company('name', config('app_name'));
     $body = '<p>Hi ' . h($first) . ',</p>'
         . '<p>Thank you for your order. We\'ve placed it and will keep you updated as it progresses.</p>' . $table
+        . giacom_setup_details_html($order)
         . '<p>If any of these details are wrong, or the date doesn\'t suit you, please reply to this email as soon as possible.</p>';
     send_mail($to, $name, "Your broadband order with $company", email_layout('Your broadband order is confirmed', $body));
     giacom_store_event((int)$order['id'], date('Y-m-d H:i:s'), 'email', 'Order confirmation emailed to ' . $to);
@@ -1136,7 +1212,7 @@ function giacom_controller(): void
                 'site_title' => $siteTitle, 'site_forename' => $siteForename, 'site_surname' => $siteSurname,
                 'site_telephone' => (string)(($siteContact['phone'] ?? '') ?: ($siteContact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
                 'site_email' => (string)(($siteContact['email'] ?? '') ?: ($contact['email'] ?? '') ?: ($account['email'] ?? '')), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
-                'send_confirmation' => '1',
+                'send_confirmation' => '1', 'ip_option' => 'dynamic',
             ];
             $errors = [];
             if (is_post()) {
@@ -1228,6 +1304,9 @@ function giacom_controller(): void
                 if ($values['site_email'] !== '' && !filter_var($values['site_email'], FILTER_VALIDATE_EMAIL)) {
                     $errors['site_email'] = 'That isn\'t a valid email address.';
                 }
+                if (!isset(GIACOM_IP_OPTIONS[$values['ip_option']])) {
+                    $errors['ip_option'] = 'Choose dynamic or static IP.';
+                }
                 if ($values['care_level'] !== '' && !isset(GIACOM_CARE_LEVELS[$values['care_level']])) {
                     $errors['care_level'] = 'Choose a care level.';
                 }
@@ -1293,6 +1372,10 @@ function giacom_controller(): void
                         } catch (IntegrationException $e) {
                             flash('The confirmation couldn\'t be sent: ' . $e->getMessage(), 'error');
                         }
+                    } elseif (query('do') === 'ips') {
+                        require_permission('orders.place');
+                        $d = giacom_request_ip_block($order);
+                        flash('Static IP block requested' . (!empty($d['ip_block']) ? ': ' . $d['ip_block'] : '') . '.');
                     } elseif (query('do') === 'abort') {
                         require_permission('orders.place');
                         $reason = trim((string)($_POST['reason'] ?? ''));

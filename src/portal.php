@@ -452,8 +452,11 @@ function dealer_order_approve(array $d): array
     }
     audit('update', "Dealer order {$d['reference']} approved and placed", 'accounts', (int)$d['account_id'], null, null, (int)$d['account_id']);
     $d = dealer_order((int)$d['id']);
+    $placed = db_one('SELECT * FROM giacom_orders WHERE id = ?', [$giacomId]);
+    $ipProblem = $placed && str_contains((string)$placed['last_error'], 'static IP block') ? 'The static IP block will follow; we\'ll confirm the addresses.' : '';
     dealer_order_notify_dealer($d, "Order {$d['reference']} accepted", '<p>Your order <b>' . h($d['reference']) . '</b> for ' . h($d['account_name']) . ' (' . h((string)$d['product_name']) . ') has been accepted and placed.</p>'
-        . ($note !== '' ? '<p>' . h($note) . '</p>' : '') . '<p>You can follow its progress on the portal.</p>');
+        . ($note !== '' ? '<p>' . h($note) . '</p>' : '') . ($ipProblem !== '' ? '<p>' . h($ipProblem) . '</p>' : '')
+        . ($placed ? giacom_setup_details_html($placed) : '') . '<p>You can follow its progress on the portal.</p>');
     return ['order' => $d, 'note' => $note, 'giacom_order_id' => $giacomId];
 }
 
@@ -476,6 +479,65 @@ function dealer_order_reject(array $d, string $reason): void
     audit('update', "Dealer order {$d['reference']} not accepted: $reason", 'accounts', (int)$d['account_id'], null, null, (int)$d['account_id']);
     dealer_order_notify_dealer(dealer_order((int)$d['id']), "Order {$d['reference']} not accepted",
         '<p>We couldn\'t accept your order <b>' . h($d['reference']) . '</b> for ' . h($d['account_name']) . '.</p><p><b>Reason:</b> ' . nl2br(h($reason)) . '</p>');
+}
+
+/* ---------------------------------------------------------- Assets --- */
+
+/*
+ * The portal's stylesheet, script and fonts. When the portal's address doesn't serve the CRM's assets folder
+ * (e.g. a subdomain pointed at a folder of its own), they're served through the portal itself instead.
+ */
+
+/** The file on disk for an asset name, or null. Only the portal's own assets can be fetched. */
+function portal_asset_file(string $name): ?string
+{
+    if (!preg_match('#^(app\.css|app\.js|fonts/[A-Za-z0-9._-]+\.woff2)$#', $name)) {
+        return null;
+    }
+    $here = dirname((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) . '/assets/';
+    foreach ([$here, APP_ROOT . '/public/assets/', dirname(__DIR__) . '/public/assets/'] as $dir) {
+        if (is_file($dir . $name)) {
+            return $dir . $name;
+        }
+    }
+    return null;
+}
+
+/** The address to load an asset from: the assets folder if this site has it, otherwise through the portal. */
+function portal_asset_url(string $name): string
+{
+    $local = dirname((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) . '/assets/' . $name;
+    if (is_file($local)) {
+        return 'assets/' . $name . '?v=' . filemtime($local);
+    }
+    $file = portal_asset_file($name);
+    return portal_url('asset', ['f' => $name, 'v' => $file ? (string)filemtime($file) : null]);
+}
+
+/** Send an asset (go=asset&f=...). */
+function portal_send_asset(string $name): never
+{
+    $file = portal_asset_file($name);
+    if (!$file) {
+        if (!headers_sent()) {
+            http_response_code(404);
+        }
+        portal_exit('');
+    }
+    $type = ['css' => 'text/css; charset=utf-8', 'js' => 'text/javascript; charset=utf-8', 'woff2' => 'font/woff2'][pathinfo($file, PATHINFO_EXTENSION)];
+    $body = (string)file_get_contents($file);
+    if ($name === 'app.css') {
+        // Fonts are fetched the same way as the stylesheet.
+        $body = (string)preg_replace_callback('#url\((["\']?)(fonts/[A-Za-z0-9._-]+\.woff2)\1\)#', fn($m) => 'url(' . portal_asset_url($m[2]) . ')', $body);
+    }
+    if (defined('PORTAL_TESTING')) {
+        throw new PortalExit($body);
+    }
+    header('Content-Type: ' . $type);
+    header('Cache-Control: public, max-age=604800');
+    header_remove('Set-Cookie');
+    echo $body;
+    exit;
 }
 
 /* ----------------------------------------------------------- The portal --- */
@@ -525,10 +587,13 @@ function portal_redirect(string $go, array $params = []): never
 /** The dealer portal (its subdomain, or portal.php). */
 function portal_dispatch(): never
 {
+    $go = (string)($_GET['go'] ?? 'orders');
+    if ($go === 'asset') {
+        portal_send_asset((string)($_GET['f'] ?? ''));
+    }
     if (!defined('PORTAL_TESTING')) {
         start_session();
     }
-    $go = (string)($_GET['go'] ?? 'orders');
     $user = portal_user();
     $error = null;
 
@@ -675,8 +740,9 @@ function portal_dispatch(): never
                 flash('Order withdrawn.');
                 portal_redirect('order', ['id' => $d['id']]);
             }
+            $placed = $d['giacom_order_id'] ? db_one('SELECT * FROM giacom_orders WHERE id = ?', [$d['giacom_order_id']]) : null;
             portal_page('order_view', ['user' => $user, 'd' => $d, 'progress' => dealer_order_progress($d), 'v' => json_decode((string)$d['details'], true) ?: [],
-                'agreement' => dealer_order_agreement($d)], 'Order ' . $d['reference']);
+                'agreement' => dealer_order_agreement($d), 'setup' => $placed ? giacom_setup_details($placed) : []], 'Order ' . $d['reference']);
 
         case 'orders':
         default:
@@ -733,7 +799,7 @@ function portal_order_form(array $user, array $customer, array $check, array $of
         'force_new_ont' => giacom_is_fttp($sp) ? giacom_default_ont($postedType) : '',
         'title' => $title, 'forename' => $forename, 'surname' => $surname, 'telephone' => $phone, 'email' => (string)(($customer['contact_email'] ?? '') ?: ($customer['email'] ?? '')),
         'site_title' => $title, 'site_forename' => $forename, 'site_surname' => $surname, 'site_telephone' => $phone, 'site_email' => (string)(($customer['contact_email'] ?? '') ?: ($customer['email'] ?? '')),
-        'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '', 'client_ref' => '',
+        'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '', 'client_ref' => '', 'ip_option' => 'dynamic',
     ];
     $errors = [];
     if (is_post()) {
@@ -774,6 +840,9 @@ function portal_order_form(array $user, array $customer, array $check, array $of
                 if (!preg_match('/^[\d +]{10,16}$/', $values[$k])) {
                     $errors[$k] = 'Enter a phone number.';
                 }
+            }
+            if (!isset(GIACOM_IP_OPTIONS[$values['ip_option']])) {
+                $errors['ip_option'] = 'Choose dynamic or static IP.';
             }
             if ($values['email'] === '') {
                 $errors['email'] = 'Enter the customer\'s email address.';
