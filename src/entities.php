@@ -537,9 +537,9 @@ function entities(): array
                 'supplier_sku'      => ['label' => 'Supplier code', 'type' => 'text', 'help' => 'Their product code or SKU; price files are matched on this'],
                 'description'       => ['label' => 'Description', 'type' => 'text', 'required' => true],
                 'product_id'        => ['label' => 'Our product', 'type' => 'ref', 'ref' => 'products', 'help' => 'The product or tariff this is the cost of'],
-                'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'required' => true, 'help' => 'Per billing cycle, excluding VAT'],
+                'cost_price'        => ['label' => 'Cost price', 'type' => 'money', 'required' => true, 'help' => 'Per billing cycle, excluding VAT', 'if' => fn() => can('costs.view')],
                 'billing_frequency' => ['label' => 'Billed', 'type' => 'select', 'options' => BILLING_FREQUENCIES, 'default' => 'monthly', 'required' => true],
-                'setup_cost'        => ['label' => 'Setup / one-off cost', 'type' => 'money'],
+                'setup_cost'        => ['label' => 'Setup / one-off cost', 'type' => 'money', 'if' => fn() => can('costs.view')],
                 'term_months'       => ['label' => 'Minimum term', 'type' => 'term'],
                 'lead_time_days'    => ['label' => 'Lead time (days)', 'type' => 'int', 'min' => 0, 'max' => 365],
                 'preferred'         => ['label' => 'Preferred supplier for our product', 'type' => 'bool',
@@ -591,7 +591,7 @@ function entities(): array
                 'order_date'    => ['label' => 'Order date', 'type' => 'date'],
                 'expected_date' => ['label' => 'Expected delivery', 'type' => 'date'],
                 'supplier_ref'  => ['label' => 'Supplier\'s order no.', 'type' => 'text'],
-                'total'         => ['label' => 'Total (ex VAT)', 'type' => 'money', 'readonly' => true],
+                'total'         => ['label' => 'Total (ex VAT)', 'type' => 'money', 'readonly' => true, 'if' => fn() => can('costs.view')],
                 'deliver_to'    => ['label' => 'Deliver to', 'type' => 'textarea'],
                 'notes'         => ['label' => 'Notes for the supplier', 'type' => 'textarea'],
                 'created_by'    => ['label' => 'Raised by', 'type' => 'ref', 'ref' => 'users', 'readonly' => true],
@@ -606,6 +606,11 @@ function entities(): array
         ],
     ];
 
+    // Supplier prices and purchase order amounts are costs.
+    if (!can('costs.view')) {
+        $entities['supplier_products']['list'] = array_values(array_diff($entities['supplier_products']['list'], ['cost_price', 'setup_cost']));
+        $entities['purchase_orders']['list'] = array_values(array_diff($entities['purchase_orders']['list'], ['total']));
+    }
     // Revenue totals only for people allowed to see them.
     if (!can('revenue.view')) {
         unset($entities['accounts']['computed']['_mrr']);

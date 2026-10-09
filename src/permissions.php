@@ -78,7 +78,7 @@ const DEFAULT_ROLE_PERMISSIONS = [
                     'records.delete', 'export', 'finance.view', 'revenue.view', 'xero.open', 'products.edit', 'costs.view', 'costs.edit', 'marketing.send', 'settings.manage', 'users.manage'],
     'manager'   => ['onboarding.edit', 'documents.manage', 'suppliers.view', 'suppliers.edit', 'purchasing.edit', 'tickets.all', 'orders.check', 'orders.place', 'customers.edit', 'customers.close', 'approvals.decide', 'services.edit', 'tickets.edit', 'sales.edit',
                     'records.delete', 'export', 'finance.view', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'marketing.send'],
-    'staff'     => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit', 'costs.view'],
+    'staff'     => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit', 'sales.edit'],
     'sales'     => ['orders.check', 'customers.edit', 'sales.edit', 'tickets.edit', 'costs.view'],
     'support'   => ['onboarding.edit', 'suppliers.view', 'orders.check', 'customers.edit', 'services.edit', 'tickets.edit'],
     'finance'   => ['suppliers.view', 'suppliers.edit', 'purchasing.edit', 'customers.edit', 'finance.view', 'revenue.view', 'xero.open', 'costs.view', 'costs.edit', 'export'],

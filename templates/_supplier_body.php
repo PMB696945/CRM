@@ -24,15 +24,15 @@ $link = fn($u) => $u ? '<a href="' . h(preg_match('#^https?://#i', $u) ? $u : 'h
         <?php if ($canWrite): ?><a class="btn btn-sm" href="<?= h(url('supplier_products', ['action' => 'new', 'supplier_id' => $id, 'return' => $here])) ?>">+ Add product</a><?php endif; ?></div>
       <?php if ($products): ?>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Code</th><th>Description</th><th>Our product</th><th class="num">Cost</th><th class="num">Setup</th><th>Term</th><th>Price changed</th></tr></thead>
+          <thead><tr><th>Code</th><th>Description</th><th>Our product</th><?php if (can('costs.view')): ?><th class="num">Cost</th><th class="num">Setup</th><?php endif; ?><th>Term</th><th>Price changed</th></tr></thead>
           <tbody>
           <?php foreach ($products as $p): ?>
             <tr class="<?= $p['active'] ? '' : 'muted' ?>">
               <td class="small"><?= h((string)$p['supplier_sku']) ?: '<span class="muted">—</span>' ?></td>
               <td><a class="row-link" href="<?= h(url('supplier_products', ['action' => 'view', 'id' => $p['id']])) ?>"><?= h($p['description']) ?></a><?= $p['active'] ? '' : ' <span class="badge">Unavailable</span>' ?></td>
               <td class="small"><?= $p['product_id'] ? '<a href="' . h(url('products', ['action' => 'view', 'id' => $p['product_id']])) . '">' . h($p['product_id__label']) . '</a>' . ($p['preferred'] ? ' <span class="badge badge-active" title="Sets the product\'s cost price">Preferred</span>' : '') : '<span class="muted">—</span>' ?></td>
-              <td class="num"><?= h(money($p['cost_price'])) ?><div class="muted small"><?= h(strtolower(BILLING_FREQUENCIES[$p['billing_frequency']] ?? '')) ?></div></td>
-              <td class="num"><?= $p['setup_cost'] !== null ? h(money($p['setup_cost'])) : '<span class="muted">—</span>' ?></td>
+              <?php if (can('costs.view')): ?><td class="num"><?= h(money($p['cost_price'])) ?><div class="muted small"><?= h(strtolower(BILLING_FREQUENCIES[$p['billing_frequency']] ?? '')) ?></div></td>
+              <td class="num"><?= $p['setup_cost'] !== null ? h(money($p['setup_cost'])) : '<span class="muted">—</span>' ?></td><?php endif; ?>
               <td class="small"><?= h(term_label($p['term_months'])) ?: '<span class="muted">—</span>' ?></td>
               <td class="small"><?= h(fmt_date($p['price_updated_at'])) ?></td>
             </tr>
@@ -46,7 +46,7 @@ $link = fn($u) => $u ? '<a href="' . h(preg_match('#^https?://#i', $u) ? $u : 'h
 
     <section class="card">
       <div class="card-head"><h2>Purchase orders</h2><?php if (can('purchasing.edit')): ?><a class="btn btn-sm" href="<?= h(url('purchase_orders', ['action' => 'new', 'supplier_id' => $id])) ?>">+ New</a><?php endif; ?></div>
-      <?php if ($orders): render('_table', ['entity' => entity('purchase_orders'), 'name' => 'purchase_orders', 'rows' => $orders, 'columns' => ['reference', 'account_id', 'status', 'order_date', 'expected_date', 'total']]);
+      <?php if ($orders): render('_table', ['entity' => entity('purchase_orders'), 'name' => 'purchase_orders', 'rows' => $orders, 'columns' => array_values(array_filter(['reference', 'account_id', 'status', 'order_date', 'expected_date', can('costs.view') ? 'total' : null]))]);
       else: ?><p class="muted">No purchase orders yet.</p><?php endif; ?>
     </section>
   </div>
@@ -78,7 +78,7 @@ $link = fn($u) => $u ? '<a href="' . h(preg_match('#^https?://#i', $u) ? $u : 'h
       <div class="card-head"><h2>Invoices</h2><a href="<?= h(url('supplier_invoices', ['status' => ''])) ?>">All →</a></div>
       <?php foreach ($invoices as $i): ?>
         <p class="small"><a href="<?= h(url('supplier_invoices', ['action' => 'view', 'id' => $i['id']])) ?>"><?= h($i['invoice_number'] ?: $i['file_name']) ?></a>
-          <?= h(fmt_date($i['invoice_date'])) ?> · <?= $i['total'] !== null ? h(money($i['total'])) : '' ?> <?= invoice_status_badge($i['status']) ?></p>
+          <?= h(fmt_date($i['invoice_date'])) ?> · <?= $i['total'] !== null && can('costs.view') ? h(money($i['total'])) : '' ?> <?= invoice_status_badge($i['status']) ?></p>
       <?php endforeach; ?>
     </section>
     <?php endif; ?>

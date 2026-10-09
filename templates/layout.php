@@ -33,8 +33,7 @@ if (can('suppliers.view') || can('suppliers.edit') || can('purchasing.edit')) {
     $nav['Purchasing'] = [
         'suppliers'         => ['truck', 'Suppliers'],
         'purchase_orders'   => ['cart', 'Purchase orders'],
-        'supplier_invoices' => ['document', 'Supplier invoices'],
-    ];
+    ] + (can('costs.view') ? ['supplier_invoices' => ['document', 'Supplier invoices']] : []);
 }
 if (can('marketing.send')) {
     $nav['Marketing'] = ['campaigns' => ['megaphone', 'Alerts & marketing']];

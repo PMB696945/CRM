@@ -760,7 +760,8 @@ function invoice_upload(array $file, ?int $poId = null, ?int $supplierId = null,
 
 function supplier_invoices_controller(): void
 {
-    if (!can('suppliers.view') && !can('purchasing.edit')) {
+    // Supplier invoices are all costs.
+    if ((!can('suppliers.view') && !can('purchasing.edit')) || !can('costs.view')) {
         forbidden();
     }
     $action = query('action', 'list');

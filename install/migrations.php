@@ -1107,4 +1107,12 @@ return [
             db()->exec('ALTER TABLE accounts ADD COLUMN is_customer TINYINT(1) NOT NULL DEFAULT 1 AFTER status');
         }
     },
+    38 => function (): void {
+        // Staff no longer see cost prices and margins by default: take it off a saved staff role too.
+        $saved = json_decode((string)setting('role_permissions', ''), true);
+        if (is_array($saved) && is_array($saved['staff'] ?? null) && array_intersect(['costs.view', 'costs.edit'], $saved['staff'])) {
+            $saved['staff'] = array_values(array_diff($saved['staff'], ['costs.view', 'costs.edit']));
+            set_setting('role_permissions', json_encode($saved));
+        }
+    },
 ];

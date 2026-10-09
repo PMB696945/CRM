@@ -3668,7 +3668,11 @@ test('the cost price at the time of ordering is kept on services and quote lines
 echo "Role visibility\n";
 test('staff don\'t see revenue totals, balances, debt or Direct Debit status; admins and finance do', function () {
     as_role('staff');
-    ok(!can('finance.view') && !can('revenue.view'), 'staff: no balances or revenue');
+    ok(!can('finance.view') && !can('revenue.view') && !can('costs.view') && !can('costs.edit'), 'staff: no balances, revenue or costs');
+    ok(!in_array('cost_price', array_keys(array_filter(entity('services')['fields'], 'field_enabled')), true) && !isset(entity('services')['computed']['_margin']), 'no service cost or margin');
+    ok(!in_array('cost_price', array_keys(array_filter(entity('products')['fields'], 'field_enabled')), true) && !in_array('_margin', entity('products')['list'], true), 'no product cost or margin');
+    ok(!array_intersect(['cost_price', 'setup_cost'], entity('supplier_products')['list']) && !in_array('total', entity('purchase_orders')['list'], true), 'no supplier prices or purchase order totals');
+    ok(!field_enabled(entity('supplier_products')['fields']['cost_price']) && !field_enabled(entity('purchase_orders')['fields']['total']));
     ob_start(); dashboard_controller(); $html = ob_get_clean();
     ok(!str_contains($html, 'Monthly recurring revenue') && !str_contains($html, 'Overdue debt') && !str_contains($html, 'No Direct Debit'), 'not on the dashboard');
     ok(str_contains($html, 'Active services') && str_contains($html, 'Live services by type'), 'counts instead');
@@ -3684,9 +3688,13 @@ test('staff don\'t see revenue totals, balances, debt or Direct Debit status; ad
     as_role('admin');
     ob_start(); dashboard_controller(); $html = ob_get_clean();
     ok(str_contains($html, 'Monthly recurring revenue'), 'admins still see MRR');
+    ok(in_array('cost_price', entity('supplier_products')['list'], true) && in_array('total', entity('purchase_orders')['list'], true), 'admins still see supplier costs');
     // A staff role saved on the Roles page before this change loses balances; revenue follows the default.
     set_setting('role_permissions', json_encode(['staff' => ['customers.edit', 'finance.view'], '_known' => array_diff(all_permissions(), ['revenue.view'])]));
     (require migrations_file())[36]();
+    set_setting('role_permissions', json_encode(array_merge(json_decode((string)setting('role_permissions'), true), ['staff' => ['customers.edit', 'costs.view']])));
+    (require migrations_file())[38]();
+    ok(!in_array('costs.view', role_permissions()['staff'], true), 'costs taken off a saved staff role');
     $perms = role_permissions();
     ok(!in_array('finance.view', $perms['staff'], true) && !in_array('revenue.view', $perms['staff'], true) && in_array('revenue.view', $perms['admin'], true));
     set_setting('role_permissions', null);

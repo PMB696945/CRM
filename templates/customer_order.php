@@ -93,10 +93,10 @@ $me = (int)current_user()['id'];
       <div class="card-head"><h2>Purchase orders</h2></div>
       <?php if ($purchaseOrders): ?>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>PO</th><th>Supplier</th><th>Status</th><th class="num">Total</th><th>Sent</th><th>Invoice</th></tr></thead>
+          <thead><tr><th>PO</th><th>Supplier</th><th>Status</th><?php if (can('costs.view')): ?><th class="num">Total</th><?php endif; ?><th>Sent</th><th>Invoice</th></tr></thead>
           <tbody><?php foreach ($purchaseOrders as $p): $inv = db_one("SELECT id, status, total FROM supplier_invoices WHERE po_id = ? ORDER BY id DESC LIMIT 1", [$p['id']]); ?>
             <tr><td><a class="row-link" href="<?= h(url('purchase_orders', ['action' => 'view', 'id' => $p['id']])) ?>"><?= h($p['reference']) ?></a></td>
-              <td><?= h($p['supplier_name']) ?></td><td><?= badge($p['status']) ?></td><td class="num"><?= h(money($p['total'])) ?></td>
+              <td><?= h($p['supplier_name']) ?></td><td><?= badge($p['status']) ?></td><?php if (can('costs.view')): ?><td class="num"><?= h(money($p['total'])) ?></td><?php endif; ?>
               <td class="small"><?= h(fmt_datetime($p['sent_at'])) ?: '<span class="muted">—</span>' ?></td>
               <td class="small"><?= $inv ? '<a href="' . h(url('supplier_invoices', ['action' => 'view', 'id' => $inv['id']])) . '">' . invoice_status_badge($inv['status']) . '</a>' : '<span class="muted">Not yet</span>' ?></td></tr>
           <?php endforeach; ?></tbody>
@@ -110,7 +110,7 @@ $me = (int)current_user()['id'];
           <p class="small muted"><?= $purchaseOrders ? 'Still to order:' : 'From the products on this order and their preferred suppliers:' ?></p>
           <?php foreach ($poPlan['suppliers'] as $sid => $p): $total = po_total($p['lines']); ?>
             <label class="check"><input type="checkbox" name="suppliers[]" value="<?= (int)$sid ?>" checked>
-              <span><b><?= h($p['supplier']['name']) ?></b> – <?= count($p['lines']) ?> line<?= count($p['lines']) === 1 ? '' : 's' ?>, <?= h(money($total)) ?>
+              <span><b><?= h($p['supplier']['name']) ?></b> – <?= count($p['lines']) ?> line<?= count($p['lines']) === 1 ? '' : 's' ?><?= can('costs.view') ? ', ' . h(money($total)) : '' ?>
                 <span class="muted small"><?= $p['supplier']['email'] ? 'to ' . h($p['supplier']['email']) : '· no orders email set, so it will be saved as a draft' ?></span>
                 <span class="block small muted"><?= h(implode(' · ', array_map(fn($l) => $l['quantity'] . ' × ' . $l['description'], $p['lines']))) ?></span></span></label>
           <?php endforeach; ?>

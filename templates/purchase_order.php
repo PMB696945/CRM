@@ -30,14 +30,14 @@ $canEdit = can('purchasing.edit');
     <section class="card">
       <div class="card-head"><h2>Items</h2></div>
       <div class="table-wrap"><table class="table">
-        <thead><tr><th>Code</th><th>Description</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Total</th></tr></thead>
+        <thead><tr><th>Code</th><th>Description</th><th class="num">Qty</th><?php if (can('costs.view')): ?><th class="num">Unit cost</th><th class="num">Total</th><?php endif; ?></tr></thead>
         <tbody>
         <?php foreach ($lines as $l): ?>
           <tr><td class="small"><?= $l['supplier_product_id'] ? '<a href="' . h(url('supplier_products', ['action' => 'view', 'id' => $l['supplier_product_id']])) . '">' . h((string)$l['sku']) . '</a>' : h((string)$l['sku']) ?></td>
-            <td><?= h($l['description']) ?></td><td class="num"><?= (int)$l['quantity'] ?></td><td class="num"><?= h(money($l['unit_cost'])) ?></td><td class="num"><?= h(money($l['quantity'] * $l['unit_cost'])) ?></td></tr>
+            <td><?= h($l['description']) ?></td><td class="num"><?= (int)$l['quantity'] ?></td><?php if (can('costs.view')): ?><td class="num"><?= h(money($l['unit_cost'])) ?></td><td class="num"><?= h(money($l['quantity'] * $l['unit_cost'])) ?></td><?php endif; ?></tr>
         <?php endforeach; ?>
         </tbody>
-        <tfoot><tr><td colspan="4" class="right"><b>Total (ex VAT)</b></td><td class="num"><b><?= h(money(po_total($lines))) ?></b></td></tr></tfoot>
+        <?php if (can('costs.view')): ?><tfoot><tr><td colspan="4" class="right"><b>Total (ex VAT)</b></td><td class="num"><b><?= h(money(po_total($lines))) ?></b></td></tr></tfoot><?php endif; ?>
       </table></div>
     </section>
     <section class="card">
@@ -60,7 +60,7 @@ $canEdit = can('purchasing.edit');
       <div class="card-head"><h2>Supplier invoices</h2></div>
       <?php foreach ($invoices as $i): ?>
         <p class="small"><a href="<?= h(url('supplier_invoices', ['action' => 'view', 'id' => $i['id']])) ?>"><?= h($i['invoice_number'] ?: $i['file_name']) ?></a>
-          <?= $i['total'] !== null ? h(money($i['total'])) : '' ?> <?= invoice_status_badge($i['status']) ?></p>
+          <?= $i['total'] !== null && can('costs.view') ? h(money($i['total'])) : '' ?> <?= invoice_status_badge($i['status']) ?></p>
       <?php endforeach; ?>
       <?php if ($canEdit): ?>
         <form method="post" action="<?= h(url('supplier_invoices', ['action' => 'upload'])) ?>" enctype="multipart/form-data" class="stack mt-2">

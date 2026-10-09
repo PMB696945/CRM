@@ -28,7 +28,7 @@
   </dl>
 </div>
 <?php if ($name === 'services') render('_service_login', ['service' => $row]); ?>
-<?php if ($name === 'products' && can('suppliers.view')): $prices = product_supplier_prices((int)$row['id']); ?>
+<?php if ($name === 'products' && can('suppliers.view') && can('costs.view')): $prices = product_supplier_prices((int)$row['id']); ?>
 <section class="card">
   <div class="card-head"><h2>Suppliers</h2>
     <?php if (can('suppliers.edit')): ?><a class="btn btn-sm" href="<?= h(url('supplier_products', ['action' => 'new', 'product_id' => $row['id'], 'description' => $row['name'], 'billing_frequency' => $row['billing_frequency'], 'return' => current_url()])) ?>">+ Add supplier price</a><?php endif; ?></div>
