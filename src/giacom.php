@@ -106,7 +106,36 @@ function giacom_xml_to_array(SimpleXMLElement $el): array
 }
 
 /** Call the API. Returns the response as an array; throws GiacomException with Giacom's reason on failure. */
+/** Look-ups that change nothing at Giacom, so they're safe to try again. */
+const GIACOM_READ_ONLY_CALLS = ['address_search', 'address_match', 'availability', 'available_appointments', 'check_api_service_status',
+    'order_view', 'order_status', 'order_eventlog_history', 'order_eventlog_changes', 'service_details'];
+
+/** Giacom's own wording when a carrier system behind it (BT, CityFibre) didn't answer in time: usually gone a moment later. */
+function giacom_is_upstream_glitch(string $message): bool
+{
+    return (bool)preg_match('/upstream|blank response|timed? ?out|temporarily unavailable|try again later/i', $message);
+}
+
 function giacom_call(string $call, array $params = [], string $version = '1.0', ?array $auth = null): array
+{
+    // A carrier system behind Giacom sometimes fails to answer; a look-up is tried twice more before giving up.
+    $tries = in_array($call, GIACOM_READ_ONLY_CALLS, true) ? 3 : 1;
+    for ($try = 1; ; $try++) {
+        try {
+            return giacom_call_once($call, $params, $version, $auth);
+        } catch (GiacomException $e) {
+            if ($try >= $tries || !giacom_is_upstream_glitch($e->getMessage())) {
+                if ($tries > 1 && giacom_is_upstream_glitch($e->getMessage())) {
+                    throw new GiacomException($e->getMessage() . ' — the carrier\'s checker didn\'t answer (tried ' . $tries . ' times). This is usually brief: please try again in a minute or two.');
+                }
+                throw $e;
+            }
+            usleep(defined('GIACOM_RETRY_DELAY_US') ? GIACOM_RETRY_DELAY_US : 1500000 * $try);
+        }
+    }
+}
+
+function giacom_call_once(string $call, array $params, string $version, ?array $auth): array
 {
     if ($auth === null && !giacom_configured()) {
         throw new GiacomException('Giacom isn\'t set up yet. An admin can add the API login under Admin → Giacom.');

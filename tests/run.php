@@ -1935,6 +1935,15 @@ test('Giacom: request XML is well formed and escaped; errors are explained', fun
     ok(str_starts_with((string)db_value("SELECT value FROM settings WHERE name = 'giacom_password'"), 'enc:v1:'), 'password encrypted');
     eq('OK', giacom_call('check_api_service_status')['check'][0]['status']);
 });
+test('Giacom: a carrier checker that doesn\'t answer is retried, then explained', function () {
+    define('GIACOM_RETRY_DELAY_US', 1000);
+    $before = count(array_keys(g_state()['calls'], 'address_search'));
+    ok(count(giacom_address_search('ZZ97 0ZZ')) > 0, 'succeeds on the second try');
+    eq($before + 2, count(array_keys(g_state()['calls'], 'address_search')));
+    try { giacom_address_search('ZZ98 0ZZ'); throw new Exception('expected failure'); }
+    catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'try again in a minute'), $e->getMessage()); }
+    eq($before + 5, count(array_keys(g_state()['calls'], 'address_search')), 'three tries, then gives up');
+});
 test('Giacom: address search and availability check are saved and summarised', function () use (&$g) {
     $g['acc'] = create('accounts', ['name' => 'Canal Street Clinic', 'type' => 'business', 'status' => 'active', 'postcode' => 'M1 3HE', 'main_name' => 'Rita Reception', 'main_phone' => '0161 496 0000', 'main_email' => 'rita@canal.example', 'billing_same' => '1']);
     try { giacom_address_search('not a postcode'); throw new Exception('expected failure'); } catch (GiacomException) {}

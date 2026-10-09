@@ -86,6 +86,12 @@ switch ($call) {
     case 'check_api_service_status':
         reply(['check' => [['service' => 'Ordering', 'status' => 'OK'], ['service' => 'Availability', 'status' => 'OK']]]);
     case 'address_search':
+        // Like the real API when BT's checker doesn't answer: fails the first time (or always for ZZ98).
+        if (($req['postcode'] ?? '') === 'ZZ980ZZ' || (($req['postcode'] ?? '') === 'ZZ970ZZ' && empty($state['glitched']))) {
+            $state['glitched'] = true;
+            $save();
+            reply([], 500, 'An upstream processing server returned a blank response');
+        }
         if (($req['postcode'] ?? '') === 'ZZ990ZZ') {
             reply(['addresses' => []]);
         }
