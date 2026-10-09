@@ -12,6 +12,7 @@
   <?php $mv = $result['min_visit'] ?? []; if (array_filter($mv)): $vl = ['NO_SITE_VISIT' => 'None', 'STANDARD' => 'Standard', 'PREMIUM' => 'Premium', 'ADVANCED' => 'Advanced']; ?><div class="kpi"><span class="kpi-label">Minimum engineer visit</span><span class="kpi-value kpi-text"><?= h($vl[$mv['new_line']] ?? '—') ?> <span class="muted small">new line</span></span><span class="kpi-sub"><?= h($vl[$mv['existing_line']] ?? '—') ?> on an existing line<?= !empty($result['site_classification']) ? ' · ' . h($result['site_classification']) : '' ?></span></div><?php endif; ?>
   <div class="kpi"><span class="kpi-label">Products available</span><span class="kpi-value"><?= count($result['products']) ?></span></div>
 </div>
+<?php if (!empty($result['partial'])): ?><div class="flash flash-warning"><?= h($result['partial']) ?></div><?php endif; ?>
 <?php $ont = $result['ont'] ?? null; if (($result['quick_text'] ?? null) || $check['uprn'] || !empty($ont['onts'])): ?>
 <div class="flash <?= in_array($result['quick_result'] ?? null, [5, 12], true) ? 'flash-success' : 'flash-info' ?>">
   <?= h($result['quick_text'] ?? '') ?>

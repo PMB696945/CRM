@@ -1943,6 +1943,10 @@ test('Giacom: a carrier checker that doesn\'t answer is retried, then explained'
     try { giacom_address_search('ZZ98 0ZZ'); throw new Exception('expected failure'); }
     catch (GiacomException $e) { ok(str_contains($e->getMessage(), 'try again in a minute'), $e->getMessage()); }
     eq($before + 5, count(array_keys(g_state()['calls'], 'address_search')), 'three tries, then gives up');
+    $id = giacom_check(['address-reference' => 'A00099999999', 'css-database-code' => 'LC', 'uprn' => '100012345', 'postcode' => 'M1 3HE', 'label' => '14 Canal Street'], null, null, null);
+    $result = json_decode((string)db_value('SELECT result FROM giacom_checks WHERE id = ?', [$id]), true);
+    ok(count($result['products']) > 0 && str_contains((string)$result['partial'], 'Only BT Openreach'), 'when the CityFibre checker fails, BT products are still shown');
+    ok(!isset(g_state()['last']['availability']['uprn']));
 });
 test('Giacom: address search and availability check are saved and summarised', function () use (&$g) {
     $g['acc'] = create('accounts', ['name' => 'Canal Street Clinic', 'type' => 'business', 'status' => 'active', 'postcode' => 'M1 3HE', 'main_name' => 'Rita Reception', 'main_phone' => '0161 496 0000', 'main_email' => 'rita@canal.example', 'billing_same' => '1']);

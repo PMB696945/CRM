@@ -100,6 +100,9 @@ switch ($call) {
             ['building' => '10', 'sub-premise' => 'Unit 2', 'organisation' => 'Bramble <Dental> & Co', 'street' => 'Canal Street', 'city' => 'Manchester', 'postcode' => 'M13HE', 'address-reference' => 'A00012345679', 'css-database-code' => 'LC'],
         ]]);
     case 'availability':
+        if (($req['address-reference'] ?? '') === 'A00099999999' && !empty($req['uprn'])) {
+            reply([], 500, 'An upstream processing server returned a blank response');
+        }
         if (empty($req['address-reference']) && empty($req['cli'])) {
             reply([], 2, 'An address or CLI is required');
         }

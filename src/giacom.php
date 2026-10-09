@@ -126,7 +126,9 @@ function giacom_call(string $call, array $params = [], string $version = '1.0', 
         } catch (GiacomException $e) {
             if ($try >= $tries || !giacom_is_upstream_glitch($e->getMessage())) {
                 if ($tries > 1 && giacom_is_upstream_glitch($e->getMessage())) {
-                    throw new GiacomException($e->getMessage() . ' — the carrier\'s checker didn\'t answer (tried ' . $tries . ' times). This is usually brief: please try again in a minute or two.');
+                    $doing = ['address_search' => 'looking up addresses at the postcode', 'address_match' => 'looking up the address', 'availability' => 'checking availability',
+                        'available_appointments' => 'looking up engineer appointments'][$call] ?? 'looking this up';
+                    throw new GiacomException($e->getMessage() . " — the carrier's checker didn't answer while $doing (tried $tries times). This is usually brief: please try again in a minute or two.");
                 }
                 throw $e;
             }
@@ -254,15 +256,28 @@ function giacom_check(array $address, ?string $cli, ?int $accountId, ?int $siteI
             // Not essential: the check still works without it.
         }
     }
-    $r = giacom_call('availability', array_filter([
+    $params = array_filter([
         'cli' => $cli ?: null,
         'postcode' => !empty($address['postcode']) ? giacom_postcode($address['postcode']) : null,
         'detailed' => 'Y',
         'address-reference' => $address['address-reference'] ?? null,
         'css-database-code' => $address['css-database-code'] ?? null,
         'uprn' => $address['uprn'] ?? null,
-    ], fn($v) => $v !== null && $v !== ''), '2.0.1');
-    $result = giacom_summarise_availability($r);
+    ], fn($v) => $v !== null && $v !== '');
+    $partial = null;
+    try {
+        $r = giacom_call('availability', $params, '2.0.1');
+    } catch (GiacomException $e) {
+        // The UPRN brings in other fibre networks' checkers (CityFibre). When one of those doesn't answer,
+        // a check without it still gives the BT Openreach products rather than nothing.
+        if (!isset($params['uprn']) || !giacom_is_upstream_glitch($e->getMessage())) {
+            throw $e;
+        }
+        unset($params['uprn']);
+        $r = giacom_call('availability', $params, '2.0.1');
+        $partial = 'Only BT Openreach products are shown: the CityFibre checker didn\'t answer just now. Check again in a few minutes to include CityFibre.';
+    }
+    $result = giacom_summarise_availability($r) + ['partial' => $partial];
     db_exec('INSERT INTO giacom_checks (account_id, site_id, postcode, cli, address_label, address_reference, css_database_code, uprn, address, result, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
         $accountId, $siteId, $address['postcode'] ?? null, $cli, mb_substr((string)($address['label'] ?? giacom_address_label($address)), 0, 255),

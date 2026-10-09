@@ -136,7 +136,8 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
           <li><label class="check"><input type="checkbox" name="is_supplier" value="1" <?= $supplier ? 'checked' : '' ?> <?= $canEdit && $canSupplier ? '' : 'disabled' ?>>
               <strong>Supplier</strong></label> <?= $supplier && !$supplier['active'] ? badge('disabled') : '' ?>
             <div class="small muted"><?php if ($supplier): ?><?= isset($tabs['supplier']) ? '<a href="' . h($tabUrl('supplier')) . '">' . h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') . '</a>' : h(SUPPLIER_CATEGORIES[$supplier['category']] ?? 'Supplier') ?><?= $supplier['account_number'] ? ' · our account ' . h($supplier['account_number']) : '' ?>
-              <?php else: ?>Ticking this adds a Supplier tab for their products, purchase orders and invoices<?php endif; ?></div></li>
+              <?php else: ?>Ticking this adds a Supplier tab for their products, purchase orders and invoices<?php endif; ?>
+              <?php if ($canEdit && !$canSupplier): ?><br>Only users allowed to add and edit suppliers can change this (Admin → Roles &amp; permissions).<?php endif; ?></div></li>
           <li><label class="check"><input type="checkbox" name="is_dealer" value="1" <?= $account['is_dealer'] ? 'checked' : '' ?> <?= $canEdit ? '' : 'disabled' ?>>
               <strong>Dealer</strong></label>
             <div class="small muted"><?php if ($account['is_dealer']): ?><a href="<?= h($tabUrl('dealer')) ?>"><?= count($children) ?> customer<?= count($children) === 1 ? '' : 's' ?> under them</a><?= $account['dealer_commission_pct'] !== null ? ' · ' . h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) . '% commission' : '' ?>

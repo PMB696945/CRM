@@ -5,6 +5,7 @@
   <p class="muted"><?= h($check['address_label']) ?><?= $check['cli'] ? ' · line ' . h($check['cli']) : '' ?> · checked <?= h(fmt_datetime($check['created_at'])) ?></p></div>
   <div class="actions"><a class="btn" href="<?= h(portal_url('check', ['customer' => $customer['id']])) ?>">Check another address</a></div>
 </div>
+<?php if (!empty($result['partial'])): ?><div class="flash flash-warning"><?= h($result['partial']) ?></div><?php endif; ?>
 <?php $mv = $result['min_visit'] ?? []; $needs = array_filter(['a new line' => $mv['new_line'] ?? null, 'taking over the existing line' => $mv['existing_line'] ?? null], fn($x) => $x && $x !== 'NO_SITE_VISIT'); ?>
 <?php if ($needs): ?><div class="flash flash-info">An engineer visit is needed at this address for <?= h(implode(' and for ', array_keys($needs))) ?>.</div><?php endif; ?>
 <?php if ($offers): ?>
