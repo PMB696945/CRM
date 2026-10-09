@@ -401,7 +401,7 @@ document.querySelectorAll('[data-refresh-dates]').forEach((b) => { b.hidden = tr
 
 // Broadband orders: only offer engineer visits at or above the minimum for the order type.
 document.querySelectorAll('select[data-min-provide]').forEach((select) => {
-  const order = ['NO_SITE_VISIT', 'STANDARD', 'PREMIUM'];
+  const order = ['NO_SITE_VISIT', 'STANDARD', 'PREMIUM', 'ADVANCED'];
   const apply = (type) => {
     const min = select.dataset[type === 'migrate' ? 'minMigrate' : 'minProvide'];
     const floor = min ? order.indexOf(min) : 0;

@@ -397,10 +397,11 @@ function giacom_contract_months(string $name): ?int
     return preg_match('/(\d{1,2})\s*months?/i', $name, $m) ? (int)$m[1] : null;
 }
 
-/** Giacom's minimum site visit ("Standard", "Premium", "None") → the order code. */
+/** Giacom's minimum site visit ("Standard", "Premium", "Advanced", "None") → the order code. */
 function giacom_visit_code(mixed $v): ?string
 {
     return match (strtolower(trim((string)$v))) {
+        'advanced', 'advanced_install' => 'ADVANCED',
         'premium', 'premium_install' => 'PREMIUM',
         'standard', 'standard_install' => 'STANDARD',
         'none', 'no_site_visit', 'no site visit' => 'NO_SITE_VISIT',
@@ -417,7 +418,24 @@ const GIACOM_IP_OPTIONS = [
     'block16' => ['Block of 16 static IPs (/28)', 16],
 ];
 
-const GIACOM_VISITS = ['NO_SITE_VISIT' => 'Not needed', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install'];
+/** Engineer visits, least first. Advanced is for FTTP only (e.g. a new ONT needing extra work). */
+const GIACOM_VISITS = ['NO_SITE_VISIT' => 'Not needed', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install', 'ADVANCED' => 'Advanced install'];
+
+/** The visits to offer for a product: Advanced only for FTTP, or when the address needs it. */
+function giacom_visits_for(array $product, ?string $min = null): array
+{
+    return array_filter(GIACOM_VISITS, fn($k) => $k !== 'ADVANCED' || giacom_is_fttp($product) || $min === 'ADVANCED', ARRAY_FILTER_USE_KEY);
+}
+
+/** Make Giacom's "Site Visit Reason is not in the list of valid values (…)" say what to do. */
+function giacom_explain_visit_error(string $message): string
+{
+    if (!preg_match('/Site Visit Reason is not in the list of valid values \(([A-Z_, ]+)\)/i', $message, $m)) {
+        return $message;
+    }
+    $valid = array_map(fn($c) => GIACOM_VISITS[strtoupper(trim($c))] ?? trim($c), explode(',', $m[1]));
+    return $message . ' This address can only have: ' . implode(' or ', $valid) . '. Choose that under Engineer visit and order again.';
+}
 
 /** The least engineer visit Giacom says the address needs for this kind of order (null if it didn't say). */
 function giacom_min_visit(array $result, string $orderType): ?string
@@ -1386,7 +1404,7 @@ function giacom_controller(): void
                         flash('Order placed with Giacom. Its progress will show here and on the customer\'s page.' . $note, str_contains($note, 'couldn\'t be sent') ? 'error' : 'success');
                         redirect(url('giacom', ['action' => 'view', 'id' => $id]));
                     } catch (GiacomException $e) {
-                        $errors['_'] = $e->getMessage();
+                        $errors['_'] = giacom_explain_visit_error($e->getMessage());
                     }
                 }
             }

@@ -2,8 +2,8 @@
 $f = fn(string $name, string $label, string $type = 'text', string $help = '', bool $required = false) => portal_field($values, $errors, $name, $label, $type, $help, $required);
 $p = $offer['product'];
 $sp = $offer['supplier'];
-$visits = ['NO_SITE_VISIT' => 'Not needed', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install'];
-$rank = array_flip(array_keys($visits));
+$visits = giacom_visits_for($sp, $minVisit);
+$rank = array_flip(array_keys(GIACOM_VISITS));
 $earliest = $appointments ? $appointments[0]['date'] : $lead;
 ?>
 <div class="page-head"><div>

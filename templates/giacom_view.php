@@ -51,7 +51,7 @@
         <form method="get" action="index.php" class="stack">
           <input type="hidden" name="page" value="giacom"><input type="hidden" name="action" value="view"><input type="hidden" name="id" value="<?= (int)$order['id'] ?>"><input type="hidden" name="appointments" value="1">
           <label>Engineer visit<select name="visit" data-autosubmit>
-            <?php foreach (GIACOM_VISITS as $k => $l): if ($minVisit && $rank[$k] < $rank[$minVisit]) continue; ?><option value="<?= $k ?>" <?= $visit === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
+            <?php foreach (giacom_visits_for(['technology' => $order['technology_type'], 'tech_label' => strtoupper((string)$order['technology_type'])], $minVisit) as $k => $l): if ($minVisit && $rank[$k] < $rank[$minVisit]) continue; ?><option value="<?= $k ?>" <?= $visit === $k ? 'selected' : '' ?>><?= $l ?></option><?php endforeach; ?></select></label>
           <?php if ($slots === null): ?><p class="help">See the dates Giacom can offer for this visit, and book or change the appointment.</p><div><button class="btn btn-sm">Show available dates</button></div><?php endif; ?>
         </form>
         <?php if ($slots === null): ?>

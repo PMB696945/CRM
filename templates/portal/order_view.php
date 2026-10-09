@@ -1,5 +1,5 @@
 <?php
-$visits = ['NO_SITE_VISIT' => 'No engineer visit', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install'];
+$visits = ['NO_SITE_VISIT' => 'No engineer visit', 'STANDARD' => 'Standard install', 'PREMIUM' => 'Premium install', 'ADVANCED' => 'Advanced install'];
 $appt = !empty($v['appointment']) ? explode('|', (string)$v['appointment']) : null;
 [$label, $detail] = $progress;
 ?>

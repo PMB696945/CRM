@@ -2176,6 +2176,11 @@ test('Giacom: cancelling an order ceases its pending service', function () use (
     eq('PREMIUM', giacom_visit_at_least('STANDARD', 'PREMIUM'));
     eq('PREMIUM', giacom_visit_at_least('PREMIUM', 'STANDARD'), 'more than the minimum is fine');
     eq('NO_SITE_VISIT', giacom_visit_at_least('NO_SITE_VISIT', null), 'no minimum given');
+    // FTTP can need an Advanced install: understood, required when Giacom says so, offered only for FTTP.
+    eq('ADVANCED', giacom_visit_code('Advanced'));
+    eq('ADVANCED', giacom_visit_at_least('PREMIUM', 'ADVANCED'));
+    ok(isset(giacom_visits_for(['technology' => 'fttp'])['ADVANCED']) && !isset(giacom_visits_for(['technology' => 'fttc', 'tech_label' => 'FTTC'])['ADVANCED']), 'Advanced only for FTTP');
+    ok(str_contains(giacom_explain_visit_error('Giacom said: Cannot provision due to validation errors: Site Visit Reason is not in the list of valid values (ADVANCED)'), 'can only have: Advanced install'));
     eq('STANDARD', giacom_min_visit(['min_visit' => ['new_line' => 'PREMIUM', 'existing_line' => 'STANDARD']], 'migrate'));
     // FTTP: a new service gets a new ONT, a take-over keeps the existing one, unless chosen otherwise; FTTC has no ONT.
     ok(giacom_is_fttp($product) && !giacom_is_fttp(json_decode($check['result'], true)['products'][0]));

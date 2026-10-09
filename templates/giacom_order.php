@@ -27,7 +27,7 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <div class="field"><label for="g_visit">Engineer visit</label>
     <?php $min = giacom_min_visit($result, $values['order_type']); $rank = array_flip(array_keys(GIACOM_VISITS)); ?>
     <select id="g_visit" name="site_visit_reason" data-min-provide="<?= h((string)giacom_min_visit($result, 'provide')) ?>" data-min-migrate="<?= h((string)giacom_min_visit($result, 'migrate')) ?>">
-      <?php foreach (GIACOM_VISITS as $k => $l): $below = $min && $rank[$k] < $rank[$min]; ?><option value="<?= $k ?>" <?= $values['site_visit_reason'] === $k ? 'selected' : '' ?><?= $below ? ' hidden disabled' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
+      <?php foreach (giacom_visits_for($product, $min) as $k => $l): $below = $min && $rank[$k] < $rank[$min]; ?><option value="<?= $k ?>" <?= $values['site_visit_reason'] === $k ? 'selected' : '' ?><?= $below ? ' hidden disabled' : '' ?>><?= $l ?></option><?php endforeach; ?></select>
     <div class="help"><?php if ($min && $min !== 'NO_SITE_VISIT'): ?>Giacom says this address needs at least a <b><?= h(strtolower(GIACOM_VISITS[$min])) ?></b> for a <?= $values['order_type'] === 'migrate' ? 'take-over of the existing' : 'new' ?> line, so less isn't offered. <?php endif; ?><span data-dates-note>The dates below are Giacom's for this visit, and are fetched again when it's changed.</span> <button class="btn btn-sm" name="refresh" value="1" formnovalidate data-skip-confirm data-refresh-dates>Show dates for this</button></div></div>
 
   <?php $earliest = $appointments ? $appointments[0]['date'] : ($leadSource === 'lead time' ? $lead : date('Y-m-d', strtotime('+1 weekday'))); ?>
