@@ -534,3 +534,85 @@ document.querySelectorAll('[data-collapsible]').forEach((card) => {
   try { start = localStorage.getItem(key) === '1'; } catch (e) { /* storage unavailable */ }
   set(start, false);
 });
+
+// New order: the service type shows its part of the form. Hidden parts are disabled, so their
+// required fields don't block the others and nothing from them is sent.
+(() => {
+  const typeSelect = document.querySelector('[data-order-type]');
+  const valueOf = (scope, name) => {
+    const els = [...scope.querySelectorAll(`[name="${CSS.escape(name)}"]`)];
+    const el = els.find((e) => e.type !== 'radio' || e.checked) || null;
+    return el && (el.type !== 'radio' || el.checked) ? el.value : '';
+  };
+  const show = (el, on) => {
+    el.hidden = !on;
+    if (el.tagName === 'FIELDSET') el.disabled = !on;
+    else el.querySelectorAll('input, select, textarea, button').forEach((i) => { if (!i.closest('fieldset[disabled]')) i.disabled = !on; });
+  };
+  const sync = () => {
+    if (typeSelect) {
+      document.querySelectorAll('[data-order-for]').forEach((el) => show(el, el.dataset.orderFor.split(' ').includes(typeSelect.value)));
+    }
+    document.querySelectorAll('[data-if]').forEach((el) => {
+      const [name, want] = el.dataset.if.split('=');
+      show(el, want.split(',').includes(valueOf(el.closest('form') || document, name)));
+    });
+    document.querySelectorAll('[data-row]').forEach((row) => {
+      const connection = valueOf(row, 'm_connection[]');
+      row.querySelectorAll('[data-row-if]').forEach((el) => {
+        const [name, want] = el.dataset.rowIf.split('=');
+        const on = want.split(',').includes(valueOf(row, name));
+        // Hidden but still sent: the rows are parallel lists, so every row must send every field.
+        el.hidden = !on;
+      });
+      const sim = row.querySelector('[data-sim-note]');
+      if (sim) {
+        const current = (row.querySelector('[name="m_current_network[]"]') || {}).value || '';
+        const network = valueOf(row, 'm_network[]');
+        const needed = connection === 'migration' || current.trim().toLowerCase() === network.toLowerCase();
+        sim.textContent = needed ? '(needed)' : '(only if staying on ' + network + ')';
+      }
+    });
+    document.querySelectorAll('[data-rows]').forEach((list) => {
+      const rows = list.querySelectorAll(':scope > [data-row]');
+      rows.forEach((row, i) => {
+        const num = row.querySelector('[data-row-num]');
+        if (num) num.textContent = 'Connection ' + (i + 1);
+        const remove = row.querySelector('[data-remove-row]');
+        if (remove) remove.hidden = rows.length === 1;
+      });
+    });
+  };
+  document.addEventListener('change', (e) => { if (e.target.closest('[data-order-type], form')) sync(); });
+  document.addEventListener('input', (e) => { if (e.target.matches('[name="m_current_network[]"]')) sync(); });
+  document.addEventListener('click', (e) => {
+    const add = e.target.closest('[data-add-row]');
+    if (add) {
+      const name = add.dataset.addRow;
+      const tpl = document.querySelector(`template[data-row-template="${name}"]`);
+      const list = document.querySelector(`[data-rows="${name}"]`);
+      list.append(tpl.content.cloneNode(true));
+      const last = list.lastElementChild;
+      // A new mobile row starts on the same network and tariff as the one above, as most orders are alike.
+      const prev = last.previousElementSibling;
+      if (prev) ['m_network[]', 'm_product_id[]'].forEach((n) => {
+        const from = prev.querySelector(`[name="${n}"]`), to = last.querySelector(`[name="${n}"]`);
+        if (from && to) to.value = from.value;
+      });
+      sync();
+      const first = last.querySelector('input, select');
+      if (first) first.focus();
+    }
+    const remove = e.target.closest('[data-remove-row]');
+    if (remove) {
+      remove.closest('[data-row]').remove();
+      sync();
+    }
+  });
+  const site = document.querySelector('[data-fill-postcode]');
+  if (site) site.addEventListener('change', () => {
+    const pc = site.selectedOptions[0].dataset.postcode;
+    if (pc) document.getElementById('bb_postcode').value = pc;
+  });
+  if (document.querySelector('[data-order-for], [data-if], [data-rows]')) sync();
+})();

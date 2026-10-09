@@ -57,6 +57,8 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
       </table></div>
     </section>
 
+    <?php if ($orderDetails = quote_order_details($quote ?? null)): ?><?php render('_order_details', ['details' => $orderDetails]); ?><?php endif; ?>
+
     <?php if ($picked && $status !== 'draft'): ?>
     <section class="card">
       <div class="card-head"><h2>Documents sent with the quote</h2></div>

@@ -53,6 +53,7 @@ $me = (int)current_user()['id'];
       <?php endif; ?>
     </section>
     <?php endif; ?>
+    <?php if ($orderDetails = quote_order_details($quote ?? null)): ?><?php render('_order_details', ['details' => $orderDetails]); ?><?php endif; ?>
     <?php if ($canEdit && $open): ?>
     <section class="card">
       <div class="card-head"><h2><?= $unsigned ? 'Waiting for the agreement' : ($next ? 'Move to the next step' : 'Update') ?></h2></div>

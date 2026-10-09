@@ -53,5 +53,6 @@ require_once __DIR__ . '/abillity.php';
 require_once __DIR__ . '/billing_diary.php';
 require_once __DIR__ . '/service_logins.php';
 require_once __DIR__ . '/broadband_prices.php';
+require_once __DIR__ . '/new_order.php';
 require_once __DIR__ . '/portal.php';
 require_once __DIR__ . '/customer_portal.php';

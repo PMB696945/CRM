@@ -39,10 +39,13 @@ function seed_demo_data(): void
         ['HW-YEALINK-T54', 'Yealink T54W handset (rental)', 'hardware', null, 4.50, 0, 36],
         ['HW-ROUTER', 'Managed router', 'hardware', null, 12.00, 150, 36],
     ];
+    // What each is, so the order form can price phone systems and handsets from them.
+    $itemTypes = ['MOB-UNL-5G' => 'tariff', 'MOB-30GB' => 'tariff', 'MOB-DATA-100' => 'tariff', 'VOIP-SEAT' => 'licence_basic',
+        'SIP-CH' => 'sip_channel', 'HW-YEALINK-T54' => 'handset', 'HW-ROUTER' => 'router'];
     $productIds = [];
     foreach ($products as [$sku, $name, $cat, $carrier, $price, $setup, $term]) {
         $productIds[$sku] = insert_row('products', [
-            'sku' => $sku, 'name' => $name, 'category' => $cat, 'carrier' => $carrier,
+            'sku' => $sku, 'name' => $name, 'category' => $cat, 'item_type' => $itemTypes[$sku] ?? null, 'carrier' => $carrier,
             'monthly_price' => $price, 'setup_fee' => $setup, 'term_months' => $term, 'active' => 1,
         ]);
     }

@@ -98,6 +98,7 @@ match (true) {
     $page === 'password'  => password_controller(),
     $page === 'gocardless' => gocardless_controller(),
     $page === 'quotes'    => quotes_controller(),
+    $page === 'new_order' => new_order_controller(),
     $page === 'contracts' => contracts_controller(),
     $page === 'contract_templates' => contract_templates_controller(),
     $page === 'settings'  => settings_controller(),

@@ -166,7 +166,7 @@ test('customer MRR sums active services only', function () use (&$acc) {
     eq(104.99, (float)find('accounts', $acc)['_mrr']);
 });
 test('renewal preset finds contracts ending soon', function () use (&$acc) {
-    $id = create('services', ['account_id' => $acc, 'identifier' => 'EXPIRING-1', 'service_type' => 'voip', 'status' => 'active', 'monthly_price' => '10', 'contract_end_date' => date('Y-m-d', strtotime('+30 days'))]);
+    $id = create('services', ['account_id' => $acc, 'identifier' => 'EXPIRING-1', 'service_type' => 'sip_trunk', 'status' => 'active', 'monthly_price' => '10', 'contract_end_date' => date('Y-m-d', strtotime('+30 days'))]);
     $found = array_column(list_rows('services', ['preset' => 'expiring', 'per_page' => 0])['rows'], 'id');
     ok(in_array($id, $found), 'expiring service listed');
     eq(1, count($found), 'only the expiring service');
@@ -781,7 +781,7 @@ test('aBILLity: customers go to aBILLity and Xero together; products and service
     $t = ab_state()['types'][$wid];
     eq([2, 52.0], [$t['FrequencyTypeId'], (float)$t['DefaultSalePrice']], 'weekly sent as monthly');
     $st = ab_state(); $st['types'][7777] = ['Id' => 7777, 'RecurringChargeType' => 'SIP Trunk']; file_put_contents($GLOBALS['abState'], json_encode($st));
-    $sip = create('products', ['sku' => 'AB-SIP', 'name' => 'SIP Trunk', 'category' => 'voip', 'monthly_price' => '8', 'term_months' => '12']);
+    $sip = create('products', ['sku' => 'AB-SIP', 'name' => 'SIP Trunk', 'category' => 'sip_trunk', 'monthly_price' => '8', 'term_months' => '12']);
     eq(7777, abillity_push_product($sip), 'linked to the existing charge type');
     eq(8, (int)ab_state()['types'][7777]['DefaultSalePrice'], 'and brought up to date');
 
@@ -818,7 +818,7 @@ test('aBILLity: customers go to aBILLity and Xero together; products and service
     eq(date('Y-m-d') . 'T00:00:00', ab_state()['charges'][$s['abillity_charge_id']]['LastPayment']);
 
     // Cancelled before it went live: flagged, since aBILLity has a charge from the provisional date.
-    $early = create('services', ['account_id' => $acct, 'product_id' => $sip, 'service_type' => 'voip', 'identifier' => 'SIP-1', 'status' => 'pending', 'monthly_price' => '8']);
+    $early = create('services', ['account_id' => $acct, 'product_id' => $sip, 'service_type' => 'sip_trunk', 'identifier' => 'SIP-1', 'status' => 'pending', 'monthly_price' => '8']);
     abillity_push_service($early);
     db_exec("UPDATE services SET status = 'ceased' WHERE id = ?", [$early]);
     abillity_queue_service($early);
@@ -1428,7 +1428,7 @@ test('our address prints tidily however it was typed in Settings', function () {
 test('one-off quote lines (e.g. installation) have no term and don\'t become services', function () use (&$flow) {
     eq('One-off (no term)', term_label(0));
     ok(array_key_first(term_options()) === 0, 'offered first in term lists');
-    [$lines, $errors] = quote_parse_lines(['line_description' => ['Hosted seat', 'Installation'], 'line_product_id' => ['', ''], 'line_service_type' => ['voip', 'other'],
+    [$lines, $errors] = quote_parse_lines(['line_description' => ['Hosted seat', 'Installation'], 'line_product_id' => ['', ''], 'line_service_type' => ['sip_trunk', 'other'],
         'line_quantity' => ['2', '1'], 'line_monthly_price' => ['10', '0'], 'line_setup_fee' => ['0', '150'], 'line_term_months' => ['36', '0']]);
     eq([], $errors);
     $t = quote_totals($lines);
@@ -2894,7 +2894,7 @@ test('accepting a quote emails the customer a confirmation with a PDF and the ac
     db_exec('INSERT INTO quotes (account_id, title, created_by) VALUES (?, ?, 1)', [$acct, 'Phones (with "quotes") & £ signs']);
     $qid = (int)db()->lastInsertId();
     db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
-    quote_save_lines($qid, [['product_id' => null, 'service_type' => 'voip', 'description' => 'Hosted seat – unlimited (UK)', 'quantity' => 3, 'monthly_price' => 12.5, 'setup_fee' => 20, 'term_months' => 1]]);
+    quote_save_lines($qid, [['product_id' => null, 'service_type' => 'sip_trunk', 'description' => 'Hosted seat – unlimited (UK)', 'quantity' => 3, 'monthly_price' => 12.5, 'setup_fee' => 20, 'term_months' => 1]]);
     quote_send(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'boss@files.example', 'Bea Boss');
     $before = count(sent_mails());
     quote_accept(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]), 'Bea Boss', '203.0.113.9', false, 'Bea@Files.example', 'Mozilla/5.0 (iPhone) Safari');
@@ -3676,6 +3676,90 @@ test('the cost price at the time of ordering is kept on services and quote lines
     $rows = list_rows('services', ['filters' => ['account_id' => $acct], 'per_page' => 0])['rows'];
     $m = array_column($rows, '_margin', 'identifier');
     eq('37.5', (string)$m['COST-LINE-1'], 'margin from the recorded cost: (39.99 − 25) ÷ 39.99');
+});
+
+echo "New order\n";
+function page_html(callable $fn): string { $_SERVER['REQUEST_METHOD'] = 'GET'; ob_start(); try { $fn(); } finally { $html = (string)ob_get_clean(); } return $html; }
+test('new order: mobile rows, SIP port with a letter of authority, Hosted PBX, hardware and leased line become priced quotes', function () {
+    as_role('admin');
+    $acct = create('accounts', ['name' => 'Order Form Ltd', 'type' => 'business', 'status' => 'active', 'address' => '1 Mill Lane', 'city' => 'Leeds', 'postcode' => 'LS1 4AB',
+        'main_name' => 'Olive Order', 'main_email' => 'olive@orderform.example', 'billing_same' => '1']);
+    $account = db_one('SELECT * FROM accounts WHERE id = ?', [$acct]);
+    $tariff = create('products', ['sku' => 'NO-MOB', 'name' => 'Business Unlimited', 'category' => 'mobile', 'item_type' => 'tariff', 'monthly_price' => '15', 'term_months' => '24', 'active' => '1']);
+    create('products', ['sku' => 'NO-CH', 'name' => 'SIP channel', 'category' => 'sip_trunk', 'item_type' => 'sip_channel', 'monthly_price' => '4', 'term_months' => '36', 'active' => '1']);
+    create('products', ['sku' => 'NO-DDI', 'name' => 'DDI', 'category' => 'sip_trunk', 'item_type' => 'ddi', 'monthly_price' => '1', 'term_months' => '36', 'active' => '1']);
+    create('products', ['sku' => 'NO-ENT', 'name' => 'Hosted Enterprise', 'category' => 'hosted_pbx', 'item_type' => 'licence_enterprise', 'monthly_price' => '12', 'term_months' => '36', 'active' => '1']);
+    $phone = create('products', ['sku' => 'NO-T54', 'name' => 'Yealink T54W', 'category' => 'hardware', 'item_type' => 'handset', 'billing_frequency' => 'one_off', 'monthly_price' => '120', 'term_months' => '0', 'active' => '1']);
+
+    // Mobile: one row per user; a port needs the number, PAC and current network, and a SIM when staying on the same network.
+    $post = ['service_type' => 'mobile', 'm_first' => ['Amy', 'Ben'], 'm_last' => ['Ash', 'Bell'], 'm_connection' => ['new', 'port'], 'm_network' => ['O2', 'EE'],
+        'm_current_network' => ['', 'EE'], 'm_number' => ['', '07700 900123'], 'm_pac' => ['', 'bad'], 'm_sim' => ['', ''], 'm_product_id' => [(string)$tariff, (string)$tariff]];
+    [, , $errors] = new_order_parse($account, $post);
+    ok(str_contains($errors['mobile'] ?? '', 'Connection 2') && str_contains($errors['mobile'], 'PAC') && str_contains($errors['mobile'], 'SIM card'), $errors['mobile'] ?? 'no error');
+    $post['m_pac'][1] = 'abc 123456';
+    $post['m_sim'][1] = '8944 1100 0000 1234 5678';
+    [$details, $lines, $errors] = new_order_parse($account, $post);
+    eq([], $errors);
+    eq(2, count($lines));
+    eq(['ABC123456', '89441100000012345678', '07700900123'], [$details['connections'][1]['pac'], $details['connections'][1]['sim'], $details['connections'][1]['number']]);
+    $post['m_current_network'][1] = 'Vodafone';
+    $post['m_sim'][1] = '';
+    eq([], new_order_parse($account, $post)[2], 'porting from another network needs no SIM');
+
+    // SIP trunk porting numbers: channels and DDIs priced; the letter of authority comes with the contract.
+    $post = ['service_type' => 'sip_trunk', 'sip_addr_choice' => 'head', 'sip_mode' => 'port', 'sip_channels' => '4', 'sip_numbers' => "0113 496 0000\n+441134960001", 'sip_provider' => 'BT'];
+    [$details, $lines, $errors, $notes] = new_order_parse($account, $post);
+    eq([], $errors);
+    eq([['SIP channel', 4, '4.00'], ['DDI', 2, '1.00']], array_map(fn($l) => [explode(' – ', $l['description'])[0], $l['quantity'], number_format($l['monthly_price'], 2)], $lines));
+    eq([], $notes, 'a number port charge is optional');
+    ok($details['bill_needed'] && order_needs_loa($details));
+    $qid = new_order_create($account, $details, $lines);
+    $quote = db_one('SELECT * FROM quotes WHERE id = ?', [$qid]);
+    eq('SIP trunk – 4 channels, porting numbers', $quote['title']);
+    eq(['01134960000', '01134960001'], quote_order_details($quote)['numbers']);
+    $loa = implode("\n", array_map(fn($p) => is_array($p) ? $p[0] : $p, order_loa_paragraphs($account, quote_order_details($quote), 'CON-1', 'Olive Order')));
+    ok(str_contains($loa, 'Letter of Authority') && str_contains($loa, '01134960001') && str_contains($loa, 'To: BT') && str_contains($loa, '1 Mill Lane, Leeds, LS1 4AB'));
+    $activeTemplates = db_all('SELECT id FROM contract_templates WHERE active = 1');
+    db_exec('UPDATE contract_templates SET active = 0');
+    foreach (['general' => 'docx_example_template', 'contract_summary' => 'docx_example_summary_template'] as $kind => $make) {
+        $stored = bin2hex(random_bytes(6)) . '.docx';
+        $make(storage_path('templates') . '/' . $stored);
+        db_exec("INSERT INTO contract_templates (name, service_type, file_name, stored_name) VALUES (?, ?, 't.docx', ?)", [$kind === 'general' ? 'General terms' : 'Contract Summary', $kind, $stored]);
+    }
+    db_exec("UPDATE quotes SET recipient_name = 'Olive Order', recipient_email = 'olive@orderform.example' WHERE id = ?", [$qid]);
+    $contract = contract_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]));
+    $docs = contract_documents($contract);
+    eq('Letter of Authority', end($docs)['title'], 'signed with the agreement');
+    ok(str_contains(docx_to_html(storage_path('contracts') . '/' . end($docs)['file']), '01134960000'));
+    foreach ($activeTemplates as $t) { db_exec('UPDATE contract_templates SET active = 1 WHERE id = ?', [$t['id']]); }
+    $_GET = ['page' => 'quotes', 'action' => 'view', 'id' => (string)$qid];
+    $html = page_html(fn() => quotes_controller());
+    ok(str_contains($html, 'Order details') && str_contains($html, 'Still needed'), 'details on the quote page');
+
+    // Hosted PBX: licence for the tier, DDIs, handsets; a tier with no product is quoted at £0 with a note.
+    $post = ['service_type' => 'hosted_pbx', 'pbx_users' => '10', 'pbx_licence' => 'enterprise', 'pbx_mode' => 'new', 'pbx_ddis' => '10',
+        'pbx_handset_product' => [(string)$phone, ''], 'pbx_handset_qty' => ['8', '1']];
+    [$details, $lines, $errors, $notes] = new_order_parse($account, $post);
+    eq([], $errors);
+    eq([['Hosted Enterprise', 10, '12.00', '0.00'], ['DDI', 10, '1.00', '0.00'], ['Yealink T54W', 8, '0.00', '120.00']],
+        array_map(fn($l) => [explode(' – ', $l['description'])[0], $l['quantity'], number_format($l['monthly_price'], 2), number_format($l['setup_fee'], 2)], $lines), 'handsets are one-off');
+    $post['pbx_licence'] = 'ultimate';
+    [, $lines, , $notes] = new_order_parse($account, $post);
+    ok(str_contains($notes[0] ?? '', 'Hosted PBX licence: Ultimate') && $lines[0]['monthly_price'] == 0 && $lines[0]['product_id'] === null);
+    $post['pbx_mode'] = 'migrate';
+    $errors = new_order_parse($account, $post)[2];
+    ok(isset($errors['pbx_numbers'], $errors['pbx_provider']), 'migrating needs their numbers and provider');
+
+    // Hardware needs an item; leased line needs a product and site contact.
+    ok(isset(new_order_parse($account, ['service_type' => 'hardware', 'hw_addr_choice' => 'head'])[2]['hw_item']));
+    $errors = new_order_parse($account, ['service_type' => 'leased_line', 'll_addr_choice' => 'other', 'll_addr_address' => '2 Quay St', 'll_addr_city' => 'Hull', 'll_addr_postcode' => 'nope'])[2];
+    ok(isset($errors['ll_addr'], $errors['ll_product'], $errors['ll_contact']));
+    eq('Choose the service type.', new_order_parse($account, [])[2]['service_type']);
+
+    // The page renders for each type.
+    $_GET = ['page' => 'new_order', 'account_id' => (string)$acct];
+    $html = page_html(fn() => new_order_controller());
+    ok(str_contains($html, 'Service type') && str_contains($html, 'data-row-template="mobile"') && str_contains($html, 'Business Unlimited'));
 });
 
 echo "Role visibility\n";

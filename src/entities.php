@@ -11,9 +11,26 @@ declare(strict_types=1);
  */
 
 const SERVICE_TYPES = [
-    'mobile' => 'Mobile', 'broadband' => 'Broadband', 'voip' => 'VoIP line', 'sip_trunk' => 'SIP trunk',
-    'hosted_pbx' => 'Hosted PBX', 'leased_line' => 'Leased line', 'ethernet' => 'Ethernet',
-    'hardware' => 'Hardware', 'other' => 'Other',
+    'broadband' => 'Broadband', 'leased_line' => 'Leased line', 'mobile' => 'Mobile', 'sip_trunk' => 'SIP trunk',
+    'hosted_pbx' => 'Hosted PBX', 'hardware' => 'Hardware', 'other' => 'Other',
+];
+
+/**
+ * What a product is, within its category, so the order form can price an order from the price list:
+ * e.g. the Hosted PBX licence for the chosen tier, SIP channels, DDIs, or the handsets to choose from.
+ */
+const PRODUCT_ITEM_TYPES = [
+    'tariff'             => 'Mobile tariff',
+    'sip_channel'        => 'SIP channel',
+    'ddi'                => 'DDI (phone number)',
+    'number_port'        => 'Number port (per number)',
+    'licence_basic'      => 'Hosted PBX licence: Basic',
+    'licence_enterprise' => 'Hosted PBX licence: Enterprise',
+    'licence_ultimate'   => 'Hosted PBX licence: Ultimate',
+    'handset'            => 'Handset / phone',
+    'headset'            => 'Headset',
+    'router'             => 'Router',
+    'accessory'          => 'Accessory',
 ];
 
 const CARRIERS = [
@@ -270,6 +287,8 @@ function entities(): array
                 'sku'               => ['label' => 'SKU', 'type' => 'text', 'required' => true, 'help' => 'Also the item code in Xero (up to 30 characters)'],
                 'name'              => ['label' => 'Name', 'type' => 'text', 'required' => true],
                 'category'          => ['label' => 'Category', 'type' => 'select', 'options' => SERVICE_TYPES, 'required' => true],
+                'item_type'         => ['label' => 'Item type', 'type' => 'select', 'options' => PRODUCT_ITEM_TYPES,
+                    'help' => 'What it is, so orders can be priced from it: e.g. the licence for each Hosted PBX tier, SIP channels, DDIs, or handsets offered with a phone system'],
                 'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
                 'billing_frequency' => ['label' => 'Billing cycle', 'type' => 'select', 'options' => BILLING_FREQUENCIES, 'default' => 'monthly', 'help' => 'How often the customer is billed for it'],
                 'monthly_price'     => ['label' => 'Sale price', 'type' => 'money', 'required' => true, 'help' => 'Per billing cycle, excluding VAT'],
@@ -303,7 +322,7 @@ function entities(): array
             ],
             'list'    => ['sku', 'name', 'category', 'billing_frequency', 'monthly_price', 'cost_price', '_margin', '_monthly', 'setup_fee', '_suppliers', 'active'],
             'search'  => ['sku', 'name', 'description'],
-            'filters' => ['category', 'carrier', 'billing_frequency', 'active'],
+            'filters' => ['category', 'item_type', 'carrier', 'billing_frequency', 'active'],
             'computed' => [
                 '_monthly' => ['label' => 'Per month', 'type' => 'money', 'sql' => billing_monthly_sql('t.monthly_price', 't.billing_frequency')],
                 '_suppliers' => ['label' => 'Suppliers', 'type' => 'int', 'sql' => '(SELECT COUNT(*) FROM supplier_products sp WHERE sp.product_id = t.id AND sp.active = 1)'],

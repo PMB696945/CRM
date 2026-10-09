@@ -1123,4 +1123,24 @@ return [
             set_setting('role_permissions', json_encode($saved));
         }
     },
+    40 => function (): void {
+        // Orders by service type: product item types (handsets, licences, channels...) price the order form,
+        // and the order details travel with the quote to the order. VoIP lines and Ethernet are retired:
+        // Ethernet is a leased line, and a VoIP line is a SIP trunk.
+        if (!column_exists('products', 'item_type')) {
+            db()->exec('ALTER TABLE products ADD COLUMN item_type VARCHAR(30) NULL AFTER category');
+        }
+        if (!column_exists('quotes', 'order_details')) {
+            db()->exec('ALTER TABLE quotes ADD COLUMN order_details MEDIUMTEXT NULL AFTER intro');
+        }
+        foreach ([['products', 'category'], ['services', 'service_type'], ['quote_lines', 'service_type'], ['contract_templates', 'service_type']] as [$table, $col]) {
+            if (column_exists($table, $col)) {
+                db()->exec("UPDATE $table SET $col = 'leased_line' WHERE $col = 'ethernet'");
+                db()->exec("UPDATE $table SET $col = 'sip_trunk' WHERE $col = 'voip'");
+            }
+        }
+        $types = "'mobile','broadband','sip_trunk','hosted_pbx','leased_line','hardware','other'";
+        db()->exec("ALTER TABLE products MODIFY category ENUM($types) NOT NULL");
+        db()->exec("ALTER TABLE services MODIFY service_type ENUM($types) NOT NULL");
+    },
 ];

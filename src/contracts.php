@@ -179,6 +179,12 @@ function contract_generate(array $account, array $templatesWithLines, string $ti
             docx_merge(template_file($template), "$dir/$file", $fields, contract_table_rows($lines));
             $docs[] = ['title' => $template['name'], 'file' => $file];
         }
+        // Numbers moving from another provider: the letter of authority is signed with the agreement.
+        if ($quote && order_needs_loa($details = quote_order_details($quote))) {
+            $file = sprintf('%s-%d-loa-%s.docx', $reference, count($docs) + 1, bin2hex(random_bytes(4)));
+            docx_create("$dir/$file", order_loa_paragraphs($account, $details, $reference, $signerName));
+            $docs[] = ['title' => 'Letter of Authority', 'file' => $file, 'kind' => 'loa'];
+        }
         db_exec('UPDATE contracts SET documents = ? WHERE id = ?', [json_encode($docs), $id]);
     } catch (Throwable $e) {
         db_exec("UPDATE contracts SET status = 'failed', last_error = ? WHERE id = ?", [$e->getMessage(), $id]);
