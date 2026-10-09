@@ -2493,6 +2493,90 @@ test('portal: staff pages list dealer orders, portal users and master terms', fu
 
 });
 
+echo "Customer portal\n";
+/** Drive the customer portal like a browser: returns [html, redirect location]. */
+function customer_req(string $go, array $get = [], ?array $post = null): array
+{
+    $_GET = ['go' => $go] + $get;
+    $_REQUEST = $_GET + (array)$post;
+    $_POST = $post === null ? [] : $post + ['_csrf' => csrf_token()];
+    $_SERVER['REQUEST_METHOD'] = $post === null ? 'GET' : 'POST';
+    try {
+        customer_portal_dispatch();
+    } catch (PortalExit $e) {
+        return [$e->html, $e->location];
+    } finally {
+        $_GET = $_POST = $_REQUEST = [];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+    }
+}
+
+test('customer portal: customers sign in and see only their own account, services with logins, orders, agreements and tickets', function () use (&$g) {
+    $acc = (int)$g['acc'];
+    db_exec('INSERT INTO customer_users (account_id, name, email) VALUES (?, ?, ?)', [$acc, 'Rita Reception', 'rita@canal.example']);
+    $uid = (int)db()->lastInsertId();
+    $before = count(sent_mails());
+    ok(customer_send_password($uid, true)['emailed']);
+    usleep(300000);
+    $all = sent_mails();
+    eq($before + 1, count($all));
+    $body = mail_body(end($all));
+    ok(str_contains($body, 'account.php?go=login') && str_contains($body, 'Canal Street Clinic'), 'welcome email with the link');
+    preg_match('/Temporary password: ([A-Za-z0-9!@#$%&*?\-]+)/', strip_tags($body), $m);
+    [$html] = customer_req('home');
+    ok(str_contains($html, '>Sign in<'), 'signed out: sign in');
+    for ($i = 0; $i < PORTAL_LOCK_AFTER; $i++) { customer_req('login', [], ['email' => 'rita@canal.example', 'password' => 'nope']); }
+    [$html] = customer_req('login', [], ['email' => 'rita@canal.example', 'password' => $m[1]]);
+    ok(str_contains($html, 'Too many attempts'), 'locked after repeated failures');
+    db_exec('UPDATE customer_users SET locked_until = NULL WHERE id = ?', [$uid]);
+    [, $loc] = customer_req('login', [], ['email' => 'rita@canal.example', 'password' => $m[1]]);
+    eq('index.php?go=home', $loc);
+    [$html] = customer_req('services');
+    ok(str_contains($html, 'Choose your password'), 'temporary password changed first');
+    customer_req('password', [], ['new_password' => 'Canal-street-2026', 'confirm_password' => 'Canal-street-2026']);
+
+    $seen = [];
+    foreach (['home', 'services', 'orders', 'agreements', 'tickets', 'password'] as $go) {
+        [$seen[$go]] = customer_req($go);
+        ok(!preg_match('/giacom|cloud\s*market/i', $seen[$go]), "the supplier isn't named ($go)");
+    }
+    ok(str_contains($seen['home'], 'Canal Street Clinic') && str_contains($seen['home'], 'Live services'), 'overview');
+    $svc = db_one("SELECT * FROM services WHERE account_id = ? AND login_password IS NOT NULL AND status <> 'ceased' ORDER BY id LIMIT 1", [$acc]);
+    $l = service_login($svc);
+    ok(str_contains($seen['services'], h($l['username'])) && str_contains($seen['services'], h($l['password'])), 'services show the login');
+    ok(str_contains($seen['orders'], 'Broadband') && (str_contains($seen['orders'], 'In progress') || str_contains($seen['orders'], 'Live')), 'broadband orders and their progress');
+
+    // Agreements: documents can be downloaded, but only the customer's own.
+    $file = 'CON-TEST-' . bin2hex(random_bytes(3)) . '.docx';
+    file_put_contents(storage_path('contracts') . '/' . $file, 'doc');
+    db_exec("INSERT INTO contracts (account_id, kind, title, status, signer_name, reference, documents, signed_at) VALUES (?, 'services', 'Broadband agreement', 'signed', 'Rita', 'CON-PORTAL1', ?, NOW())",
+        [$acc, json_encode([['title' => 'Agreement', 'file' => $file]])]);
+    $cid = (int)db()->lastInsertId();
+    [$html] = customer_req('agreements');
+    ok(str_contains($html, 'CON-PORTAL1') && str_contains($html, 'Signed'));
+    [$dl] = customer_req('document', ['id' => (string)$cid, 'file' => $file]);
+    eq('FILE:' . $file, $dl, 'own agreement document downloads');
+    [$dl] = customer_req('document', ['id' => (string)$cid, 'file' => '../config.php']);
+    ok(str_contains($dl, 'wasn&#039;t found') || str_contains($dl, "wasn't found"), 'only the agreement\'s own files');
+
+    // Someone at another customer sees only theirs.
+    $other = create('accounts', ['name' => 'Other Customer Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    db_exec('INSERT INTO customer_users (account_id, name, email, password_hash, must_change_password) VALUES (?, ?, ?, ?, 0)', [$other, 'Olly Other', 'olly@other.example', password_hash('Other-pass-123', PASSWORD_DEFAULT)]);
+    $mine = $_SESSION['customer_user_id'];
+    $_SESSION['customer_user_id'] = (int)db()->lastInsertId();
+    [$html] = customer_req('home');
+    ok(str_contains($html, 'Other Customer Ltd') && !str_contains($html, 'Canal Street Clinic'), 'their own account');
+    [$html] = customer_req('services');
+    ok(!str_contains($html, h($l['username'])), "not another customer's services");
+    [$dl] = customer_req('document', ['id' => (string)$cid, 'file' => $file]);
+    ok(!str_starts_with($dl, 'FILE:'), "not another customer's documents");
+    $_SESSION['customer_user_id'] = $mine;
+    // Staff: the card on the customer's page.
+    ob_start(); render('_customer_portal', ['account' => db_one('SELECT * FROM accounts WHERE id = ?', [$acc]), 'canEdit' => true]); $html = ob_get_clean();
+    ok(str_contains($html, 'rita@canal.example') && str_contains($html, 'Give portal access'));
+    unset($_SESSION['customer_user_id'], $_SESSION['customer_last'], $_SESSION['customer_since']);
+});
+
 proc_terminate($gProc);
 @unlink($gState);
 foreach (['giacom_username', 'giacom_password', 'giacom_events_since', 'giacom_last_sync_at'] as $k) { set_setting($k, null); }

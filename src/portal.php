@@ -35,7 +35,8 @@ function portal_requested(): bool
 /** A link within the portal. */
 function portal_url(string $go = 'orders', array $params = []): string
 {
-    $base = defined('CRM_PORTAL') ? 'portal.php' : 'index.php';
+    // The script this site is served by: portal.php or account.php when hosted beside the CRM, else its own subdomain's index.php.
+    $base = defined('CRM_PORTAL') ? 'portal.php' : (defined('CRM_CUSTOMER_PORTAL') ? 'account.php' : 'index.php');
     return $base . '?' . http_build_query(['go' => $go] + array_filter($params, fn($v) => $v !== null && $v !== ''));
 }
 

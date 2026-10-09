@@ -104,6 +104,14 @@
       <div class="help">Products show on the portal when they have a dealer price and supplier product IDs (under Products &amp; tariffs).</div></div>
   </section>
 
+  <section class="card form-grid" id="customer-portal">
+    <h2 class="wide">Customer portal</h2>
+    <p class="wide muted">Customers sign in to see their own account: details, services with their logins and IP addresses, orders, agreements and support tickets. It's read-only apart from their own password. Give people access from the customer's page (Customer portal).</p>
+    <div class="field"><label for="s_cph">Portal address</label><input id="s_cph" name="customer_portal_host" value="<?= $v('customer_portal_host') ?>" placeholder="myaccount.yourcompany.co.uk">
+      <div class="help">A subdomain pointed at the same folder as the CRM. Leave blank to use <code><?= h(app_url()) ?>/account.php</code>.</div></div>
+    <div class="field"><label>Portal link</label><p><a href="<?= h(customer_portal_public_url('login')) ?>" target="_blank" rel="noopener"><?= h(customer_portal_public_url('login')) ?></a></p></div>
+  </section>
+
   <section class="card form-grid">
     <h2 class="wide">Orders</h2>
     <p class="wide muted">When a quote is accepted an order is created and the team below is alerted. As they move it through the steps, the customer is emailed with the message for that step (which can be changed each time).</p>

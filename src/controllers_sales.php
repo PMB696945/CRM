@@ -440,7 +440,7 @@ function settings_controller(): void
         'contract_summary_for', 'quote_acceptance_statement', 'esign_summary_statement', 'esign_sign_statement', 'session_idle_minutes', 'require_2fa', 'force_https',
         'marketing_topics', 'campaign_batch_size',
         'invoice_reader', 'invoice_model', 'invoice_tolerance', 'invoice_alert_email',
-        'order_group_id', 'order_message_processing', 'order_message_confirmed', 'order_message_completed', 'order_message_cancelled', 'portal_host'];
+        'order_group_id', 'order_message_processing', 'order_message_confirmed', 'order_message_completed', 'order_message_cancelled', 'portal_host', 'customer_portal_host'];
     $before = array_combine($keys, array_map(fn($k) => (string)setting($k), $keys));
     if (is_post()) {
         verify_csrf();
@@ -535,14 +535,15 @@ function settings_controller(): void
             if ($key === 'invoice_model' && !preg_match('/^[a-z0-9.\-]{3,60}$/', $value)) {
                 $value = '';
             }
-            if ($key === 'portal_host') {
+            if ($key === 'portal_host' || $key === 'customer_portal_host') {
                 // Just the host name. Never the address staff use, or the CRM itself would turn into the portal.
                 $value = strtolower(trim((string)preg_replace('#^https?://#i', '', $value), " /"));
                 $value = (string)preg_replace('#/.*$#', '', $value);
                 $staff = array_filter([strtolower(preg_replace('/:\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? ''))), strtolower((string)parse_url(app_url(), PHP_URL_HOST))]);
-                if ($value !== '' && (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $value) || in_array($value, $staff, true))) {
-                    flash('The dealer portal address must be its own subdomain (e.g. partners.yourcompany.co.uk), not the address you use for the CRM. It wasn\'t changed.', 'error');
-                    $value = (string)setting('portal_host');
+                $other = strtolower(trim((string)($_POST[$key === 'portal_host' ? 'customer_portal_host' : 'portal_host'] ?? '')));
+                if ($value !== '' && (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $value) || in_array($value, $staff, true) || $value === preg_replace('#^https?://#', '', rtrim($other, '/')))) {
+                    flash('Each portal address must be its own subdomain (e.g. partners.yourcompany.co.uk or myaccount.yourcompany.co.uk), not the address you use for the CRM or the other portal. It wasn\'t changed.', 'error');
+                    $value = (string)setting($key);
                 }
             }
             if ($key === 'order_group_id' && !($value !== '' && ctype_digit($value) && db_value('SELECT 1 FROM ticket_groups WHERE id = ?', [$value]))) {

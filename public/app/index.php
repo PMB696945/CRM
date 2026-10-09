@@ -32,6 +32,10 @@ if (schema_version() < latest_schema_version()) {
 if (portal_requested()) {
     portal_dispatch();
 }
+// The customer portal (its own subdomain, or account.php): customers see their own account.
+if (customer_portal_requested()) {
+    customer_portal_dispatch();
+}
 
 start_session();
 
@@ -112,6 +116,7 @@ match (true) {
     $page === 'mail_log'  => mail_log_controller(),
     $page === 'dealer_orders' => dealer_orders_controller(),
     $page === 'service_login' => service_login_controller(),
+    $page === 'customer_portal_users' => customer_portal_users_controller(),
     $page === 'purchase_orders' => purchase_orders_controller(),
     $page === 'price_import' => price_import_controller(),
     $page === 'abillity'  => abillity_controller(),

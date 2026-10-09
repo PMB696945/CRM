@@ -1051,4 +1051,23 @@ return [
                 [$o['broadband_username'] ?: null, $d['bb_password'] ?? null, $o['service_id']]);
         }
     },
+    33 => function (): void {
+        // Customer portal: people at a customer who sign in to see their own account.
+        db()->exec("CREATE TABLE IF NOT EXISTS customer_users (
+            id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            account_id               INT UNSIGNED NOT NULL,
+            name                     VARCHAR(150) NOT NULL,
+            email                    VARCHAR(190) NOT NULL UNIQUE,
+            password_hash            VARCHAR(255) NULL,
+            active                   TINYINT(1) NOT NULL DEFAULT 1,
+            must_change_password     TINYINT(1) NOT NULL DEFAULT 1,
+            temp_password_expires_at DATETIME NULL,
+            failed_logins            TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            locked_until             DATETIME NULL,
+            reset_sent_at            DATETIME NULL,
+            last_login_at            DATETIME NULL,
+            created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_cu_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    },
 ];

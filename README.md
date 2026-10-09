@@ -509,6 +509,19 @@ Dealers can sign in to their own portal to check broadband availability for thei
 
 **Orders.** Dealers add their own customers (created under the dealer, billed via the dealer), check an address, choose a product, the engineer visit and the install date, and send the order. It appears under **Sales → Dealer orders**. Once the agreement is signed the team is emailed. **Approve and place order** places it with the supplier exactly like a staff broadband order (login made from the settings under Admin → Giacom, the chosen appointment booked if it's still free), and the dealer is emailed. **Turn down** emails the dealer your reason. Dealers can withdraw an order until it's approved. Turning an order down or withdrawing it cancels its unsigned agreement.
 
+## Customer portal
+
+Customers can sign in to see **their own account**. It's read-only apart from their own portal password:
+- **Overview:** company details, contacts, sites, and counts of live services, orders in progress, open tickets and agreements to sign.
+- **Services:** each line and service with its status, monthly price, contract end and **setup details**: username, password (shown on request) and IP address(es) once live.
+- **Orders:** broadband orders with their progress and install date, and other orders with a link to their tracking page.
+- **Agreements:** signed agreements and their documents to download, and any waiting to be signed.
+- **Support tickets:** their tickets and where each one is up to.
+
+Nothing on it names the wholesale supplier.
+
+**Setting it up:** point a subdomain (e.g. `myaccount.yourcompany.co.uk`) at the CRM's `public` folder and enter it under **Settings → Customer portal**, or use `…/account.php` on the CRM's address. On a customer's **Customer** tab, the *Customer portal* card gives people access: they're emailed a temporary password, changed when they first sign in. Five wrong passwords lock the account for 15 minutes, and you can send a new password or remove access there.
+
 ## Orders and onboarding
 
 Accepting a quote (online or recorded by staff) creates an **order** (ORD-000001…) and emails the **onboarding team**: the *Onboarding* group under Admin → Ticket groups (change which group in Settings → Orders). Add the people who process orders to that group; if it has a shared email address, alerts go there instead.

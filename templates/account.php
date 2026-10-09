@@ -385,6 +385,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
       <?php endif; ?>
     </section>
     <?php render('_billing_link', ['account' => $account, 'canEdit' => $canEdit]); ?>
+    <?php render('_customer_portal', ['account' => $account, 'canEdit' => $canEdit]); ?>
   </aside>
 </div>
 
