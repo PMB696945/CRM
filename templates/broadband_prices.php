@@ -36,7 +36,8 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
   <div><h1>Broadband prices <span class="count"><?= count($products) ?></span></h1>
     <p class="muted">What each broadband product costs you, what customers pay and the dealer price, per month, ex VAT. Edit in the table and press Save, or update in bulk with a CSV.</p></div>
   <div class="actions">
-    <a class="btn" href="<?= h(url('broadband_prices', ['action' => 'csv'])) ?>">Download CSV</a>
+    <a class="btn" href="<?= h(url('broadband_prices', ['action' => 'xlsx'])) ?>">⬇ Export prices (Excel)</a>
+    <a class="btn" href="<?= h(url('broadband_prices', ['action' => 'csv'])) ?>">⬇ Export CSV</a>
     <a class="btn btn-ghost" href="<?= h(url('broadband_prices', $showInactive ? [] : ['inactive' => 1])) ?>"><?= $showInactive ? 'Hide' : 'Show' ?> inactive</a>
   </div>
 </div>
@@ -62,8 +63,13 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
 </form>
 
 <section class="card" style="margin-top:1.5rem">
-  <div class="card-head"><h2>Update prices from a CSV</h2></div>
-  <p class="muted">Download the CSV above, change the prices in Excel, and upload it here. You'll see every change before anything is saved.</p>
+  <div class="card-head"><h2>Update prices in bulk</h2></div>
+  <ol class="small" style="margin:0 0 .75rem 1.1rem;list-style:decimal">
+    <li><b>Export the current prices</b> as a template:
+      <a href="<?= h(url('broadband_prices', ['action' => 'xlsx'])) ?>">Excel</a> or <a href="<?= h(url('broadband_prices', ['action' => 'csv'])) ?>">CSV</a>.</li>
+    <li><b>Change the prices</b> in Excel. Keep the header row and the SKUs; add rows for new products.</li>
+    <li><b>Upload it below</b>, as Excel or CSV. You'll see every change before anything is saved.</li>
+  </ol>
   <ul class="small muted">
     <li>Rows are matched to products by <b>SKU</b>. A new SKU adds a broadband product (it needs a product name and sell price).</li>
     <li>Columns: <?= h(implode(', ', array_map(fn($c) => $c[0], BB_PRICE_COLUMNS))) ?>. Any can be left out; a blank cell leaves that value as it is.</li>
@@ -71,7 +77,7 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
   </ul>
   <form method="post" action="<?= h(url('broadband_prices', ['action' => 'upload'])) ?>" enctype="multipart/form-data" class="filters">
     <?= csrf_field() ?>
-    <input type="file" name="file" accept=".csv,.txt,.xlsx" required aria-label="Price CSV">
+    <input type="file" name="file" accept=".csv,.txt,.xlsx" required aria-label="Price file (Excel or CSV)">
     <button class="btn">Upload and preview</button>
   </form>
 </section>

@@ -3640,6 +3640,34 @@ test('broadband prices: edit in place, download and upload a CSV with a preview,
     ok(str_contains($html, 'name="p[' . $a . '][monthly_price]"') && str_contains($html, 'data-bb-margin') && str_contains($html, 'p[new][sku]'), 'the editable page');
 });
 
+test('broadband prices: export to Excel as a template, change a price, and upload it again', function () {
+    as_role('admin');
+    $id = create('products', ['sku' => '0042-BB', 'name' => 'Excel Fibre', 'category' => 'broadband', 'monthly_price' => '35', 'cost_price' => '21.5', 'term_months' => '24', 'active' => '1']);
+    $path = storage_path('tmp') . '/bb-test.xlsx';
+    bb_xlsx(bb_products(), $path);
+    $rows = xlsx_rows($path);
+    eq(array_column(array_map(fn($c) => [BB_PRICE_COLUMNS[$c][0]], bb_export_columns()), 0), $rows[0], 'header row as the upload expects');
+    $map = bb_csv_map($rows[0]);
+    $mine = array_values(array_filter($rows, fn($r) => $r[$map['sku']] === '0042-BB'))[0] ?? null;
+    ok($mine !== null, 'SKU kept as text, leading zeros and all');
+    eq(['35', '21.5', 'Yes'], [$mine[$map['monthly_price']], $mine[$map['cost_price']], $mine[$map['active']]]);
+    // Unchanged, it changes nothing; with a new sell price, that's the only change.
+    $items = fn(array $rows) => array_map(fn($r, $i) => ['line' => 'Row ' . ($i + 2), 'id' => null, 'values' => array_map(fn($idx) => (string)($r[$idx] ?? ''), $map)], array_slice($rows, 1), array_keys(array_slice($rows, 1)));
+    eq([[], []], [bb_plan($items($rows), false)['changes'], bb_plan($items($rows), false)['new']]);
+    foreach ($rows as &$r) {
+        if ($r[$map['sku']] === '0042-BB') {
+            $r[$map['monthly_price']] = '36.99';
+        }
+    }
+    unset($r);
+    $plan = bb_plan($items($rows), false);
+    eq([$id], array_keys($plan['changes']));
+    eq(['monthly_price'], array_keys($plan['changes'][$id]));
+    eq([1, 0], bb_apply($plan, 'CSV test'));
+    eq('36.99', db_value('SELECT monthly_price FROM products WHERE id = ?', [$id]));
+    @unlink($path);
+});
+
 echo "Costs recorded on sales\n";
 test('the cost price at the time of ordering is kept on services and quote lines, even when the product cost changes', function () {
     $acct = create('accounts', ['name' => 'Cost History Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);

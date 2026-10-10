@@ -181,19 +181,41 @@ function bb_apply(array $plan, string $how): array
     return [count($plan['changes']), count($plan['new'])];
 }
 
+/** The columns this user may export (buy prices need "see costs"). */
+function bb_export_columns(): array
+{
+    return array_values(array_filter(array_keys(BB_PRICE_COLUMNS), fn($c) => $c !== 'cost_price' || can('costs.view')));
+}
+
+/** The products as rows of text with a header row: the export, and the template to upload again. */
+function bb_export_rows(array $products): array
+{
+    $cols = bb_export_columns();
+    $rows = [array_map(fn($c) => BB_PRICE_COLUMNS[$c][0], $cols)];
+    foreach ($products as $p) {
+        $rows[] = array_map(fn($c) => match (BB_PRICE_COLUMNS[$c][1]) {
+            'money' => $p[$c] === null ? '' : number_format((float)$p[$c], 2, '.', ''),
+            'bool' => $p[$c] ? 'Yes' : 'No',
+            default => (string)($p[$c] ?? ''),
+        }, $cols);
+    }
+    return $rows;
+}
+
+/** The products as an Excel file at $path. */
+function bb_xlsx(array $products, string $path): void
+{
+    $kinds = array_map(fn($c) => ['money' => 'money', 'term' => 'int'][BB_PRICE_COLUMNS[$c][1]] ?? 'text', bb_export_columns());
+    xlsx_write($path, bb_export_rows($products), $kinds, 'Broadband prices');
+}
+
 /** The products as CSV rows (for download, and as the upload template). */
 function bb_csv(array $products): string
 {
     $fh = fopen('php://temp', 'r+');
     fwrite($fh, "\xEF\xBB\xBF");
-    $cols = array_filter(array_keys(BB_PRICE_COLUMNS), fn($c) => $c !== 'cost_price' || can('costs.view'));
-    fputcsv($fh, array_map(fn($c) => BB_PRICE_COLUMNS[$c][0], $cols), escape: '');
-    foreach ($products as $p) {
-        fputcsv($fh, array_map(fn($c) => csv_safe(match (BB_PRICE_COLUMNS[$c][1]) {
-            'money' => $p[$c] === null ? '' : number_format((float)$p[$c], 2, '.', ''),
-            'bool' => $p[$c] ? 'Yes' : 'No',
-            default => (string)($p[$c] ?? ''),
-        }), $cols), escape: '');
+    foreach (bb_export_rows($products) as $i => $row) {
+        fputcsv($fh, $i ? array_map('csv_safe', $row) : $row, escape: '');
     }
     rewind($fh);
     $csv = (string)stream_get_contents($fh);
@@ -230,6 +252,17 @@ function broadband_prices_controller(): void
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="broadband-prices-' . date('Y-m-d') . '.csv"');
         echo bb_csv(bb_products());
+        exit;
+    }
+    if ($action === 'xlsx') {
+        audit('export', 'Broadband prices exported to Excel', 'products');
+        $path = storage_path('tmp') . '/bb-prices-' . bin2hex(random_bytes(4)) . '.xlsx';
+        bb_xlsx(bb_products(), $path);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="broadband-prices-' . date('Y-m-d') . '.xlsx"');
+        header('Content-Length: ' . filesize($path));
+        readfile($path);
+        @unlink($path);
         exit;
     }
     if (is_post()) {
