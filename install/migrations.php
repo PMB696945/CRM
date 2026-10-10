@@ -1143,4 +1143,14 @@ return [
         db()->exec("ALTER TABLE products MODIFY category ENUM($types) NOT NULL");
         db()->exec("ALTER TABLE services MODIFY service_type ENUM($types) NOT NULL");
     },
+    41 => function (): void {
+        // Each sale keeps the product's code and name as they were when it was ordered (with its prices,
+        // already kept), so changing or deleting a product later leaves the record of what was sold.
+        foreach (['services', 'quote_lines'] as $table) {
+            if (!column_exists($table, 'product_sku')) {
+                db()->exec("ALTER TABLE $table ADD COLUMN product_sku VARCHAR(40) NULL AFTER product_id, ADD COLUMN product_name VARCHAR(150) NULL AFTER product_sku");
+            }
+            db()->exec("UPDATE $table t JOIN products p ON p.id = t.product_id SET t.product_sku = p.sku, t.product_name = p.name WHERE t.product_sku IS NULL");
+        }
+    },
 ];

@@ -1,7 +1,9 @@
 // Confirm destructive actions.
 document.addEventListener('submit', (e) => {
-  const msg = e.target.dataset.confirm;
   if (e.submitter && e.submitter.hasAttribute('data-skip-confirm')) return;
+  // A button can ask its own question (e.g. "Delete selected"), with {n} for how many are ticked.
+  const ticked = document.querySelectorAll(`input[name="ids[]"][form="${e.target.id}"]:checked`).length;
+  const msg = (e.submitter && e.submitter.dataset.confirm ? e.submitter.dataset.confirm : e.target.dataset.confirm || '').replace('{n}', ticked);
   if (msg && !window.confirm(msg)) e.preventDefault();
 });
 

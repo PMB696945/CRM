@@ -92,8 +92,11 @@ function quote_save_lines(int $quoteId, array $lines): void
 {
     db_exec('DELETE FROM quote_lines WHERE quote_id = ?', [$quoteId]);
     foreach (array_values($lines) as $i => $l) {
-        db_exec('INSERT INTO quote_lines (quote_id, product_id, service_type, description, quantity, monthly_price, cost_price, setup_fee, term_months, sort)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$quoteId, $l['product_id'], $l['service_type'], $l['description'], $l['quantity'], $l['monthly_price'],
+        // The product's code and name now, kept with the line's prices if the product changes or is deleted later.
+        $product = $l['product_id'] ? db_one('SELECT sku, name FROM products WHERE id = ?', [$l['product_id']]) : null;
+        db_exec('INSERT INTO quote_lines (quote_id, product_id, product_sku, product_name, service_type, description, quantity, monthly_price, cost_price, setup_fee, term_months, sort)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$quoteId, $l['product_id'], $product['sku'] ?? ($l['product_sku'] ?? null), $product['name'] ?? ($l['product_name'] ?? null),
+            $l['service_type'], $l['description'], $l['quantity'], $l['monthly_price'],
             product_monthly_cost($l['product_id']), $l['setup_fee'], $l['term_months'], $i]);
     }
 }

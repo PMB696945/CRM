@@ -708,6 +708,27 @@ function entity_controller(string $name): void
             }
             redirect(safe_return($_POST['_return'] ?? null, $id ? url('products', ['action' => 'view', 'id' => $id]) : url('products')));
 
+        case 'bulk_delete':
+        case 'bulk_deactivate':
+            // Several products ticked on the list.
+            if ($name !== 'products' || !is_post()) {
+                not_found();
+            }
+            verify_csrf();
+            require_permission('products.edit');
+            $ids = array_values(array_unique(array_filter(array_map('intval', is_array($_POST['ids'] ?? null) ? $_POST['ids'] : []))));
+            $back = safe_return($_POST['_return'] ?? null, url('products'));
+            if (!$ids) {
+                flash('Tick the products first.', 'error');
+                redirect($back);
+            }
+            if ($action === 'bulk_delete') {
+                require_permission('records.delete');
+            }
+            [$type, $message] = products_bulk($action === 'bulk_delete' ? 'delete' : 'deactivate', $ids);
+            flash($message, $type);
+            redirect($back);
+
         case 'make_account':
             // A supplier that is also a customer or dealer: give it a customer record (one company, with tabs).
             if ($name !== 'suppliers' || !is_post() || !$id) {
@@ -1496,4 +1517,34 @@ function account_types_controller(): void
         flash($e->getMessage(), 'error');
     }
     redirect(url('accounts', ['action' => 'view', 'id' => $account['id']]));
+}
+
+/**
+ * Make several products inactive, or delete them. Deleting is safe for products already sold: each service and
+ * quote line keeps the product code, name and prices from when it was ordered. Returns [flash type, message].
+ */
+function products_bulk(string $what, array $ids): array
+{
+    $entity = entity('products');
+    $ids = array_values(array_filter(array_map('intval', $ids)));
+    $products = $ids ? db_all('SELECT * FROM products WHERE id IN (' . implode(',', $ids) . ')') : [];
+    if ($what === 'deactivate') {
+        $changed = array_filter($products, fn($p) => (int)$p['active'] === 1);
+        foreach ($changed as $p) {
+            db_exec('UPDATE products SET active = 0 WHERE id = ?', [$p['id']]);
+            audit('update', 'Product ' . record_label($entity, $p) . ' made inactive', 'products', (int)$p['id'], null, ['Available to sell' => ['from' => 'Yes', 'to' => 'No']]);
+        }
+        return ['success', count($changed) . ' product' . (count($changed) === 1 ? '' : 's') . ' made inactive.' . (count($changed) < count($products) ? ' The others already were.' : '')];
+    }
+    $inUse = 0;
+    foreach ($products as $p) {
+        // Services and quote lines keep the product's code, name and prices from when they were sold.
+        $inUse += (int)db_value('SELECT EXISTS (SELECT 1 FROM services WHERE product_id = ?) OR EXISTS (SELECT 1 FROM quote_lines WHERE product_id = ?)', [$p['id'], $p['id']]);
+        $snapshot = record_snapshot('products', $entity, (int)$p['id']);
+        delete_row('products', (int)$p['id']);
+        audit('delete', 'Product ' . record_label($entity, $p) . ' deleted', 'products', (int)$p['id'], null,
+            array_map(fn($v) => ['from' => $v, 'to' => ''], array_filter($snapshot, fn($v) => $v !== '')));
+    }
+    return ['success', count($products) . ' product' . (count($products) === 1 ? '' : 's') . ' deleted.'
+        . ($inUse ? " $inUse had been sold: those services and quotes keep the product code, name and prices from when they were ordered." : '')];
 }

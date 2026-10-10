@@ -339,6 +339,8 @@ function entities(): array
                 'account_id'        => ['label' => 'Customer', 'type' => 'ref', 'ref' => 'accounts', 'required' => true],
                 'site_id'           => ['label' => 'Installation site', 'type' => 'ref', 'ref' => 'sites', 'scoped' => true, 'help' => 'From the customer\'s address book. Leave blank for head office.'],
                 'product_id'        => ['label' => 'Product / tariff', 'type' => 'ref', 'ref' => 'products', 'help' => 'Prices, term and type are copied from the product when left blank. Prices on services are per month, so a yearly product is divided by 12'],
+                'product_sku'       => ['label' => 'Product code when ordered', 'type' => 'text', 'readonly' => true],
+                'product_name'      => ['label' => 'Product name when ordered', 'type' => 'text', 'readonly' => true],
                 'service_type'      => ['label' => 'Service type', 'type' => 'select', 'options' => SERVICE_TYPES],
                 'identifier'        => ['label' => 'Number / circuit ID', 'type' => 'text', 'required' => true, 'help' => 'MSISDN, CLI, circuit reference or serial number'],
                 'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
@@ -778,6 +780,11 @@ function before_save(string $name, array $data, ?array $existing): array
             if (!empty($data['product_id'])) {
                 $product = db_one('SELECT * FROM products WHERE id = ?', [$data['product_id']]);
                 if ($product) {
+                    // The product's code and name when it was ordered, kept if the product is renamed or deleted.
+                    if ($existing === null || (int)$existing['product_id'] !== (int)$data['product_id']) {
+                        $data['product_sku'] = $product['sku'];
+                        $data['product_name'] = $product['name'];
+                    }
                     $data['service_type'] = $data['service_type'] ?: $product['category'];
                     $data['carrier'] = $data['carrier'] ?: $product['carrier'];
                     $data['monthly_price'] ??= monthly_equivalent($product['monthly_price'], $product['billing_frequency'] ?? 'monthly');

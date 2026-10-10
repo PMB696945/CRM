@@ -3668,6 +3668,28 @@ test('broadband prices: export to Excel as a template, change a price, and uploa
     @unlink($path);
 });
 
+test('products: tick several to make inactive or delete; sales keep the product code, name and prices from when they were ordered', function () {
+    as_role('admin');
+    $acct = create('accounts', ['name' => 'Bulk Delete Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    $free = create('products', ['sku' => 'BULK-1', 'name' => 'Old tariff A', 'category' => 'mobile', 'monthly_price' => '5', 'term_months' => '12', 'active' => '1']);
+    $free2 = create('products', ['sku' => 'BULK-2', 'name' => 'Old tariff B', 'category' => 'mobile', 'monthly_price' => '6', 'term_months' => '12', 'active' => '1']);
+    $sold = create('products', ['sku' => 'BULK-3', 'name' => 'Sold tariff', 'category' => 'mobile', 'monthly_price' => '7', 'cost_price' => '4', 'term_months' => '12', 'active' => '1']);
+    $svc = insert_row('services', ['account_id' => $acct, 'product_id' => $sold, 'identifier' => '07700900999', 'status' => 'active']);
+    db_exec("INSERT INTO quotes (account_id, title, reference) VALUES (?, 'Bulk quote', 'Q-BULK')", [$acct]);
+    $qid = (int)db()->lastInsertId();
+    quote_save_lines($qid, [['product_id' => $sold, 'service_type' => 'mobile', 'description' => 'Sold tariff', 'quantity' => 2, 'monthly_price' => 7, 'setup_fee' => 0, 'term_months' => 12]]);
+    // Changing the product changes nothing already sold.
+    update_row('products', $sold, ['name' => 'Renamed tariff', 'monthly_price' => 9.5]);
+    eq(['BULK-3', 'Sold tariff', '7.00', '4.00'], array_values(db_one('SELECT product_sku, product_name, monthly_price, cost_price FROM services WHERE id = ?', [$svc])));
+    [, $msg] = products_bulk('deactivate', [$free2]);
+    eq(['0', '6.00', 'Old tariff B'], array_values(db_one('SELECT active, monthly_price, name FROM products WHERE id = ?', [$free2])), $msg);
+    [$type, $msg] = products_bulk('delete', [$free, $free2, $sold]);
+    eq(0, (int)db_value('SELECT COUNT(*) FROM products WHERE id IN (?, ?, ?)', [$free, $free2, $sold]));
+    ok($type === 'success' && str_contains($msg, '3 products deleted') && str_contains($msg, '1 had been sold'), $msg);
+    eq([null, 'BULK-3', 'Sold tariff', '7.00', '4.00'], array_values(db_one('SELECT product_id, product_sku, product_name, monthly_price, cost_price FROM services WHERE id = ?', [$svc])), 'the service still says what was sold, and for how much');
+    eq([null, 'BULK-3', 'Sold tariff', '7.00'], array_values(db_one('SELECT product_id, product_sku, product_name, monthly_price FROM quote_lines WHERE quote_id = ?', [$qid])));
+});
+
 echo "Costs recorded on sales\n";
 test('the cost price at the time of ordering is kept on services and quote lines, even when the product cost changes', function () {
     $acct = create('accounts', ['name' => 'Cost History Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
