@@ -78,6 +78,6 @@
   <p class="help mt-6 text-center"><?= h(implode(' · ', array_filter([$company, company('phone'), company('email')]))) ?></p>
 <?php endif; ?>
 </div>
-<script src="assets/app.js"></script>
+<script src="<?= h(asset_url('app.js')) ?>"></script>
 </body>
 </html>

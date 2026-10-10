@@ -83,6 +83,7 @@ $flash = flash();
         </div>
       <?php endforeach; ?>
     </nav>
+    <div class="small muted" style="padding:0 1.25rem .5rem" title="Changes with each update: check it after uploading new files">Version <?= h((string)crm_version()) ?></div>
     <div class="sidebar-foot">
       <span class="avatar"><?= h(initials($user['name'])) ?></span>
       <a href="<?= h(url('profile')) ?>" class="me"><?= h($user['name']) ?><small><?= h($user['email']) ?></small></a>
@@ -116,6 +117,6 @@ $flash = flash();
     </main>
   </div>
 </div>
-<script src="assets/app.js"></script>
+<script src="<?= h(asset_url('app.js')) ?>"></script>
 </body>
 </html>

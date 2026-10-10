@@ -17,7 +17,12 @@ if (schema_version() < latest_schema_version()) {
         redirect('install.php');
     }
     try {
-        migrate();
+        if (migrate() !== [] && PHP_SAPI !== 'cli' && !is_post() && !isset($_GET['_updated'])) {
+            // New files were just uploaded. Some hosts keep serving cached copies of the old PHP files,
+            // so clear them and load the page again on the new code.
+            opcache_flush_app();
+            redirect(current_url() . (str_contains(current_url(), '?') ? '&' : '?') . '_updated=1');
+        }
     } catch (PDOException $e) {
         http_response_code(503);
         exit('<!doctype html><meta charset="utf-8"><title>Database update needed</title><body style="font-family:system-ui;max-width:640px;margin:3rem auto;padding:0 1rem">'

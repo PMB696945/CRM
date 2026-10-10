@@ -206,9 +206,31 @@ function initials(string $name): string
     return implode('', $letters) ?: '?';
 }
 
-/** <head> snippet shared by every page: fonts/CSS and the saved light/dark theme. */
-function theme_head(string $css = 'assets/app.css'): string
+/** An asset's URL with its file time, so browsers fetch the new copy after an update instead of a cached old one. */
+function asset_url(string $name): string
 {
+    $file = dirname((string)($_SERVER['SCRIPT_FILENAME'] ?? '')) . '/assets/' . $name;
+    if (!is_file($file)) {
+        $file = APP_ROOT . '/public/assets/' . $name;
+    }
+    return 'assets/' . $name . (is_file($file) ? '?v=' . filemtime($file) : '');
+}
+
+/** The CRM's version: its latest database update, which goes up with each release. Shown so an upload can be checked. */
+function crm_version(): int
+{
+    static $version = null;
+    if ($version === null) {
+        require_once APP_ROOT . '/src/installer.php';
+        $version = latest_schema_version();
+    }
+    return $version;
+}
+
+/** <head> snippet shared by every page: fonts/CSS and the saved light/dark theme. */
+function theme_head(?string $css = null): string
+{
+    $css ??= asset_url('app.css');
     return '<link rel="stylesheet" href="' . h($css) . '">'
         . '<script nonce="' . csp_nonce() . '">' . "try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}</script>";
 }
