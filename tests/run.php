@@ -3717,8 +3717,32 @@ test('new order: mobile rows, SIP port with a letter of authority, Hosted PBX, h
     $quote = db_one('SELECT * FROM quotes WHERE id = ?', [$qid]);
     eq('SIP trunk – 4 channels, porting numbers', $quote['title']);
     eq(['01134960000', '01134960001'], quote_order_details($quote)['numbers']);
-    $loa = implode("\n", array_map(fn($p) => is_array($p) ? $p[0] : $p, order_loa_paragraphs($account, quote_order_details($quote), 'CON-1', 'Olive Order')));
-    ok(str_contains($loa, 'Letter of Authority') && str_contains($loa, '01134960001') && str_contains($loa, 'To: BT') && str_contains($loa, '1 Mill Lane, Leeds, LS1 4AB'));
+    // The letter of authority: saved in the customer's files with the quote; from the admin's own template when uploaded.
+    $details = quote_order_details($quote);
+    ok(!empty($details['loa_document_id']) && str_contains((string)db_value('SELECT title FROM documents WHERE id = ?', [$details['loa_document_id']]), 'Letter of Authority – BT'), 'LoA saved: ' . json_encode($details['loa_document_id'] ?? null));
+    $f = loa_fields($account, $details, strtotime('2026-09-22'));
+    eq(['0113 496 0000' . "\n" . '0113 496 0001', '1 Mill Lane' . "\n" . 'Leeds' . "\n" . 'LS1 4AB', 'BT', '22nd September 2026', '22nd March 2027'],
+        [$f['numbers'], $f['site_address'], $f['current_provider'], $f['date'], $f['valid_until']]);
+    $plain = storage_path('tmp') . '/loa-test.docx';
+    loa_generate($account, $details, $plain);
+    ok(str_contains(docx_to_html($plain), '0113 496 0001'), 'a plain letter without a template');
+    loa_save_settings(['loa_signer_name' => 'Paula Porter', 'loa_signer_title' => 'Technical Director', 'loa_provider_name' => 'Voice Co'],
+        ['name' => 'sig.png', 'tmp_name' => (function () { $t = storage_path('tmp') . '/sig.png'; file_put_contents($t, test_png(300, 100)); return $t; })(), 'error' => UPLOAD_ERR_OK, 'size' => 2000]);
+    ok(loa_signature_file() !== null, 'signature saved');
+    $stored = bin2hex(random_bytes(6)) . '.docx';
+    docx_create(storage_path('templates') . '/' . $stored, ['To {{current_provider}} from {{new_provider_name}}', 'Site: {{site_address}}', 'Numbers: {{numbers}}',
+        'Signed: {{signature}}', '{{signer_name}}, {{signer_title}}, {{date}}']);
+    db_exec("INSERT INTO contract_templates (name, service_type, file_name, stored_name) VALUES ('Our LoA', 'loa', 'loa.docx', ?)", [$stored]);
+    loa_generate($account, $details, $plain);
+    $html = docx_to_html($plain);
+    ok(str_contains($html, 'To BT from Voice Co') && str_contains($html, 'Paula Porter, Technical Director') && str_contains($html, '0113 496 0001'), $html);
+    $zip = new ZipArchive();
+    $zip->open($plain);
+    ok($zip->locateName('word/media/crm-signature.png') !== false && str_contains((string)$zip->getFromName('word/_rels/document.xml.rels'), 'rIdCrmSignature')
+        && str_contains((string)$zip->getFromName('word/document.xml'), 'r:embed="rIdCrmSignature"') && str_contains((string)$zip->getFromName('[Content_Types].xml'), 'Extension="png"'), 'signature image placed');
+    ok(simplexml_load_string((string)$zip->getFromName('word/document.xml')) !== false, 'still valid XML');
+    $zip->close();
+    @unlink($plain);
     $activeTemplates = db_all('SELECT id FROM contract_templates WHERE active = 1');
     db_exec('UPDATE contract_templates SET active = 0');
     foreach (['general' => 'docx_example_template', 'contract_summary' => 'docx_example_summary_template'] as $kind => $make) {
@@ -3730,7 +3754,7 @@ test('new order: mobile rows, SIP port with a letter of authority, Hosted PBX, h
     $contract = contract_create_from_quote(db_one('SELECT * FROM quotes WHERE id = ?', [$qid]));
     $docs = contract_documents($contract);
     eq('Letter of Authority', end($docs)['title'], 'signed with the agreement');
-    ok(str_contains(docx_to_html(storage_path('contracts') . '/' . end($docs)['file']), '01134960000'));
+    ok(str_contains(docx_to_html(storage_path('contracts') . '/' . end($docs)['file']), '0113 496 0000'), 'numbers in the signed letter');
     foreach ($activeTemplates as $t) { db_exec('UPDATE contract_templates SET active = 1 WHERE id = ?', [$t['id']]); }
     $_GET = ['page' => 'quotes', 'action' => 'view', 'id' => (string)$qid];
     $html = page_html(fn() => quotes_controller());

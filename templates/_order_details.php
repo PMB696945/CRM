@@ -28,7 +28,9 @@ $row = fn(string $label, ?string $value) => $value !== null && $value !== '' ? '
       <dt>Copy bill</dt><dd><?php if (!empty($d['bill_document_id']) && ($doc = db_one('SELECT id, title FROM documents WHERE id = ?', [$d['bill_document_id']]))): ?>
         <a href="<?= h(url('documents', ['action' => 'download', 'id' => $doc['id']])) ?>"><?= h($doc['title']) ?></a>
         <?php else: ?><span class="text-warning">Still needed</span> <span class="muted small">— add it to the customer's files</span><?php endif; ?></dd>
-      <dt>Letter of authority</dt><dd>Created from these details and signed with the contract</dd>
+      <dt>Letter of authority</dt><dd><?php if (!empty($d['loa_document_id']) && ($loa = db_one('SELECT id, title FROM documents WHERE id = ?', [$d['loa_document_id']]))): ?>
+        <a href="<?= h(url('documents', ['action' => 'download', 'id' => $loa['id']])) ?>"><?= h($loa['title']) ?></a> <span class="muted small">— in the customer's files, and signed with the contract</span>
+        <?php else: ?>Created from these details and signed with the contract<?php endif; ?></dd>
     <?php endif; ?>
   </dl>
 

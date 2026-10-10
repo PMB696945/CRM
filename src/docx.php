@@ -56,8 +56,10 @@ function docx_placeholders(string $path): array
  * Fill a template. $fields maps placeholder => text (newlines become line
  * breaks); $tableRows fills {{services_table}}: list of [cells...] with the
  * first row as the header and an optional last row treated as a totals row.
+ * $images maps placeholder => image file (PNG or JPEG), placed in the text
+ * where the placeholder is, e.g. a signature.
  */
-function docx_merge(string $templatePath, string $outPath, array $fields, array $tableRows = []): void
+function docx_merge(string $templatePath, string $outPath, array $fields, array $tableRows = [], array $images = []): void
 {
     docx_require_zip();
     if (!copy($templatePath, $outPath)) {
@@ -67,20 +69,69 @@ function docx_merge(string $templatePath, string $outPath, array $fields, array 
     if ($zip->open($outPath) !== true) {
         throw new IntegrationException('Couldn\'t open the contract template.');
     }
+    $media = docx_add_images($zip, $images);
     for ($i = 0; $i < $zip->numFiles; $i++) {
         $name = $zip->getNameIndex($i);
-        if (preg_match('#^word/(document|header\d*|footer\d*)\.xml$#', $name)) {
-            $xml = (string)$zip->getFromIndex($i);
-            $zip->addFromString($name, docx_merge_xml($xml, $fields, $tableRows));
+        if (preg_match('#^word/(document|header\d*|footer\d*)\.xml$#', $name, $m)) {
+            $xml = docx_merge_xml((string)$zip->getFromIndex($i), $fields, $tableRows, $media);
+            $zip->addFromString($name, $xml);
+            // Each part that shows an image needs a link to it.
+            $relsName = "word/_rels/{$m[1]}.xml.rels";
+            foreach ($media as $img) {
+                if (str_contains($xml, 'r:embed="' . $img['rid'] . '"')) {
+                    $rels = $zip->getFromName($relsName) ?: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+                    if (!str_contains($rels, 'Id="' . $img['rid'] . '"')) {
+                        $rels = str_replace('</Relationships>', '<Relationship Id="' . $img['rid'] . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="' . $img['target'] . '"/></Relationships>', $rels);
+                        $zip->addFromString($relsName, $rels);
+                    }
+                }
+            }
         }
     }
     $zip->close();
 }
 
-function docx_merge_xml(string $xml, array $fields, array $tableRows): string
+/** Put images into a .docx being filled, sized to fit a line or two of text (at most 1.5cm tall, 6cm wide). */
+function docx_add_images(ZipArchive $zip, array $images): array
+{
+    $media = [];
+    foreach ($images as $key => $path) {
+        $info = $path && is_file($path) ? @getimagesize($path) : false;
+        if (!$info || !in_array($info[2], [IMAGETYPE_PNG, IMAGETYPE_JPEG], true)) {
+            continue;
+        }
+        $ext = $info[2] === IMAGETYPE_PNG ? 'png' : 'jpeg';
+        $target = 'media/crm-' . preg_replace('/[^a-z0-9_]/', '', strtolower((string)$key)) . '.' . $ext;
+        $zip->addFile($path, 'word/' . $target);
+        $types = (string)$zip->getFromName('[Content_Types].xml');
+        if (!preg_match('/Extension="' . $ext . '"/i', $types)) {
+            $types = str_replace('</Types>', '<Default Extension="' . $ext . '" ContentType="image/' . $ext . '"/></Types>', $types);
+            $zip->addFromString('[Content_Types].xml', $types);
+        }
+        $emuPerCm = 360000;
+        $scale = min(1.5 * $emuPerCm / $info[1], 6 * $emuPerCm / $info[0]);
+        $media[strtolower((string)$key)] = ['rid' => 'rIdCrm' . ucfirst(preg_replace('/[^a-z0-9]/', '', strtolower((string)$key))), 'target' => $target,
+            'cx' => (int)round($info[0] * $scale), 'cy' => (int)round($info[1] * $scale), 'id' => 9000 + count($media)];
+    }
+    return $media;
+}
+
+/** A run showing an image added by docx_add_images. Namespaces are declared on the spot, as a template may not declare them. */
+function docx_image_run(array $img): string
+{
+    return '<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">'
+        . '<wp:extent cx="' . $img['cx'] . '" cy="' . $img['cy'] . '"/><wp:docPr id="' . $img['id'] . '" name="Picture ' . $img['id'] . '"/>'
+        . '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        . '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="' . basename($img['target']) . '"/><pic:cNvPicPr/></pic:nvPicPr>'
+        . '<pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="' . $img['rid'] . '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+        . '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' . $img['cx'] . '" cy="' . $img['cy'] . '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>'
+        . '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>';
+}
+
+function docx_merge_xml(string $xml, array $fields, array $tableRows, array $media = []): string
 {
     $fields = array_change_key_case($fields, CASE_LOWER);
-    return preg_replace_callback('#<w:p\b[^>]*?(?:/>|>.*?</w:p>)#s', function ($m) use ($fields, $tableRows) {
+    return preg_replace_callback('#<w:p\b[^>]*?(?:/>|>.*?</w:p>)#s', function ($m) use ($fields, $tableRows, $media) {
         $p = $m[0];
         preg_match_all('#<w:t(?:\s[^>]*)?>(.*?)</w:t>#s', $p, $texts);
         $text = html_entity_decode(implode('', $texts[1]), ENT_QUOTES | ENT_XML1, 'UTF-8');
@@ -91,19 +142,30 @@ function docx_merge_xml(string $xml, array $fields, array $tableRows): string
         if (preg_match('/^\s*\{\{\s*services_table\s*\}\}\s*$/i', $text)) {
             return $tableRows ? docx_table($tableRows) : '<w:p/>';
         }
-        $replaced = preg_replace_callback('/\{\{\s*([a-z0-9_]+)\s*\}\}/i', function ($f) use ($fields) {
+        $replaced = preg_replace_callback('/\{\{\s*([a-z0-9_]+)\s*\}\}/i', function ($f) use ($fields, $media) {
             $key = strtolower($f[1]);
+            if (isset($media[$key])) {
+                return "\x01$key\x01"; // an image, placed below
+            }
             return array_key_exists($key, $fields) ? (string)$fields[$key] : $f[0];
         }, $text);
 
         preg_match('#^<w:p\b[^>]*>#', $p, $open);
         preg_match('#<w:pPr>.*?</w:pPr>#s', $p, $pPr);
         preg_match('#<w:r\b[^>]*>\s*(<w:rPr>.*?</w:rPr>)#s', $p, $rPr);
-        $runs = [];
-        foreach (explode("\n", str_replace("\r", '', $replaced)) as $i => $line) {
-            $runs[] = ($i ? '<w:br/>' : '') . '<w:t xml:space="preserve">' . htmlspecialchars($line, ENT_QUOTES | ENT_XML1, 'UTF-8') . '</w:t>';
+        $out = '';
+        foreach (preg_split("/(\x01[a-z0-9_]+\x01)/", str_replace("\r", '', $replaced), -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) as $piece) {
+            if (preg_match("/^\x01([a-z0-9_]+)\x01$/", $piece, $img)) {
+                $out .= docx_image_run($media[$img[1]]);
+                continue;
+            }
+            $runs = [];
+            foreach (explode("\n", $piece) as $i => $line) {
+                $runs[] = ($i ? '<w:br/>' : '') . '<w:t xml:space="preserve">' . htmlspecialchars($line, ENT_QUOTES | ENT_XML1, 'UTF-8') . '</w:t>';
+            }
+            $out .= '<w:r>' . ($rPr[1] ?? '') . implode('', $runs) . '</w:r>';
         }
-        return ($open[0] ?? '<w:p>') . ($pPr[0] ?? '') . '<w:r>' . ($rPr[1] ?? '') . implode('', $runs) . '</w:r></w:p>';
+        return ($open[0] ?? '<w:p>') . ($pPr[0] ?? '') . ($out ?: '<w:r/>') . '</w:p>';
     }, $xml);
 }
 

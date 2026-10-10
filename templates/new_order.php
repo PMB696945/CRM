@@ -153,7 +153,9 @@ $mobileRow = function (array $r = []) use ($sel, $tariffs): string {
       <div class="field"><label for="sip_ddis">DDIs required</label><input id="sip_ddis" type="number" min="0" name="sip_ddis" value="<?= h($v('sip_ddis')) ?>"><?= $err('sip_ddis') ?></div>
     </fieldset>
     <fieldset class="order-part" data-if="sip_mode=port">
-      <div class="field"><label for="sip_numbers">Numbers to port</label><textarea id="sip_numbers" name="sip_numbers" rows="4" placeholder="One per line"><?= h($v('sip_numbers')) ?></textarea><?= $err('sip_numbers') ?></div>
+      <div class="field"><label for="sip_numbers">Numbers to port</label><textarea id="sip_numbers" name="sip_numbers" rows="4" placeholder="One per line"><?= h($v('sip_numbers')) ?></textarea><?= $err('sip_numbers') ?>
+        <div class="mt-2"><button type="submit" class="btn btn-sm" formaction="<?= h(url('new_order', ['account_id' => $id, 'action' => 'loa'])) ?>" formtarget="_blank" formnovalidate>📄 Create letter of authority</button>
+        <div class="help">Downloads the LoA filled in from the address, numbers and provider here<?= loa_template() ? '' : ' (a plain letter: upload your own LoA under Contract templates)' ?>.</div></div></div>
       <div class="field"><label for="sip_provider">Current provider</label><input id="sip_provider" name="sip_provider" value="<?= h($v('sip_provider')) ?>"><?= $err('sip_provider') ?>
         <label for="sip_bill" style="margin-top:1rem">Copy bill</label><input id="sip_bill" type="file" name="sip_bill" accept=".pdf,.jpg,.jpeg,.png,.heic,.doc,.docx">
         <div class="help">A recent bill showing the numbers. Can be added to the customer's files later. A letter of authority is created from these details and signed with the contract.</div></div>
@@ -172,7 +174,9 @@ $mobileRow = function (array $r = []) use ($sel, $tariffs): string {
       <div class="field"><label for="pbx_ddis">DDIs required</label><input id="pbx_ddis" type="number" min="0" name="pbx_ddis" value="<?= h($v('pbx_ddis')) ?>"><?= $err('pbx_ddis') ?></div>
     </fieldset>
     <fieldset class="order-part" data-if="pbx_mode=migrate">
-      <div class="field"><label for="pbx_numbers">Existing numbers</label><textarea id="pbx_numbers" name="pbx_numbers" rows="4" placeholder="One per line"><?= h($v('pbx_numbers')) ?></textarea><?= $err('pbx_numbers') ?></div>
+      <div class="field"><label for="pbx_numbers">Existing numbers</label><textarea id="pbx_numbers" name="pbx_numbers" rows="4" placeholder="One per line"><?= h($v('pbx_numbers')) ?></textarea><?= $err('pbx_numbers') ?>
+        <div class="mt-2"><button type="submit" class="btn btn-sm" formaction="<?= h(url('new_order', ['account_id' => $id, 'action' => 'loa'])) ?>" formtarget="_blank" formnovalidate>📄 Create letter of authority</button>
+        <div class="help">Downloads the LoA filled in from the address, numbers and provider here<?= loa_template() ? '' : ' (a plain letter: upload your own LoA under Contract templates)' ?>.</div></div></div>
       <div class="field"><label for="pbx_provider">Current provider</label><input id="pbx_provider" name="pbx_provider" value="<?= h($v('pbx_provider')) ?>"><?= $err('pbx_provider') ?>
         <label for="pbx_bill" style="margin-top:1rem">Current bill</label><input id="pbx_bill" type="file" name="pbx_bill" accept=".pdf,.jpg,.jpeg,.png,.heic,.doc,.docx">
         <div class="help">A letter of authority is created from these details and signed with the contract.</div></div>

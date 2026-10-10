@@ -14,6 +14,7 @@ function contract_template_types(): array
         'contract_summary' => 'Contract Summary (sent and confirmed before the agreement)',
         'msa_schedule' => 'Service schedule under a dealer MSA',
         'msa'          => 'Master services agreement (MSA)',
+        'loa'          => 'Letter of Authority (porting numbers)',
     ];
 }
 
@@ -182,7 +183,7 @@ function contract_generate(array $account, array $templatesWithLines, string $ti
         // Numbers moving from another provider: the letter of authority is signed with the agreement.
         if ($quote && order_needs_loa($details = quote_order_details($quote))) {
             $file = sprintf('%s-%d-loa-%s.docx', $reference, count($docs) + 1, bin2hex(random_bytes(4)));
-            docx_create("$dir/$file", order_loa_paragraphs($account, $details, $reference, $signerName));
+            loa_generate($account, $details, "$dir/$file");
             $docs[] = ['title' => 'Letter of Authority', 'file' => $file, 'kind' => 'loa'];
         }
         db_exec('UPDATE contracts SET documents = ? WHERE id = ?', [json_encode($docs), $id]);

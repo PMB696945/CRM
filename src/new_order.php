@@ -56,10 +56,10 @@ function order_line(?array $product, string $serviceType, string $description, i
 function order_address_choices(array $account): array
 {
     $choices = ['head' => ['label' => 'Head office: ' . implode(', ', array_filter([$account['address'], $account['city'], $account['postcode']])),
-        'site_id' => null, 'address' => $account['address'], 'city' => $account['city'], 'postcode' => $account['postcode']]];
+        'site_id' => null, 'address' => $account['address'], 'address2' => $account['address2'], 'city' => $account['city'], 'county' => $account['county'], 'postcode' => $account['postcode']]];
     foreach (db_all('SELECT * FROM sites WHERE account_id = ? ORDER BY name', [$account['id']]) as $s) {
         $choices[(string)$s['id']] = ['label' => $s['name'] . ': ' . implode(', ', array_filter([$s['address'], $s['city'], $s['postcode']])),
-            'site_id' => (int)$s['id'], 'address' => $s['address'], 'city' => $s['city'], 'postcode' => $s['postcode']];
+            'site_id' => (int)$s['id'], 'address' => $s['address'], 'address2' => $s['address2'], 'city' => $s['city'], 'county' => $s['county'], 'postcode' => $s['postcode']];
     }
     return $choices;
 }
@@ -77,7 +77,8 @@ function order_parse_address(array $account, array $post, string $prefix, string
         if (!trim((string)$a['postcode'])) {
             $errors[$prefix] = "That address has no postcode. Add it to the customer, or type the $what in.";
         }
-        return ['site_id' => $a['site_id'], 'address' => (string)$a['address'], 'city' => (string)$a['city'], 'postcode' => (string)$a['postcode']];
+        return ['site_id' => $a['site_id'], 'address' => (string)$a['address'], 'address2' => (string)$a['address2'], 'city' => (string)$a['city'],
+            'county' => (string)$a['county'], 'postcode' => (string)$a['postcode']];
     }
     $a = ['site_id' => null];
     foreach (['address' => 'first line', 'city' => 'town', 'postcode' => 'postcode'] as $k => $label) {
@@ -95,7 +96,7 @@ function order_parse_address(array $account, array $post, string $prefix, string
 
 function order_address_text(?array $a): string
 {
-    return $a ? implode(', ', array_filter([$a['address'] ?? '', $a['city'] ?? '', $a['postcode'] ?? ''], fn($v) => trim((string)$v) !== '')) : '';
+    return $a ? implode(', ', array_filter([$a['address'] ?? '', $a['address2'] ?? '', $a['city'] ?? '', $a['postcode'] ?? ''], fn($v) => trim((string)$v) !== '')) : '';
 }
 
 /** Phone numbers typed one per line (or separated by commas), tidied. Returns [numbers, bad ones]. */
@@ -378,6 +379,9 @@ function new_order_create(array $account, array $details, array $lines, array $f
             $details['bill_needed'] = false;
         }
     }
+    if (order_needs_loa($details)) {
+        $details['loa_document_id'] = loa_store($account, $details);
+    }
     db_exec('INSERT INTO quotes (account_id, title, valid_until, order_details, created_by) VALUES (?, ?, ?, ?, ?)', [
         $account['id'], mb_substr($details['title'], 0, 200), date('Y-m-d', strtotime('+' . (int)(setting('quote_validity_days') ?: 30) . ' days')),
         json_encode($details), current_user()['id'] ?? null,
@@ -401,34 +405,6 @@ function order_needs_loa(?array $details): bool
     return $details && (($details['type'] === 'sip_trunk' && ($details['mode'] ?? '') === 'port') || ($details['type'] === 'hosted_pbx' && ($details['mode'] ?? '') === 'migrate'));
 }
 
-/** The letter of authority for porting numbers, as Word document paragraphs. */
-function order_loa_paragraphs(array $account, array $details, string $contractRef, string $signer): array
-{
-    $us = company('name', config('app_name'));
-    $address = order_address_text($details['type'] === 'hosted_pbx' ? ($details['current_address'] ?? null) : ($details['address'] ?? null))
-        ?: implode(', ', array_filter([$account['address'], $account['city'], $account['postcode']]));
-    $p = [
-        ['Letter of Authority', 'Title'],
-        'Date: ' . date('j F Y'),
-        'To: ' . ($details['provider'] ?? 'the current provider'),
-        "We, {$account['name']}" . ($account['company_number'] ? " (company number {$account['company_number']})" : '') . ', are the account holder for the telephone numbers below, '
-            . "installed at $address.",
-        "We authorise $us, and the carriers it works with, to act on our behalf to transfer (port) these numbers from "
-            . ($details['provider'] ?? 'our current provider') . " to $us, and to obtain any information about them needed to do so.",
-        ['Numbers to transfer', 'Heading1'],
-    ];
-    foreach ($details['numbers'] ?? [] as $n) {
-        $p[] = $n;
-    }
-    $p[] = ['Account holder', 'Heading1'];
-    $p[] = 'Company: ' . $account['name'];
-    $p[] = 'Address: ' . $address;
-    $p[] = 'Authorised by: ' . $signer;
-    $p[] = 'Signed electronically as part of agreement ' . $contractRef . '. The signature, date and time are recorded on the signing certificate.';
-    $p[] = 'We understand that services on these numbers with the current provider may end when the transfer completes, and that any charges or notice due to them remain ours.';
-    return $p;
-}
-
 function new_order_controller(): void
 {
     require_permission('sales.edit');
@@ -436,6 +412,24 @@ function new_order_controller(): void
     $type = (string)($_GET['type'] ?? ($_POST['service_type'] ?? ''));
     $errors = [];
     $values = $_POST;
+    if ($account && is_post() && query('action') === 'loa') {
+        // The letter of authority from what's on the form so far, without placing the order.
+        verify_csrf();
+        [$details, , $errors] = new_order_parse($account, $_POST, []);
+        $errors = array_intersect_key($errors, array_flip(['sip_addr', 'sip_numbers', 'sip_provider', 'pbx_addr', 'pbx_numbers', 'pbx_provider']));
+        if (!order_needs_loa($details)) {
+            $errors['_'] = 'Choose porting (SIP trunk) or migrating (Hosted PBX) and enter the numbers first.';
+        }
+        if ($errors) {
+            page('error', ['message' => 'The letter of authority needs: ' . implode(' ', $errors) . ' Close this tab, fill them in and try again.'], 'Letter of Authority');
+            return;
+        }
+        $tmp = storage_path('tmp') . '/loa-' . bin2hex(random_bytes(6)) . '.docx';
+        loa_generate($account, $details, $tmp);
+        register_shutdown_function(fn() => @unlink($tmp));
+        audit('loa', 'Letter of Authority created for ' . implode(', ', $details['numbers']), 'accounts', (int)$account['id'], null, null, (int)$account['id']);
+        send_download($tmp, loa_file_name($account, $details));
+    }
     if ($account && is_post()) {
         verify_csrf();
         [$details, $lines, $errors, $notes] = new_order_parse($account, $_POST, $_FILES);

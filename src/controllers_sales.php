@@ -356,9 +356,17 @@ function contract_templates_controller(): void
 
     if ($action === 'example') {
         $path = storage_path('tmp') . '/example-' . bin2hex(random_bytes(4)) . '.docx';
-        query('kind') === 'summary' ? docx_example_summary_template($path) : docx_example_template($path);
+        $kind = (string)query('kind');
+        $kind === 'summary' ? docx_example_summary_template($path) : ($kind === 'loa' ? loa_example_template($path) : docx_example_template($path));
         register_shutdown_function(fn() => @unlink($path));
-        send_download($path, query('kind') === 'summary' ? 'Example Contract Summary.docx' : 'Example contract template.docx');
+        send_download($path, ['summary' => 'Example Contract Summary.docx', 'loa' => 'Example Letter of Authority.docx'][$kind] ?? 'Example contract template.docx');
+    }
+    if ($action === 'signature') {
+        $file = loa_signature_file() ?? not_found();
+        header('Content-Type: ' . (str_ends_with($file, '.png') ? 'image/png' : 'image/jpeg'));
+        header('Cache-Control: private, no-store');
+        readfile($file);
+        exit;
     }
     if ($action === 'download' && $id) {
         $t = db_one('SELECT * FROM contract_templates WHERE id = ?', [$id]) ?? not_found();
@@ -391,9 +399,16 @@ function contract_templates_controller(): void
                     [$name, $type, mb_substr(basename($file['name']), 0, 255), $stored, current_user()['id'], trim((string)($_POST['notes'] ?? '')) ?: null]);
                 audit('template_upload', "Contract template \"$name\" uploaded ($type)", 'contract_templates', (int)db()->lastInsertId());
                 $fields = docx_placeholders(storage_path('templates') . '/' . $stored);
-                $unknown = array_diff($fields, array_keys(contract_merge_field_help()));
+                $unknown = array_diff($fields, array_keys($type === 'loa' ? loa_merge_field_help() : contract_merge_field_help()));
                 flash('Template uploaded' . ($fields ? ' with ' . count($fields) . ' merge field(s)' : ' (no {{merge_fields}} found)') . '.'
                     . ($unknown ? ' Unrecognised fields left as-is: {{' . implode('}}, {{', $unknown) . '}}.' : ''));
+            } catch (IntegrationException $e) {
+                flash($e->getMessage(), 'error');
+            }
+        } elseif ($action === 'loa_settings') {
+            try {
+                loa_save_settings($_POST, $_FILES['signature'] ?? null);
+                flash('Letter of Authority details saved.');
             } catch (IntegrationException $e) {
                 flash($e->getMessage(), 'error');
             }
