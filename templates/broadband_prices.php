@@ -13,9 +13,9 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
     $margin = bb_margin($p['monthly_price'] ?? null, $p['cost_price'] ?? null);
     $dealerMargin = bb_margin($p['dealer_price'] ?? null, $p['cost_price'] ?? null);
     $html = '<tr data-bb-row' . (isset($p['active']) && !$p['active'] ? ' class="muted"' : '') . '>'
-        . '<td>' . $in('name', $p['name'] ?? '', 'w-full', 'aria-label="Product" placeholder="' . ($key === 'new' ? 'New product name' : '') . '"')
-        . '<div class="small">' . $in('sku', $p['sku'] ?? '', 'w-full', 'aria-label="SKU" placeholder="SKU"') . '</div></td>'
-        . '<td>' . $in('supplier_product_ids', $p['supplier_product_ids'] ?? '', 'w-full', 'aria-label="Supplier product IDs" placeholder="e.g. 34350"') . '</td>'
+        . '<td>' . $in('sku', $p['sku'] ?? '', 'bb-sku', 'aria-label="SKU" placeholder="SKU" title="' . h((string)($p['sku'] ?? '')) . '"') . '</td>'
+        . '<td>' . $in('name', $p['name'] ?? '', 'bb-name', 'aria-label="Product" placeholder="' . ($key === 'new' ? 'New product name' : '') . '" title="' . h((string)($p['name'] ?? '')) . '"') . '</td>'
+        . '<td>' . $in('supplier_product_ids', $p['supplier_product_ids'] ?? '', 'bb-ids', 'aria-label="Supplier product IDs" placeholder="e.g. 34350" title="' . h((string)($p['supplier_product_ids'] ?? '')) . '"') . '</td>'
         . '<td>' . $termSel . '</td>';
     if ($canCost) {
         $html .= '<td class="num">' . ($canEditCost ? $in('cost_price', $money($p['cost_price'] ?? null), 'num', 'inputmode="decimal" data-bb="buy" aria-label="Buy price"')
@@ -28,7 +28,7 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
         . ($canCost ? '<td class="num" data-bb-dealer-margin>' . ($dealerMargin === null ? '—' : number_format($dealerMargin * 100, 1) . '%') . '</td>' : '')
         . '<td class="num">' . $in('dealer_setup_fee', $money($p['dealer_setup_fee'] ?? null), 'num', 'inputmode="decimal" aria-label="Dealer setup fee"') . '</td>'
         . '<td class="center"><input type="checkbox" name="' . $n('active') . '" value="1"' . (($p['active'] ?? 1) ? ' checked' : '') . ' aria-label="Active"></td>'
-        . '<td>' . ($key !== 'new' ? '<a class="small" href="' . h(url('products', ['action' => 'view', 'id' => $p['id']])) . '">Open</a>' : '') . '</td></tr>';
+        . '<td>' . ($key !== 'new' ? '<a href="' . h(url('products', ['action' => 'view', 'id' => $p['id']])) . '" title="Open the product" aria-label="Open the product">↗</a>' : '') . '</td></tr>';
     return $html;
 };
 ?>
@@ -46,15 +46,15 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
   <?= csrf_field() ?>
   <div class="table-wrap"><table class="table compact bb-prices">
     <thead><tr>
-      <th>Product / SKU</th><th>Supplier product IDs</th><th>Term</th>
+      <th>SKU</th><th>Product</th><th title="Supplier product IDs">Supplier IDs</th><th>Term</th>
       <?php if ($canCost): ?><th class="num">Buy</th><?php endif; ?>
-      <th class="num">Sell</th><?php if ($canCost): ?><th class="num">Margin</th><?php endif; ?><th class="num">Setup fee</th>
-      <th class="num">Dealer</th><?php if ($canCost): ?><th class="num">Our margin on dealer</th><?php endif; ?><th class="num">Dealer setup</th>
+      <th class="num">Sell</th><?php if ($canCost): ?><th class="num" title="(sell − buy) ÷ sell">Margin</th><?php endif; ?><th class="num">Setup</th>
+      <th class="num">Dealer</th><?php if ($canCost): ?><th class="num" title="Our margin on the dealer price: (dealer − buy) ÷ dealer">Dlr margin</th><?php endif; ?><th class="num">Dlr setup</th>
       <th class="center">Active</th><th></th>
     </tr></thead>
     <tbody>
       <?php foreach ($products as $p): ?><?= $row((string)$p['id'], $p) ?><?php endforeach; ?>
-      <tr class="bb-new-label"><td colspan="13" class="small muted">Add a product: fill in the row below (SKU, name and sell price are needed).</td></tr>
+      <tr class="bb-new-label"><td colspan="14" class="small muted">Add a product: fill in the row below (SKU, name and sell price are needed).</td></tr>
       <?= $row('new', ['term_months' => 24, 'active' => 1]) ?>
     </tbody>
   </table></div>

@@ -336,10 +336,17 @@
   .table tbody tr:hover td { @apply bg-gray-50 dark:bg-white/[0.02]; }
   .table .num { @apply text-right tabular-nums; }
   .table.compact th, .table.compact td { @apply px-4 py-2.5; }
-  .bb-prices td { @apply px-2! py-1.5! align-top; }
-  .bb-prices input:not([type=checkbox]), .bb-prices select { @apply min-w-0 px-2 py-1 text-theme-sm; }
-  .bb-prices input.num { @apply w-20 text-right; }
-  .bb-prices td:first-child { @apply min-w-48; }
+  /* Broadband prices: compact, so every column fits on one row */
+  .bb-prices { @apply text-theme-xs; }
+  .bb-prices th { @apply px-1! py-2! text-[11px]! whitespace-nowrap; }
+  .bb-prices td { @apply px-1! py-1! align-middle whitespace-nowrap; }
+  .bb-prices input:not([type=checkbox]), .bb-prices select { @apply h-7! min-w-0 rounded-md! px-1.5! py-0! text-theme-xs! shadow-none!; }
+  .bb-prices select { @apply w-[5.5rem]! pr-5! bg-[right_0.15rem_center]!; }
+  .bb-prices input.num { @apply w-[3.9rem]! text-right; }
+  .bb-prices input.bb-sku { @apply w-[6.75rem]!; }
+  .bb-prices input.bb-name { @apply w-[11.5rem]! 2xl:w-[16rem]!; }
+  .bb-prices input.bb-ids { @apply w-[5.75rem]!; }
+  .bb-prices [data-bb-margin], .bb-prices [data-bb-dealer-margin] { @apply text-gray-500 dark:text-gray-400; }
   .row-link { @apply whitespace-nowrap font-medium text-gray-800 hover:text-brand-500 dark:text-white/90 dark:hover:text-brand-400; }
   .empty-row { @apply py-10! text-center; }
   .row-done td { @apply opacity-60; }
