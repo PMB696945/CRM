@@ -53,7 +53,19 @@ function quotes_controller(): void
                 }
                 $values = $data + $values;
                 $billAccount = db_one('SELECT * FROM accounts WHERE id = ?', [(int)($data['account_id'] ?? 0)]);
-                $values['bill_to_dealer'] = $billAccount && bill_to_dealer_from($billAccount, $_POST) ? 1 : 0;
+                if ($billAccount && bill_to_per_product($billAccount)) {
+                    // Chosen on each line.
+                    foreach ($lines as $i => $l) {
+                        if (!in_array($l['bill_to'], ['dealer', 'customer'], true)) {
+                            $errors['_lines'] = trim(($errors['_lines'] ?? '') . ' Choose who\'s billed for line ' . ($i + 1) . ' (' . $l['description'] . ').');
+                        }
+                        $lines[$i]['bill_to_dealer'] = $l['bill_to'] === 'dealer' ? 1 : 0;
+                    }
+                    $values['bill_to_dealer'] = $lines && !array_filter($lines, fn($l) => !$l['bill_to_dealer']) ? 1 : 0;
+                } else {
+                    $values['bill_to_dealer'] = $billAccount && bill_to_dealer_from($billAccount, $_POST) ? 1 : 0;
+                    $lines = array_map(fn($l) => ['bill_to_dealer' => $values['bill_to_dealer']] + $l, $lines);
+                }
                 if (!$errors) {
                     if ($quote) {
                         db_exec('UPDATE quotes SET account_id = ?, title = ?, valid_until = ?, opportunity_id = ?, intro = ?, bill_to_dealer = ? WHERE id = ?',

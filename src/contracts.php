@@ -353,7 +353,7 @@ function contract_create_services(array $contract): int
                 'identifier' => 'TBC – ' . $l['description'] . ((int)$l['quantity'] > 1 ? " #$n" : ''),
                 'carrier' => null, 'status' => 'pending', 'monthly_price' => $l['monthly_price'], 'cost_price' => $l['cost_price'] ?? null, 'setup_fee' => $l['setup_fee'],
                 'start_date' => null, 'term_months' => $l['term_months'], 'contract_end_date' => null, 'install_address' => null,
-                'notes' => "From contract {$contract['reference']}", 'bill_to_dealer' => $toDealer,
+                'notes' => "From contract {$contract['reference']}", 'bill_to_dealer' => (int)($l['bill_to_dealer'] ?? $toDealer),
             ]);
             $created++;
         }

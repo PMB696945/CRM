@@ -50,6 +50,8 @@ function quote_parse_lines(array $post): array
             'monthly_price' => round((float)str_replace([',', '£'], '', $get('line_monthly_price')), 2),
             'setup_fee'     => round((float)str_replace([',', '£'], '', $get('line_setup_fee')), 2),
             'term_months'   => (int)$get('line_term_months'),
+            // Who's billed for this line, when chosen per line (a product-specific customer under a dealer).
+            'bill_to'       => $get('line_bill_to'),
         ];
         if ($line['description'] === '') {
             $errors[] = "Line $row needs a description.";
@@ -94,10 +96,10 @@ function quote_save_lines(int $quoteId, array $lines): void
     foreach (array_values($lines) as $i => $l) {
         // The product's code and name now, kept with the line's prices if the product changes or is deleted later.
         $product = $l['product_id'] ? db_one('SELECT sku, name FROM products WHERE id = ?', [$l['product_id']]) : null;
-        db_exec('INSERT INTO quote_lines (quote_id, product_id, product_sku, product_name, service_type, description, quantity, monthly_price, cost_price, setup_fee, term_months, sort)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$quoteId, $l['product_id'], $product['sku'] ?? ($l['product_sku'] ?? null), $product['name'] ?? ($l['product_name'] ?? null),
+        db_exec('INSERT INTO quote_lines (quote_id, product_id, product_sku, product_name, service_type, description, quantity, monthly_price, cost_price, setup_fee, term_months, bill_to_dealer, sort)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$quoteId, $l['product_id'], $product['sku'] ?? ($l['product_sku'] ?? null), $product['name'] ?? ($l['product_name'] ?? null),
             $l['service_type'], $l['description'], $l['quantity'], $l['monthly_price'],
-            product_monthly_cost($l['product_id']), $l['setup_fee'], $l['term_months'], $i]);
+            product_monthly_cost($l['product_id']), $l['setup_fee'], $l['term_months'], !empty($l['bill_to_dealer']) ? 1 : 0, $i]);
     }
 }
 

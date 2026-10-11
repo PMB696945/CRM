@@ -1176,4 +1176,12 @@ return [
         db()->exec('UPDATE services s JOIN accounts a ON a.id = s.account_id SET s.abillity_site_id = a.abillity_site_id
             WHERE s.abillity_charge_id IS NOT NULL AND s.abillity_site_id IS NULL');
     },
+    43 => function (): void {
+        // Customers under a dealer can be billed per product ("product specific"): each quote line says who's billed.
+        db()->exec("ALTER TABLE accounts MODIFY parent_relationship ENUM('referral','billed_via_dealer','product_specific') NULL");
+        if (!column_exists('quote_lines', 'bill_to_dealer')) {
+            db()->exec('ALTER TABLE quote_lines ADD COLUMN bill_to_dealer TINYINT(1) NOT NULL DEFAULT 0');
+            db()->exec('UPDATE quote_lines l JOIN quotes q ON q.id = l.quote_id SET l.bill_to_dealer = q.bill_to_dealer');
+        }
+    },
 ];

@@ -37,7 +37,10 @@ $cancel = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : (
       <label for="q_intro">Message to the customer</label>
       <textarea id="q_intro" name="intro" rows="3" placeholder="Shown at the top of the quote page"><?= h($values['intro']) ?></textarea>
     </div>
-    <?php if ($accountId && ($billAccount = db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]))): ?>
+    <?php $billAccount = $accountId ? db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]) : null; $perLine = $billAccount && bill_to_per_product($billAccount); ?>
+    <?php if ($perLine): ?>
+      <div class="field wide"><label>Billing</label><div class="help"><?= h($billAccount['name']) ?> is billed per product: choose <b>Bill to</b> on each line below, the customer or their dealer, <?= h(account_dealer($billAccount)['name']) ?>.</div></div>
+    <?php elseif ($billAccount): ?>
       <?php render('_bill_to', ['account' => $billAccount, 'toDealer' => isset($values['bill_to_dealer']) ? (bool)$values['bill_to_dealer'] : bill_to_dealer_default($billAccount)]); ?>
     <?php endif; ?>
   </section>
@@ -47,7 +50,7 @@ $cancel = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : (
     <?php if (!empty($errors['_lines'])): ?><div class="flash flash-error"><?= h($errors['_lines']) ?></div><?php endif; ?>
     <div class="table-wrap">
       <table class="table lines-table">
-        <thead><tr><th>Product</th><th>Type</th><th>Description</th><th class="num">Qty</th><th class="num">Monthly £</th><th class="num">One-off £</th><th class="num">Term</th><th></th></tr></thead>
+        <thead><tr><th>Product</th><th>Type</th><?php if ($perLine): ?><th>Bill to</th><?php endif; ?><th>Description</th><th class="num">Qty</th><th class="num">Monthly £</th><th class="num">One-off £</th><th class="num">Term</th><th></th></tr></thead>
         <tbody data-lines>
         <?php foreach ($rows as $l): ?>
           <tr>
@@ -60,6 +63,10 @@ $cancel = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : (
             <td><select name="line_service_type[]" aria-label="Service type">
               <?php foreach (SERVICE_TYPES as $k => $label): ?><option value="<?= h($k) ?>" <?= $l['service_type'] === $k ? 'selected' : '' ?>><?= h($label) ?></option><?php endforeach; ?>
             </select></td>
+            <?php if ($perLine): $bt = $l['bill_to'] ?? (isset($l['bill_to_dealer']) && isset($l['id']) ? ($l['bill_to_dealer'] ? 'dealer' : 'customer') : ''); ?>
+            <td><select name="line_bill_to[]" aria-label="Bill to" required style="min-width:8rem"><option value="">Choose…</option>
+              <option value="customer" <?= $bt === 'customer' ? 'selected' : '' ?>>Customer</option><option value="dealer" <?= $bt === 'dealer' ? 'selected' : '' ?>>Dealer</option></select></td>
+            <?php endif; ?>
             <td><input name="line_description[]" value="<?= h($l['description']) ?>" aria-label="Description" placeholder="Description"></td>
             <td><input name="line_quantity[]" type="number" min="1" value="<?= (int)$l['quantity'] ?>" class="w-20" aria-label="Quantity"></td>
             <td><input name="line_monthly_price[]" type="number" step="0.01" min="0" value="<?= h($l['monthly_price']) ?>" class="w-28" aria-label="Monthly price"></td>

@@ -12,7 +12,7 @@ $activeContract = array_values(array_filter($contracts, fn($c) => !in_array($c['
     <p class="dealer-line">For <a href="<?= h(url('accounts', ['action' => 'view', 'id' => $account['id']])) ?>"><?= h($account['name']) ?></a>
       <?php if ($account['parent_id']): ?> · via dealer <?= h(db_value('SELECT name FROM accounts WHERE id = ?', [$account['parent_id']])) ?><?php endif; ?>
       <?php if ($quote['valid_until']): ?> · valid until <?= h(fmt_date($quote['valid_until'])) ?><?php endif; ?>
-      <?php if (account_dealer($account)): ?> · <b>Billed to: <?= h(bill_to_label($account, (bool)$quote['bill_to_dealer'])) ?></b><?php endif; ?></p>
+      <?php if (account_dealer($account)): ?> · <b>Billed to: <?= h(quote_bill_to_label($account, $lines)) ?></b><?php endif; ?></p>
   </div>
   <div class="actions">
     <a class="btn btn-ghost" href="<?= h($act('pdf')) ?>" target="_blank" rel="noopener">PDF</a>

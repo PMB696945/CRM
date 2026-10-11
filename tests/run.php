@@ -987,6 +987,21 @@ test('dealer billing: an order for a customer under a dealer is billed to the cu
     update_row('services', (int)$svc['id'], ['bill_to_dealer' => 0]);
     try { abillity_push_service((int)$svc['id']); } catch (AbillityException) {}
     ok(str_contains((string)db_value('SELECT abillity_error FROM services WHERE id = ?', [$svc['id']]), 'billing has moved'));
+    // Product specific: no default, so each order must say; a quote can split its lines between the two.
+    db_exec("UPDATE accounts SET parent_relationship = 'product_specific' WHERE id = ?", [$custId]);
+    $mixed = db_one('SELECT * FROM accounts WHERE id = ?', [$custId]);
+    ok(bill_to_per_product($mixed) && !bill_to_dealer_default($mixed));
+    ok(str_contains(new_order_parse($mixed, $post)[2]['bill_to'] ?? '', 'Choose who this order is billed to'));
+    eq([], new_order_parse($mixed, $post + ['bill_to' => 'customer'])[2]);
+    db_exec("INSERT INTO quotes (account_id, title, reference) VALUES (?, 'Split quote', 'Q-SPLIT')", [$custId]);
+    $split = (int)db()->lastInsertId();
+    quote_save_lines($split, [
+        ['product_id' => $tariff, 'service_type' => 'mobile', 'description' => 'SIM via dealer', 'quantity' => 1, 'monthly_price' => 12, 'setup_fee' => 0, 'term_months' => 24, 'bill_to_dealer' => 1],
+        ['product_id' => null, 'service_type' => 'broadband', 'description' => 'Broadband direct', 'quantity' => 1, 'monthly_price' => 30, 'setup_fee' => 0, 'term_months' => 24, 'bill_to_dealer' => 0],
+    ]);
+    eq('Split: 1 line to the dealer, 1 to the customer', quote_bill_to_label($mixed, quote_lines($split)));
+    contract_create_services(['quote_id' => $split, 'account_id' => $custId, 'reference' => 'CON-SPLIT']);
+    eq(['SIM via dealer' => '1', 'Broadband direct' => '0'], array_column(db_all("SELECT REPLACE(identifier, 'TBC – ', '') AS d, bill_to_dealer FROM services WHERE notes = 'From contract CON-SPLIT'"), 'bill_to_dealer', 'd'));
     // A customer without a dealer can't have a dealer-billed service.
     $own = insert_row('services', ['account_id' => $direct['id'], 'identifier' => 'DIRECT-1', 'status' => 'pending', 'bill_to_dealer' => 1]);
     eq('0', (string)db_value('SELECT bill_to_dealer FROM services WHERE id = ?', [$own]));

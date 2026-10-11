@@ -68,7 +68,8 @@ $levels = $product['care_levels'] ?: array_keys(GIACOM_CARE_LEVELS);
   <?= $f('bb_password', 'Password', 'text', 'Saved with Giacom only. Give it to the customer or put it on the router.', true) ?>
   <div class="field wide"><div class="help">Full username sent to Giacom: <b data-full-username data-suffix="<?= h($values['bb_suffix']) ?>" data-realm="<?= h($values['realm']) ?>"><?= h(giacom_full_username($values['bb_username'] ?: 'username', $values['bb_suffix'], $values['realm'] ?: 'realm')) ?></b>
     <br>The part after the username is set for your Giacom account<?= can('settings.manage') ? ' under <a href="' . h(url('giacom', ['action' => 'settings'])) . '">Admin → Giacom</a>' : '' ?>.</div></div>
-  <?php render('_bill_to', ['account' => $account, 'toDealer' => $values['bill_to'] === 'dealer']); ?>
+  <?php render('_bill_to', ['account' => $account, 'toDealer' => $values['bill_to'] === '' ? null : $values['bill_to'] === 'dealer']); ?>
+  <?php if (!empty($errors['bill_to'])): ?><div class="field wide has-error"><div class="error"><?= h($errors['bill_to']) ?></div></div><?php endif; ?>
   <?= $f('client_ref', 'Order reference (optional)', 'text', 'Giacom\'s reference for this order, e.g. a PO or quote reference. Leave blank to use the account number (' . $account['account_number'] . ')') ?>
 
   <div class="form-section wide"><h2>Customer</h2><p class="help">The end user Giacom registers the service to. Filled in from the main contact.</p></div>

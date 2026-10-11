@@ -1326,7 +1326,7 @@ function giacom_controller(): void
                 'site_title' => $siteTitle, 'site_forename' => $siteForename, 'site_surname' => $siteSurname,
                 'site_telephone' => (string)(($siteContact['phone'] ?? '') ?: ($siteContact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
                 'site_email' => (string)(($siteContact['email'] ?? '') ?: ($contact['email'] ?? '') ?: ($account['email'] ?? '')), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
-                'send_confirmation' => '1', 'ip_option' => 'dynamic', 'bill_to' => bill_to_dealer_default($account) ? 'dealer' : 'customer',
+                'send_confirmation' => '1', 'ip_option' => 'dynamic', 'bill_to' => bill_to_per_product($account) ? '' : (bill_to_dealer_default($account) ? 'dealer' : 'customer'),
             ];
             $errors = [];
             if (is_post()) {
@@ -1335,7 +1335,11 @@ function giacom_controller(): void
                     $values[$k] = trim((string)($_POST[$k] ?? ''));
                 }
                 $values['order_type'] = $values['order_type'] === 'migrate' ? 'migrate' : 'provide';
-                $values['bill_to'] = bill_to_dealer_from($account, $values) ? 'dealer' : 'customer';
+                if ($missing = bill_to_missing($account, $values)) {
+                    $errors['bill_to'] = $missing;
+                } else {
+                    $values['bill_to'] = bill_to_dealer_from($account, $values) ? 'dealer' : 'customer';
+                }
                 $values['site_visit_reason'] = giacom_visit_at_least(giacom_visit_code($values['site_visit_reason']) ?? 'NO_SITE_VISIT', giacom_min_visit($result, $values['order_type']));
                 if (!empty($_POST['refresh'])) {
                     // The install type changed, so Giacom was asked again: start from its earliest date for this visit.

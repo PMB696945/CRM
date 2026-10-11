@@ -17,7 +17,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
     <h1><?= h($account['name']) ?> <?= badge($account['status']) ?> <?= badge($account['type']) ?><?= $account['is_dealer'] ? ' <span class="badge badge-dealer">Dealer</span>' : '' ?><?= $supplier ? ' <span class="badge">Supplier</span>' : '' ?></h1>
     <?php if ($account['parent_id']): ?>
       <p class="dealer-line">
-        <?= $account['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referred by dealer' ?>
+        <?= ['billed_via_dealer' => 'Billed via dealer', 'product_specific' => 'Billing chosen per product'][$account['parent_relationship'] ?? ''] ?? 'Referred by dealer' ?>
         <?= display_value($entity, 'parent_id', $account) ?>
         <?php if ($account['msa_covered']): ?> · <span class="badge badge-msa">Covered by dealer's MSA</span><?php endif; ?>
       </p>
@@ -425,7 +425,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
             <tr>
               <td><a class="row-link" href="<?= h(url('accounts', ['action' => 'view', 'id' => $c['id']])) ?>"><?= h($c['name']) ?></a> <span class="muted"><?= h($c['account_number']) ?></span></td>
               <td><?= badge($c['status']) ?></td>
-              <td><?= $c['parent_relationship'] === 'billed_via_dealer' ? 'Billed via dealer' : 'Referral' ?></td>
+              <td><?= ['billed_via_dealer' => 'Billed via dealer', 'product_specific' => 'Per product'][$c['parent_relationship'] ?? ''] ?? 'Referral' ?></td>
               <td><?= $c['msa_covered'] ? '✔' : '<span class="muted">—</span>' ?></td>
               <?php if (can('revenue.view')): ?><td class="num"><?= h(money($c['_mrr'] ?? 0)) ?></td><?php endif; ?>
             </tr>

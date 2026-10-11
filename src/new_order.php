@@ -26,13 +26,36 @@ function bill_to_dealer_default(array $account): bool
     return ($account['parent_relationship'] ?? null) === 'billed_via_dealer' && account_dealer($account) !== null;
 }
 
+/** Is who's billed chosen on each order and service for this customer (some products billed via the dealer, some direct)? */
+function bill_to_per_product(array $account): bool
+{
+    return ($account['parent_relationship'] ?? null) === 'product_specific' && account_dealer($account) !== null;
+}
+
 /** The bill-to choice from a form ('dealer' or 'customer'); only a customer with a dealer can be billed via them. */
 function bill_to_dealer_from(array $account, array $post): bool
 {
     if (!account_dealer($account)) {
         return false;
     }
-    return isset($post['bill_to']) ? $post['bill_to'] === 'dealer' : bill_to_dealer_default($account);
+    return in_array($post['bill_to'] ?? '', ['dealer', 'customer'], true) ? $post['bill_to'] === 'dealer' : bill_to_dealer_default($account);
+}
+
+/** For a product-specific customer, the form must say who's billed. Returns an error, or null. */
+function bill_to_missing(array $account, array $post): ?string
+{
+    return bill_to_per_product($account) && !in_array($post['bill_to'] ?? '', ['dealer', 'customer'], true)
+        ? 'Choose who this order is billed to: ' . $account['name'] . ' or their dealer.' : null;
+}
+
+/** Who a quote's lines are billed to, in words (they can be split for a product-specific customer). */
+function quote_bill_to_label(array $account, array $lines): string
+{
+    $toDealer = count(array_filter($lines, fn($l) => !empty($l['bill_to_dealer'])));
+    if (!$lines || $toDealer === 0 || $toDealer === count($lines)) {
+        return bill_to_label($account, $lines && $toDealer > 0);
+    }
+    return 'Split: ' . $toDealer . ' line' . ($toDealer === 1 ? '' : 's') . ' to the dealer, ' . (count($lines) - $toDealer) . ' to the customer';
 }
 
 /** Who a record is billed to, in words. */
@@ -191,6 +214,9 @@ function new_order_parse(array $account, array $post, array $files = []): array
     $lines = [];
     $missing = [];
     $details = ['type' => $type, 'notes' => trim((string)($post['notes'] ?? '')), 'bill_to_dealer' => bill_to_dealer_from($account, $post)];
+    if ($type !== '' && ($billProblem = bill_to_missing($account, $post))) {
+        $errors['bill_to'] = $billProblem;
+    }
     $price = function (string $itemType, string $category, string $description, int $qty, bool $optional = false) use (&$lines, &$missing): void {
         if ($qty < 1) {
             return;
@@ -416,7 +442,7 @@ function new_order_create(array $account, array $details, array $lines, array $f
     ]);
     $qid = (int)db()->lastInsertId();
     db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
-    quote_save_lines($qid, $lines);
+    quote_save_lines($qid, array_map(fn($l) => ['bill_to_dealer' => !empty($details['bill_to_dealer']) ? 1 : 0] + $l, $lines));
     audit('create', 'Quote ' . sprintf('Q-%06d', $qid) . ' created from the order form: ' . $details['title'], 'quotes', $qid, null, null, (int)$account['id']);
     return $qid;
 }

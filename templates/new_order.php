@@ -194,7 +194,8 @@ $mobileRow = function (array $r = []) use ($sel, $tariffs): string {
   </fieldset>
 
   <fieldset class="card form-grid" data-order-for="leased_line mobile sip_trunk hosted_pbx hardware" hidden>
-    <?php render('_bill_to', ['account' => $account, 'toDealer' => isset($values['bill_to']) ? $values['bill_to'] === 'dealer' : bill_to_dealer_default($account)]); ?>
+    <?php render('_bill_to', ['account' => $account, 'toDealer' => in_array($values['bill_to'] ?? '', ['dealer', 'customer'], true) ? $values['bill_to'] === 'dealer'
+        : (bill_to_per_product($account) ? null : bill_to_dealer_default($account))]); ?>
     <div class="field wide"><label for="o_notes">Notes for the onboarding team (optional)</label><textarea id="o_notes" name="notes" rows="3"><?= h($v('notes')) ?></textarea></div>
     <div class="field wide"><div><button class="btn btn-primary">Create quote</button></div>
       <div class="help">Creates a draft quote priced from the price list, with these details attached. Check it, then send it to the customer.</div></div>
