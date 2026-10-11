@@ -123,7 +123,11 @@ const REF_LABELS = [
     'supplier_products' => 'description',
     'purchase_orders'   => 'reference',
     'customer_orders'   => 'reference',
+    'commission_plans'  => 'name',
 ];
+
+const COMMISSION_BASES = ['gross_profit' => '% of gross profit (price − cost)', 'turnover' => '% of turnover (what the customer pays)'];
+const COMMISSION_APPLIES = ['direct' => 'Services we bill the customer for', 'dealer_billed' => 'Services billed to the dealer', 'all' => 'All their customers\' services'];
 
 const SUPPLIER_CATEGORIES = ['network' => 'Network / connectivity', 'hardware' => 'Hardware', 'software' => 'Software & licences',
     'services' => 'Services', 'distributor' => 'Distributor', 'other' => 'Other'];
@@ -175,7 +179,8 @@ function entities(): array
                 'parent_relationship' => ['label' => 'Relationship to dealer', 'type' => 'select', 'options' => ['referral' => 'Referred by the dealer (we bill the customer)', 'billed_via_dealer' => 'Billed via the dealer',
                     'product_specific' => 'Product specific (chosen on each order and service)']],
                 'msa_covered'    => ['label' => "Covered by the dealer's MSA", 'type' => 'bool', 'help' => "Contracts become service schedules under the dealer's master services agreement"],
-                'dealer_commission_pct' => ['label' => 'Dealer commission %', 'type' => 'int', 'min' => 0, 'max' => 100, 'help' => 'For dealers: % of their customers\' MRR'],
+                'commission_plan_id' => ['label' => 'Commission plan', 'type' => 'ref', 'ref' => 'commission_plans', 'show_if' => 'is_dealer=1',
+                    'help' => 'For dealers: how their commission is worked out. Blank: the default plan. Plans are set up under Admin → Commission plans'],
                 'industry'       => ['label' => 'Industry', 'type' => 'text'],
                 'company_number' => ['label' => 'Company no.', 'type' => 'text'],
                 'owner_id'       => ['label' => 'Account manager', 'type' => 'ref', 'ref' => 'users'],
@@ -511,6 +516,28 @@ function entities(): array
     ];
 
     $entities += [
+        'commission_plans' => [
+            'label' => 'Commission plan', 'plural' => 'Commission plans', 'icon' => '💷', 'perm' => 'settings.manage', 'view_perm' => 'settings.manage',
+            'fields' => [
+                'name'       => ['label' => 'Name', 'type' => 'text', 'required' => true, 'help' => 'e.g. 50% of gross profit'],
+                'basis'      => ['label' => 'Worked out on', 'type' => 'select', 'options' => COMMISSION_BASES, 'required' => true, 'default' => 'gross_profit',
+                    'help' => 'Gross profit is each service\'s monthly price less its cost when it was sold'],
+                'rate'       => ['label' => 'Rate', 'type' => 'percent', 'required' => true, 'help' => 'e.g. 50 for half'],
+                'applies_to' => ['label' => 'Counts', 'type' => 'select', 'options' => COMMISSION_APPLIES, 'required' => true, 'default' => 'direct',
+                    'help' => 'Which of the dealer\'s customers\' services earn commission'],
+                'is_default' => ['label' => 'Default plan', 'type' => 'bool', 'help' => 'Used for dealers without a plan of their own'],
+                'active'     => ['label' => 'Available', 'type' => 'bool', 'default' => 1],
+                'notes'      => ['label' => 'Notes', 'type' => 'textarea'],
+            ],
+            'list'    => ['name', 'basis', 'rate', 'applies_to', 'is_default', '_dealers', 'active'],
+            'search'  => ['name', 'notes'],
+            'filters' => ['basis', 'active'],
+            'computed' => [
+                '_dealers' => ['label' => 'Dealers', 'type' => 'int', 'sql' => '(SELECT COUNT(*) FROM accounts a WHERE a.is_dealer = 1 AND (a.commission_plan_id = t.id OR (a.commission_plan_id IS NULL AND t.is_default = 1)))'],
+            ],
+            'default_sort' => ['name', 'asc'],
+        ],
+
         'suppliers' => [
             'label' => 'Supplier', 'plural' => 'Suppliers', 'icon' => '🚚', 'perm' => 'suppliers.edit', 'view_perm' => 'suppliers.view',
             'fields' => [
@@ -744,7 +771,7 @@ function before_save(string $name, array $data, ?array $existing): array
                 $data['msa_covered'] = 0;
             }
             if (array_key_exists('is_dealer', $data) && empty($data['is_dealer'])) {
-                $data['dealer_commission_pct'] = null;
+                $data['commission_plan_id'] = null;
             }
             if (isset($data['status'])) {
                 if ($data['status'] === 'churned' && ($existing['status'] ?? null) !== 'churned') {
@@ -884,6 +911,13 @@ function before_save(string $name, array $data, ?array $existing): array
             }
             if (array_key_exists('product_id', $data) && empty($data['product_id'])) {
                 $data['preferred'] = 0;
+            }
+            break;
+
+        case 'commission_plans':
+            // One default plan: choosing a new one replaces the old.
+            if (!empty($data['is_default'])) {
+                db_exec('UPDATE commission_plans SET is_default = 0 WHERE id <> ?', [$existing['id'] ?? 0]);
             }
             break;
 

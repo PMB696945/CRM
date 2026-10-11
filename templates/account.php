@@ -141,7 +141,7 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
               <?php if ($canEdit && !$canSupplier): ?><br>Only users allowed to add and edit suppliers can change this (Admin → Roles &amp; permissions).<?php endif; ?></div></li>
           <li><label class="check"><input type="checkbox" name="is_dealer" value="1" <?= $account['is_dealer'] ? 'checked' : '' ?> <?= $canEdit ? '' : 'disabled' ?>>
               <strong>Dealer</strong></label>
-            <div class="small muted"><?php if ($account['is_dealer']): ?><a href="<?= h($tabUrl('dealer')) ?>"><?= count($children) ?> customer<?= count($children) === 1 ? '' : 's' ?> under them</a><?= $account['dealer_commission_pct'] !== null ? ' · ' . h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) . '% commission' : '' ?>
+            <div class="small muted"><?php if ($account['is_dealer']): ?><a href="<?= h($tabUrl('dealer')) ?>"><?= count($children) ?> customer<?= count($children) === 1 ? '' : 's' ?> under them</a><?= ($plan = commission_plan_for($account)) ? ' · ' . h($plan['name']) . ' commission' : '' ?>
               <?php else: ?>Ticking this lets other customers sit under them, and adds a Dealer tab<?php endif; ?></div></li>
         </ul>
         <?php if ($canEdit): ?><div style="margin-top:.75rem"><button class="btn btn-sm">Save contact type</button></div><?php endif; ?>
@@ -411,12 +411,14 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
 <?php elseif ($tab === 'dealer'): ?>
     <?php
         $groupMrr = array_sum(array_map(fn($c) => (float)($c['_mrr'] ?? 0), $children));
-        $commission = $account['dealer_commission_pct'] !== null ? $groupMrr * (float)$account['dealer_commission_pct'] / 100 : null; ?>
+        $comm = dealer_commission($account);
+        // A commission on gross profit shows the profit, so it needs permission to see costs.
+        $showComm = can('revenue.view') && $comm['plan'] && ($comm['plan']['basis'] === 'turnover' || can('costs.view')); ?>
     <section class="card">
       <div class="card-head"><h2>Dealer's customers <span class="count"><?= count($children) ?></span></h2>
         <?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'new', 'parent_id' => $id, 'parent_relationship' => 'referral', 'return' => $here])) ?>">+ Add customer under this dealer</a><?php endif; ?></div>
       <?php if (can('revenue.view')): ?><p class="muted">Customers' MRR <b><?= h(money($groupMrr)) ?></b> · with this dealer's own services <b><?= h(money($groupMrr + $mrr)) ?></b>
-        <?php if ($commission !== null): ?> · commission at <?= h(rtrim(rtrim(number_format((float)$account['dealer_commission_pct'], 2), '0'), '.')) ?>%: <b><?= h(money($commission)) ?>/mo</b><?php endif; ?></p><?php endif; ?>
+        </p><?php endif; ?>
       <?php if ($children): ?>
         <div class="table-wrap"><table class="table">
           <thead><tr><th>Customer</th><th>Status</th><th>Relationship</th><th>MSA</th><?php if (can('revenue.view')): ?><th class="num">MRR</th><?php endif; ?></tr></thead>
@@ -433,6 +435,30 @@ $tabUrl = fn(string $t) => url('accounts', ['action' => 'view', 'id' => $id] + (
           </tbody>
         </table></div>
       <?php else: ?><p class="muted">No customers under this dealer yet.</p><?php endif; ?>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>Commission</h2>
+        <?php if ($canEdit): ?><a class="btn btn-sm" href="<?= h(url('accounts', ['action' => 'edit', 'id' => $id, 'return' => $here])) ?>">Change plan</a><?php endif; ?></div>
+      <?php if (!$comm['plan']): ?>
+        <p class="muted">No commission plan. Choose one on the dealer<?= can('settings.manage') ? ', or set up plans under <a href="' . h(url('commission_plans')) . '">Admin → Commission plans</a>' : '' ?>.</p>
+      <?php else: ?>
+        <p><b><?= h($comm['plan']['name']) ?></b><?= $account['commission_plan_id'] ? '' : ' <span class="muted">(the default plan)</span>' ?>
+          <span class="muted">· <?= h(commission_plan_summary($comm['plan'])) ?></span></p>
+        <?php if ($showComm): ?>
+          <p>Estimated commission <b><?= h(money($comm['commission'])) ?>/month</b> on <?= h(money($comm['turnover'])) ?>/month of live services.
+            <span class="muted small">aBILLity works out the payout; this is for reference.</span></p>
+          <?php if ($comm['no_cost']): ?><p class="small text-warning"><?= (int)$comm['no_cost'] ?> service<?= $comm['no_cost'] === 1 ? ' has' : 's have' ?> no cost price, so <?= $comm['no_cost'] === 1 ? 'it isn\'t' : 'they aren\'t' ?> counted. Add the cost on the service to include <?= $comm['no_cost'] === 1 ? 'it' : 'them' ?>.</p><?php endif; ?>
+          <?php if ($comm['customers']): ?>
+          <div class="table-wrap"><table class="table table-compact">
+            <thead><tr><th>Customer</th><th class="num">Services</th><th class="num">Turnover</th><?php if (can('costs.view')): ?><th class="num">Cost</th><th class="num">Gross profit</th><?php endif; ?><th class="num">Commission</th></tr></thead>
+            <tbody><?php foreach ($comm['customers'] as $c): ?><tr>
+              <td><a href="<?= h(url('accounts', ['action' => 'view', 'id' => $c['account_id']])) ?>"><?= h($c['name']) ?></a></td><td class="num"><?= (int)$c['services'] ?></td>
+              <td class="num"><?= h(money($c['turnover'])) ?></td><?php if (can('costs.view')): ?><td class="num"><?= h(money($c['cost'])) ?></td><td class="num"><?= h(money($c['profit'])) ?></td><?php endif; ?>
+              <td class="num"><b><?= h(money($c['commission'])) ?></b></td></tr><?php endforeach; ?></tbody>
+          </table></div>
+          <?php else: ?><p class="muted small">No live services count towards commission yet.</p><?php endif; ?>
+        <?php endif; ?>
+      <?php endif; ?>
     </section>
     <?php render('_dealer_portal', ['account' => $account, 'canEdit' => $canEdit, 'portal' => dealer_portal_summary((int)$account['id'])]); ?>
 

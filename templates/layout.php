@@ -49,6 +49,7 @@ $admin = array_filter([
     'mail_log'   => can('settings.manage') ? ['inbox', 'Email log'] : null,
     'error_log'  => is_super_admin() ? ['shield', 'Error log'] : null,
     'contract_templates' => can('settings.manage') ? ['template', 'Contract templates'] : null,
+    'commission_plans' => can('settings.manage') ? ['pound', 'Commission plans'] : null,
     'xero'       => can('settings.manage') ? ['link', 'Xero'] : null,
     'gocardless' => can('settings.manage') ? ['bank', 'GoCardless'] : null,
     'mailchimp'  => can('settings.manage') ? ['megaphone', 'Mailchimp'] : null,

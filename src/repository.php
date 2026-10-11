@@ -56,6 +56,14 @@ function validate(array $entity, array $input): array
                 $data[$field] = strtolower($raw);
                 break;
 
+            case 'percent':
+                $clean = str_replace(['%', ' '], '', $raw);
+                if (!is_numeric($clean) || (float)$clean < 0 || (float)$clean > 100) {
+                    $errors[$field] = "$label must be between 0 and 100%.";
+                }
+                $data[$field] = round((float)$clean, 2);
+                break;
+
             case 'money':
                 $clean = str_replace([',', '£', ' '], '', $raw);
                 if (!is_numeric($clean) || (float)$clean < 0) {

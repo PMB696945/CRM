@@ -66,6 +66,9 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
           case 'money': ?>
             <input id="<?= h($id) ?>" type="number" step="0.01" min="0" name="<?= h($field) ?>" value="<?= h($value) ?>" <?= !empty($def['required']) ? 'required' : '' ?>>
           <?php break;
+          case 'percent': ?>
+            <input id="<?= h($id) ?>" type="number" step="0.01" min="0" max="100" name="<?= h($field) ?>" value="<?= h($value) ?>" <?= !empty($def['required']) ? 'required' : '' ?>>
+          <?php break;
           case 'int': ?>
             <input id="<?= h($id) ?>" type="number" step="1" name="<?= h($field) ?>" value="<?= h($value) ?>" <?= isset($def['min']) ? 'min="' . (int)$def['min'] . '"' : '' ?> <?= isset($def['max']) ? 'max="' . (int)$def['max'] . '"' : '' ?> <?= !empty($def['required']) ? 'required' : '' ?>>
           <?php break;

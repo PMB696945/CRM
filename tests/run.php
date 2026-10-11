@@ -1007,6 +1007,41 @@ test('dealer billing: an order for a customer under a dealer is billed to the cu
     eq('0', (string)db_value('SELECT bill_to_dealer FROM services WHERE id = ?', [$own]));
 });
 
+test('dealer commission: plans on gross profit or turnover, for the services each plan counts', function () {
+    as_role('super_admin');
+    $gp = (int)db_value("SELECT id FROM commission_plans WHERE basis = 'gross_profit' AND is_default = 1");
+    ok($gp > 0, 'the default plan is 50% of gross profit');
+    $dealerId = create('accounts', ['name' => 'Comms Dealer Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    db_exec('UPDATE accounts SET is_dealer = 1 WHERE id = ?', [$dealerId]);
+    $a = create('accounts', ['name' => 'Alpha Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    $b = create('accounts', ['name' => 'Beta Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    db_exec("UPDATE accounts SET parent_id = ?, parent_relationship = 'product_specific' WHERE id IN (?, ?)", [$dealerId, $a, $b]);
+    $svc = fn($acct, $price, $cost, $toDealer = 0, $status = 'active') => insert_row('services', ['account_id' => $acct, 'identifier' => "C-$acct-$price", 'status' => $status,
+        'monthly_price' => $price, 'cost_price' => $cost, 'bill_to_dealer' => $toDealer]);
+    $svc($a, 40, 25);            // direct: profit 15
+    $svc($a, 30, null);          // direct, no cost: left out of a gross profit plan
+    $svc($b, 50, 30);            // direct: profit 20
+    $svc($b, 100, 60, 1);        // billed to the dealer: not counted on a "direct" plan
+    $svc($b, 99, 1, 0, 'ceased'); // not live
+    $dealer = db_one('SELECT * FROM accounts WHERE id = ?', [$dealerId]);
+    $c = dealer_commission($dealer);
+    eq(['50% of gross profit', 17.5, 35.0, 90.0, 1], [$c['plan']['name'], $c['commission'], $c['profit'], $c['turnover'], $c['no_cost']], '(15 + 20) × 50%');
+    eq(['Alpha Ltd' => 7.5, 'Beta Ltd' => 10.0], array_column($c['customers'], 'commission', 'name'));
+    // A dealer on 10% of turnover: every direct service counts, cost or not.
+    db_exec('UPDATE accounts SET commission_plan_id = (SELECT id FROM commission_plans WHERE name = ?) WHERE id = ?', ['10% of turnover', $dealerId]);
+    $c = dealer_commission(db_one('SELECT * FROM accounts WHERE id = ?', [$dealerId]));
+    eq([12.0, 120.0, 0], [$c['commission'], $c['turnover'], $c['no_cost']], '(40 + 30 + 50) × 10%');
+    // A plan of their own, counting everything; and only one plan is the default.
+    $all = insert_row('commission_plans', ['name' => '20% of turnover, all services', 'basis' => 'turnover', 'rate' => 20, 'applies_to' => 'all', 'is_default' => 1, 'active' => 1]);
+    eq([$all], array_map('intval', array_column(db_all('SELECT id FROM commission_plans WHERE is_default = 1'), 'id')));
+    db_exec('UPDATE accounts SET commission_plan_id = ? WHERE id = ?', [$all, $dealerId]);
+    eq(44.0, dealer_commission(db_one('SELECT * FROM accounts WHERE id = ?', [$dealerId]))['commission'], '(40 + 30 + 50 + 100) × 20%');
+    eq('20% of turnover on all their customers\' services', commission_plan_summary(db_one('SELECT * FROM commission_plans WHERE id = ?', [$all])));
+    update_row('commission_plans', $gp, ['is_default' => 1]);
+    [, $errors] = validate(entity('commission_plans'), ['name' => 'Silly', 'basis' => 'turnover', 'rate' => '150', 'applies_to' => 'all']);
+    ok(isset($errors['rate']));
+});
+
 proc_terminate($mock);
 @unlink($mockState);
 proc_terminate($abProc);

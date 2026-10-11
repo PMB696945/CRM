@@ -1184,4 +1184,37 @@ return [
             db()->exec('UPDATE quote_lines l JOIN quotes q ON q.id = l.quote_id SET l.bill_to_dealer = q.bill_to_dealer');
         }
     },
+    44 => function (): void {
+        // Commission plans for dealers: a basis (gross profit or turnover), a rate and which services count.
+        db()->exec("CREATE TABLE IF NOT EXISTS commission_plans (
+            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            basis ENUM('gross_profit','turnover') NOT NULL DEFAULT 'gross_profit',
+            rate DECIMAL(6,2) NOT NULL,
+            applies_to ENUM('direct','dealer_billed','all') NOT NULL DEFAULT 'direct',
+            is_default TINYINT(1) NOT NULL DEFAULT 0,
+            active TINYINT(1) NOT NULL DEFAULT 1,
+            notes TEXT NULL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME NULL ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!column_exists('accounts', 'commission_plan_id')) {
+            db()->exec('ALTER TABLE accounts ADD COLUMN commission_plan_id INT UNSIGNED NULL AFTER dealer_commission_pct');
+        }
+        if (!db_value('SELECT COUNT(*) FROM commission_plans')) {
+            db_exec("INSERT INTO commission_plans (name, basis, rate, applies_to, is_default, notes) VALUES
+                ('50% of gross profit', 'gross_profit', 50, 'direct', 1, 'Our standard dealer commission: half of what we make on the customers we bill directly.'),
+                ('10% of turnover', 'turnover', 10, 'direct', 0, 'A tenth of what the customers we bill directly pay each month.')");
+        }
+        // Dealers given a percentage before: that was a share of their customers' monthly charges, i.e. turnover.
+        foreach (db_all('SELECT id, dealer_commission_pct AS pct FROM accounts WHERE is_dealer = 1 AND dealer_commission_pct IS NOT NULL AND commission_plan_id IS NULL') as $d) {
+            $rate = rtrim(rtrim(number_format((float)$d['pct'], 2, '.', ''), '0'), '.');
+            $plan = db_value("SELECT id FROM commission_plans WHERE basis = 'turnover' AND applies_to = 'direct' AND rate = ?", [$d['pct']]);
+            if (!$plan) {
+                db_exec("INSERT INTO commission_plans (name, basis, rate, applies_to) VALUES (?, 'turnover', ?, 'direct')", ["$rate% of turnover", $d['pct']]);
+                $plan = db()->lastInsertId();
+            }
+            db_exec('UPDATE accounts SET commission_plan_id = ? WHERE id = ?', [$plan, $d['id']]);
+        }
+    },
 ];
