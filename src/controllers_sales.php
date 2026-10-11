@@ -52,14 +52,16 @@ function quotes_controller(): void
                     $errors['_lines'] = implode(' ', $lineErrors);
                 }
                 $values = $data + $values;
+                $billAccount = db_one('SELECT * FROM accounts WHERE id = ?', [(int)($data['account_id'] ?? 0)]);
+                $values['bill_to_dealer'] = $billAccount && bill_to_dealer_from($billAccount, $_POST) ? 1 : 0;
                 if (!$errors) {
                     if ($quote) {
-                        db_exec('UPDATE quotes SET account_id = ?, title = ?, valid_until = ?, opportunity_id = ?, intro = ? WHERE id = ?',
-                            [$data['account_id'], $data['title'], $data['valid_until'], $data['opportunity_id'], $data['intro'], $quote['id']]);
+                        db_exec('UPDATE quotes SET account_id = ?, title = ?, valid_until = ?, opportunity_id = ?, intro = ?, bill_to_dealer = ? WHERE id = ?',
+                            [$data['account_id'], $data['title'], $data['valid_until'], $data['opportunity_id'], $data['intro'], $values['bill_to_dealer'], $quote['id']]);
                         $qid = (int)$quote['id'];
                     } else {
-                        db_exec('INSERT INTO quotes (account_id, title, valid_until, opportunity_id, intro, created_by) VALUES (?, ?, ?, ?, ?, ?)',
-                            [$data['account_id'], $data['title'], $data['valid_until'], $data['opportunity_id'], $data['intro'], current_user()['id']]);
+                        db_exec('INSERT INTO quotes (account_id, title, valid_until, opportunity_id, intro, bill_to_dealer, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                            [$data['account_id'], $data['title'], $data['valid_until'], $data['opportunity_id'], $data['intro'], $values['bill_to_dealer'], current_user()['id']]);
                         $qid = (int)db()->lastInsertId();
                         db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
                     }
@@ -149,8 +151,8 @@ function quotes_controller(): void
                 flash("Contract {$contract['reference']} created.");
                 redirect(url('contracts', ['action' => 'view', 'id' => $contract['id']]));
             case 'duplicate':
-                db_exec('INSERT INTO quotes (account_id, title, valid_until, opportunity_id, intro, order_details, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [$quote['account_id'], $quote['title'], date('Y-m-d', strtotime('+' . (int)(setting('quote_validity_days') ?: 30) . ' days')), $quote['opportunity_id'], $quote['intro'], $quote['order_details'], current_user()['id']]);
+                db_exec('INSERT INTO quotes (account_id, title, valid_until, opportunity_id, intro, order_details, bill_to_dealer, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$quote['account_id'], $quote['title'], date('Y-m-d', strtotime('+' . (int)(setting('quote_validity_days') ?: 30) . ' days')), $quote['opportunity_id'], $quote['intro'], $quote['order_details'], $quote['bill_to_dealer'], current_user()['id']]);
                 $qid = (int)db()->lastInsertId();
                 db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);
                 quote_save_lines($qid, quote_lines((int)$quote['id']));

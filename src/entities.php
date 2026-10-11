@@ -346,6 +346,8 @@ function entities(): array
                 'carrier'           => ['label' => 'Carrier / network', 'type' => 'select', 'options' => opts(CARRIERS)],
                 'status'            => ['label' => 'Status', 'type' => 'select', 'options' => opts(['pending', 'active', 'suspended', 'ceased']), 'required' => true],
                 'monthly_price'     => ['label' => 'Monthly price', 'type' => 'money'],
+                'bill_to_dealer'    => ['label' => 'Billed to the dealer', 'type' => 'bool',
+                    'help' => 'For a customer under a dealer: the dealer is billed for this service instead of the customer'],
                 'cost_price'        => ['label' => 'Monthly cost', 'type' => 'money', 'help' => 'What it costs you per month, recorded when it was ordered (from the product). Change it only when the supplier\'s price for this line changes',
                     'if' => fn() => can('costs.view'), 'readonly' => !can('costs.edit')],
                 'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money'],
@@ -794,6 +796,13 @@ function before_save(string $name, array $data, ?array $existing): array
                     if ($existing === null && ($data['cost_price'] ?? null) === null && $product['cost_price'] !== null) {
                         $data['cost_price'] = monthly_equivalent($product['cost_price'], $product['billing_frequency'] ?? 'monthly');
                     }
+                }
+            }
+            // Only a customer under a dealer can be billed via the dealer.
+            if (array_key_exists('bill_to_dealer', $data) && $data['bill_to_dealer']) {
+                $acct = db_one('SELECT parent_id FROM accounts WHERE id = ?', [$data['account_id'] ?? $existing['account_id'] ?? 0]);
+                if (!$acct || !$acct['parent_id'] || !db_value('SELECT is_dealer FROM accounts WHERE id = ?', [$acct['parent_id']])) {
+                    $data['bill_to_dealer'] = 0;
                 }
             }
             // Defaults for a new service, or for fields being saved (a partial update leaves the others alone).

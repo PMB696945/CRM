@@ -14,6 +14,34 @@ const MOBILE_NETWORKS = ['O2', 'EE', 'Vodafone'];
 const MOBILE_CONNECTIONS = ['new' => 'New connection', 'migration' => 'Migration', 'port' => 'Port'];
 const PBX_LICENCES = ['basic' => 'Basic', 'enterprise' => 'Enterprise', 'ultimate' => 'Ultimate'];
 
+/** The dealer a customer sits under, if any. */
+function account_dealer(array $account): ?array
+{
+    return !empty($account['parent_id']) ? db_one('SELECT * FROM accounts WHERE id = ? AND is_dealer = 1', [$account['parent_id']]) : null;
+}
+
+/** Whether a new order for this customer is billed to their dealer unless chosen otherwise. */
+function bill_to_dealer_default(array $account): bool
+{
+    return ($account['parent_relationship'] ?? null) === 'billed_via_dealer' && account_dealer($account) !== null;
+}
+
+/** The bill-to choice from a form ('dealer' or 'customer'); only a customer with a dealer can be billed via them. */
+function bill_to_dealer_from(array $account, array $post): bool
+{
+    if (!account_dealer($account)) {
+        return false;
+    }
+    return isset($post['bill_to']) ? $post['bill_to'] === 'dealer' : bill_to_dealer_default($account);
+}
+
+/** Who a record is billed to, in words. */
+function bill_to_label(array $account, bool $toDealer): string
+{
+    $dealer = $toDealer ? account_dealer($account) : null;
+    return $dealer ? 'The dealer, ' . $dealer['name'] : 'The customer, ' . $account['name'];
+}
+
 /** Products to choose from on the order form: a category and/or item types. */
 function order_products(?string $category, array $itemTypes = []): array
 {
@@ -162,7 +190,7 @@ function new_order_parse(array $account, array $post, array $files = []): array
     $errors = [];
     $lines = [];
     $missing = [];
-    $details = ['type' => $type, 'notes' => trim((string)($post['notes'] ?? ''))];
+    $details = ['type' => $type, 'notes' => trim((string)($post['notes'] ?? '')), 'bill_to_dealer' => bill_to_dealer_from($account, $post)];
     $price = function (string $itemType, string $category, string $description, int $qty, bool $optional = false) use (&$lines, &$missing): void {
         if ($qty < 1) {
             return;
@@ -382,9 +410,9 @@ function new_order_create(array $account, array $details, array $lines, array $f
     if (order_needs_loa($details)) {
         $details['loa_document_id'] = loa_store($account, $details);
     }
-    db_exec('INSERT INTO quotes (account_id, title, valid_until, order_details, created_by) VALUES (?, ?, ?, ?, ?)', [
+    db_exec('INSERT INTO quotes (account_id, title, valid_until, order_details, bill_to_dealer, created_by) VALUES (?, ?, ?, ?, ?, ?)', [
         $account['id'], mb_substr($details['title'], 0, 200), date('Y-m-d', strtotime('+' . (int)(setting('quote_validity_days') ?: 30) . ' days')),
-        json_encode($details), current_user()['id'] ?? null,
+        json_encode($details), !empty($details['bill_to_dealer']) ? 1 : 0, current_user()['id'] ?? null,
     ]);
     $qid = (int)db()->lastInsertId();
     db_exec('UPDATE quotes SET reference = ? WHERE id = ?', [sprintf('Q-%06d', $qid), $qid]);

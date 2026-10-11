@@ -37,6 +37,9 @@ $cancel = $quote ? url('quotes', ['action' => 'view', 'id' => $quote['id']]) : (
       <label for="q_intro">Message to the customer</label>
       <textarea id="q_intro" name="intro" rows="3" placeholder="Shown at the top of the quote page"><?= h($values['intro']) ?></textarea>
     </div>
+    <?php if ($accountId && ($billAccount = db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]))): ?>
+      <?php render('_bill_to', ['account' => $billAccount, 'toDealer' => isset($values['bill_to_dealer']) ? (bool)$values['bill_to_dealer'] : bill_to_dealer_default($billAccount)]); ?>
+    <?php endif; ?>
   </section>
 
   <section class="card">

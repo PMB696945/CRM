@@ -437,6 +437,7 @@ function dealer_order_approve(array $d): array
     $ours = db_one('SELECT dealer_price, dealer_setup_fee FROM products WHERE id = ?', [$d['product_id']]);
     $o['service_monthly_price'] = $ours['dealer_price'] ?? null;
     $o['service_setup_fee'] = $ours['dealer_setup_fee'] ?? null;
+    $o['bill_to_dealer'] = (int)($d['bill_to_dealer'] ?? 1);
     db_exec('UPDATE dealer_orders SET last_error = NULL WHERE id = ?', [$d['id']]);
     try {
         $giacomId = giacom_place_order($check, $product, $o);

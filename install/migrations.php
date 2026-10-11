@@ -1153,4 +1153,27 @@ return [
             db()->exec("UPDATE $table t JOIN products p ON p.id = t.product_id SET t.product_sku = p.sku, t.product_name = p.name WHERE t.product_sku IS NULL");
         }
     },
+    42 => function (): void {
+        // Who an order is billed to when the customer sits under a dealer: the customer or the dealer.
+        // Recorded on the quote, the broadband order and each service, defaulting to the customer's
+        // "relationship to dealer"; aBILLity charges the dealer's account for dealer-billed services.
+        $add = function (string $table, string $column, string $definition): void {
+            if (column_exists($table, $column)) {
+                return;
+            }
+            db()->exec("ALTER TABLE $table ADD COLUMN $column $definition");
+        };
+        $add('services', 'bill_to_dealer', 'TINYINT(1) NOT NULL DEFAULT 0');
+        $add('services', 'abillity_site_id', 'INT UNSIGNED NULL');
+        $add('quotes', 'bill_to_dealer', 'TINYINT(1) NOT NULL DEFAULT 0');
+        $add('giacom_orders', 'bill_to_dealer', 'TINYINT(1) NOT NULL DEFAULT 0');
+        $add('dealer_orders', 'bill_to_dealer', 'TINYINT(1) NOT NULL DEFAULT 1');
+        foreach (['services', 'quotes', 'giacom_orders'] as $table) {
+            db()->exec("UPDATE $table t JOIN accounts a ON a.id = t.account_id SET t.bill_to_dealer = 1
+                WHERE a.parent_id IS NOT NULL AND a.parent_relationship = 'billed_via_dealer'");
+        }
+        // Charges already in aBILLity are on the customer's own account.
+        db()->exec('UPDATE services s JOIN accounts a ON a.id = s.account_id SET s.abillity_site_id = a.abillity_site_id
+            WHERE s.abillity_charge_id IS NOT NULL AND s.abillity_site_id IS NULL');
+    },
 ];

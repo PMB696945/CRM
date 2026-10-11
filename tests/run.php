@@ -944,6 +944,54 @@ test('revoked connection gives a clear error and is marked disconnected', functi
     ok(str_contains((string)setting('xero_last_sync_error'), 'reconnect'));
 });
 
+test('dealer billing: an order for a customer under a dealer is billed to the customer or the dealer, and aBILLity charges whichever it is', function () {
+    as_role('super_admin');
+    foreach (['abillity_system' => 'TESTSYS', 'abillity_username' => 'api-user', 'abillity_password' => 'api-pass'] as $k => $v) {
+        set_setting($k, $v);
+    }
+    $mk = function (string $name, string $num) {
+        $id = create('accounts', ['name' => $name, 'account_number' => $num, 'type' => 'business', 'status' => 'active', 'address' => '1 High St', 'city' => 'Leeds', 'postcode' => 'LS1 1AA']);
+        $c = create('contacts', ['account_id' => $id, 'name' => "$name Accounts", 'email' => strtolower($num) . '@example.com', 'is_billing' => '1']);
+        db_exec('UPDATE accounts SET billing_contact_id = ?, main_contact_id = ? WHERE id = ?', [$c, $c, $id]);
+        return $id;
+    };
+    $dealerId = $mk('Smart Computers', 'SMAR001');
+    db_exec('UPDATE accounts SET is_dealer = 1 WHERE id = ?', [$dealerId]);
+    $custId = $mk('Garage Ltd', 'GARA001');
+    db_exec("UPDATE accounts SET parent_id = ?, parent_relationship = 'billed_via_dealer' WHERE id = ?", [$dealerId, $custId]);
+    $cust = db_one('SELECT * FROM accounts WHERE id = ?', [$custId]);
+    $direct = db_one('SELECT * FROM accounts WHERE id = ?', [$mk('Direct Ltd', 'DIRE001')]);
+    // The choice defaults from the customer's relationship to the dealer, and can be changed per order.
+    ok(bill_to_dealer_default($cust) && !bill_to_dealer_default($direct));
+    $tariff = create('products', ['sku' => 'DLR-MOB', 'name' => 'Dealer SIM', 'category' => 'mobile', 'monthly_price' => '12', 'term_months' => '24', 'active' => '1']);
+    $post = ['service_type' => 'mobile', 'm_first' => ['Gail'], 'm_last' => ['Garage'], 'm_connection' => ['new'], 'm_network' => ['O2'], 'm_current_network' => [''],
+        'm_number' => [''], 'm_pac' => [''], 'm_sim' => [''], 'm_product_id' => [(string)$tariff]];
+    eq(true, new_order_parse($cust, $post)[0]['bill_to_dealer'], 'defaults to the dealer');
+    eq(false, new_order_parse($cust, $post + ['bill_to' => 'customer'])[0]['bill_to_dealer'], 'or the customer');
+    eq(false, new_order_parse($direct, $post + ['bill_to' => 'dealer'])[0]['bill_to_dealer'], 'no dealer: always the customer');
+    [$details, $lines] = new_order_parse($cust, $post + ['bill_to' => 'dealer']);
+    $qid = new_order_create($cust, $details, $lines);
+    eq('1', (string)db_value('SELECT bill_to_dealer FROM quotes WHERE id = ?', [$qid]));
+    // The signed order's services carry it, and aBILLity charges the dealer's account, naming the customer.
+    contract_create_services(['quote_id' => $qid, 'account_id' => $custId, 'reference' => 'CON-DLR1']);
+    $svc = db_one("SELECT * FROM services WHERE account_id = ? AND notes = 'From contract CON-DLR1'", [$custId]);
+    eq('1', (string)$svc['bill_to_dealer']);
+    abillity_push_service((int)$svc['id']);
+    $svc = db_one('SELECT * FROM services WHERE id = ?', [$svc['id']]);
+    $dealer = db_one('SELECT * FROM accounts WHERE id = ?', [$dealerId]);
+    ok($svc['abillity_charge_id'] && !$svc['abillity_error'], (string)$svc['abillity_error']);
+    $charge = ab_state()['charges'][$svc['abillity_charge_id']];
+    eq([(int)$dealer['abillity_site_id'], (int)$dealer['abillity_site_id']], [(int)$charge['SiteId'], (int)$svc['abillity_site_id']], 'on the dealer\'s account');
+    ok(str_contains($charge['Description'], '(Garage Ltd)'), $charge['Description']);
+    // Changing who's billed after it's in aBILLity is flagged, not silently billed twice.
+    update_row('services', (int)$svc['id'], ['bill_to_dealer' => 0]);
+    try { abillity_push_service((int)$svc['id']); } catch (AbillityException) {}
+    ok(str_contains((string)db_value('SELECT abillity_error FROM services WHERE id = ?', [$svc['id']]), 'billing has moved'));
+    // A customer without a dealer can't have a dealer-billed service.
+    $own = insert_row('services', ['account_id' => $direct['id'], 'identifier' => 'DIRECT-1', 'status' => 'pending', 'bill_to_dealer' => 1]);
+    eq('0', (string)db_value('SELECT bill_to_dealer FROM services WHERE id = ?', [$own]));
+});
+
 proc_terminate($mock);
 @unlink($mockState);
 proc_terminate($abProc);

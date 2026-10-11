@@ -340,6 +340,7 @@ function contract_create_services(array $contract): int
         return 0;
     }
     $lines = $contract['quote_id'] ? quote_lines((int)$contract['quote_id']) : [];
+    $toDealer = $contract['quote_id'] ? (int)db_value('SELECT bill_to_dealer FROM quotes WHERE id = ?', [$contract['quote_id']]) : 0;
     $created = 0;
     foreach ($lines as $l) {
         // One-off charges (installation, hardware bought outright) aren't ongoing services.
@@ -352,7 +353,7 @@ function contract_create_services(array $contract): int
                 'identifier' => 'TBC – ' . $l['description'] . ((int)$l['quantity'] > 1 ? " #$n" : ''),
                 'carrier' => null, 'status' => 'pending', 'monthly_price' => $l['monthly_price'], 'cost_price' => $l['cost_price'] ?? null, 'setup_fee' => $l['setup_fee'],
                 'start_date' => null, 'term_months' => $l['term_months'], 'contract_end_date' => null, 'install_address' => null,
-                'notes' => "From contract {$contract['reference']}",
+                'notes' => "From contract {$contract['reference']}", 'bill_to_dealer' => $toDealer,
             ]);
             $created++;
         }

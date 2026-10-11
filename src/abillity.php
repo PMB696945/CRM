@@ -376,10 +376,18 @@ function abillity_push_service(int $serviceId): void
     $s = db_one('SELECT s.*, p.name AS product_name, p.billing_frequency, p.monthly_price AS product_price, p.cost_price, p.abillity_charge_type_id
         FROM services s LEFT JOIN products p ON p.id = s.product_id WHERE s.id = ?', [$serviceId]) ?? throw new AbillityException('Service not found.');
     try {
-        $account = db_one('SELECT * FROM accounts WHERE id = ?', [$s['account_id']]);
+        $customer = db_one('SELECT * FROM accounts WHERE id = ?', [$s['account_id']]);
+        // Billed to the dealer: the charge goes on the dealer's account, named with the end customer.
+        $dealer = $s['bill_to_dealer'] ? account_dealer($customer) : null;
+        $account = $dealer ?? $customer;
         $siteId = (int)$account['abillity_site_id'];
         if (!$siteId || $account['abillity_pending']) {
             $siteId = abillity_push_customer((int)$account['id']);
+        }
+        if ($s['abillity_site_id'] && (int)$s['abillity_site_id'] !== $siteId && ((int)$s['abillity_charge_id'] || (int)$s['abillity_setup_charge_id'])) {
+            throw new AbillityException('Its billing has moved to ' . ($dealer ? "the dealer, {$dealer['name']}" : "the customer, {$customer['name']}")
+                . ', but aBILLity already charges the other account. End charge ' . ((int)$s['abillity_charge_id'] ?: (int)$s['abillity_setup_charge_id'])
+                . ' in aBILLity and add it to the right account, or change "Billed to the dealer" back.');
         }
         if ($s['product_id'] && !$s['abillity_charge_type_id']) {
             try {
@@ -400,7 +408,7 @@ function abillity_push_service(int $serviceId): void
             : ($s['start_date'] && $s['start_date'] > date('Y-m-d') ? $s['start_date'] : date('Y-m-d', strtotime('+' . abillity_provisional_days() . ' days')));
         $last = $s['status'] === 'ceased' ? ($s['abillity_last_payment'] ?: date('Y-m-d')) : null;
         $name = $s['product_name'] ?: (SERVICE_TYPES[$s['service_type']] ?? 'Service');
-        $description = mb_substr("$name – {$s['identifier']}", 0, 100);
+        $description = mb_substr("$name – {$s['identifier']}" . ($dealer ? " ({$customer['name']})" : ''), 0, 100);
         $notes = "CRM service #{$s['id']}" . ($s['term_months'] ? "; {$s['term_months']} month term" : '') . ($s['contract_end_date'] ? '; contract ends ' . fmt_date($s['contract_end_date']) : '');
 
         $sent = fn($v) => $v !== null; // 0 means sent, but its aBILLity ID couldn't be found
@@ -434,7 +442,7 @@ function abillity_push_service(int $serviceId): void
                 $id = abillity_new_id(abillity_api('POST', 'servicecharge/v2', ['SiteId' => $siteId] + $charge))
                     ?? abillity_find_service_charge($siteId, $description, "CRM service #{$s['id']}");
                 // Never send it again once aBILLity has it, even if its ID couldn't be found (that would bill twice).
-                db_exec('UPDATE services SET abillity_charge_id = ? WHERE id = ?', [$id ?? 0, $serviceId]);
+                db_exec('UPDATE services SET abillity_charge_id = ?, abillity_site_id = ? WHERE id = ?', [$id ?? 0, $siteId, $serviceId]);
                 if ($id === null) {
                     $unmatched[] = 'its charge';
                 }
@@ -448,7 +456,7 @@ function abillity_push_service(int $serviceId): void
                 'FirstPayment' => abillity_date($first), 'SerialNo' => mb_substr($s['identifier'], 0, 40), 'Notes' => "CRM service #{$s['id']} setup",
             ]) + ['Quantity' => 1, 'Rental' => false, 'BackDatable' => true];
             $id = abillity_new_id(abillity_api('POST', 'servicecharge/v2', $setup)) ?? abillity_find_service_charge($siteId, $setupDescription, "CRM service #{$s['id']} setup");
-            db_exec('UPDATE services SET abillity_setup_charge_id = ? WHERE id = ?', [$id ?? 0, $serviceId]);
+            db_exec('UPDATE services SET abillity_setup_charge_id = ?, abillity_site_id = ? WHERE id = ?', [$id ?? 0, $siteId, $serviceId]);
             if ($id === null) {
                 $unmatched[] = 'its setup charge';
             }

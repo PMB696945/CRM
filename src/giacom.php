@@ -630,16 +630,17 @@ function giacom_place_order(array $check, array $product, array $o): int
             'notes' => "Giacom $type order $orderId: {$product['name']}" . ($fullUsername ? "\nBroadband username: $fullUsername" : ''),
             'login_username' => $fullUsername ?: null,
             'ip_details' => giacom_ip_pending_label($o['ip_option'] ?? null),
+            'bill_to_dealer' => ($o['bill_to'] ?? '') === 'dealer' || !empty($o['bill_to_dealer']) ? 1 : 0,
         ]);
         if ($o['bb_password'] !== '') {
             db_exec('UPDATE services SET login_password = ? WHERE id = ?', [encrypt_secret((string)$o['bb_password']), $serviceId]);
         }
         db_exec('INSERT INTO giacom_orders (account_id, site_id, service_id, check_id, order_type, giacom_order_id, giacom_service_id, cli, product_id, product_name,
-                technology_type, broadband_username, address_label, crd, client_ref, status, status_updated_at, details, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)', [
+                technology_type, broadband_username, address_label, crd, client_ref, status, status_updated_at, bill_to_dealer, details, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)', [
             $account['id'], $check['site_id'] ?: null, $serviceId, $check['id'], $type, $orderId, $r['service-id'] ?? null, $o['cli'] ?: null,
             $product['product_id'], mb_substr($product['name'], 0, 190), $product['technology'], $fullUsername ?: null,
-            $check['address_label'], $o['crd'], $clientRef, 'Placed',
+            $check['address_label'], $o['crd'], $clientRef, 'Placed', ($o['bill_to'] ?? '') === 'dealer' || !empty($o['bill_to_dealer']) ? 1 : 0,
             json_encode(['care_level' => $o['care_level'], 'contact' => trim($o['forename'] . ' ' . $o['surname']), 'telephone' => $o['telephone'], 'email' => $o['email'],
                 'site_contact' => trim(($o['site_forename'] ?? '') . ' ' . ($o['site_surname'] ?? '')), 'site_telephone' => $o['site_telephone'] ?? '',
                 'site_email' => $o['site_email'] ?? '',
@@ -1325,7 +1326,7 @@ function giacom_controller(): void
                 'site_title' => $siteTitle, 'site_forename' => $siteForename, 'site_surname' => $siteSurname,
                 'site_telephone' => (string)(($siteContact['phone'] ?? '') ?: ($siteContact['mobile'] ?? '') ?: ($site['phone'] ?? '') ?: $account['phone']),
                 'site_email' => (string)(($siteContact['email'] ?? '') ?: ($contact['email'] ?? '') ?: ($account['email'] ?? '')), 'site_passphrase' => '', 'site_notes' => '', 'hazard_notes' => '',
-                'send_confirmation' => '1', 'ip_option' => 'dynamic',
+                'send_confirmation' => '1', 'ip_option' => 'dynamic', 'bill_to' => bill_to_dealer_default($account) ? 'dealer' : 'customer',
             ];
             $errors = [];
             if (is_post()) {
@@ -1334,6 +1335,7 @@ function giacom_controller(): void
                     $values[$k] = trim((string)($_POST[$k] ?? ''));
                 }
                 $values['order_type'] = $values['order_type'] === 'migrate' ? 'migrate' : 'provide';
+                $values['bill_to'] = bill_to_dealer_from($account, $values) ? 'dealer' : 'customer';
                 $values['site_visit_reason'] = giacom_visit_at_least(giacom_visit_code($values['site_visit_reason']) ?? 'NO_SITE_VISIT', giacom_min_visit($result, $values['order_type']));
                 if (!empty($_POST['refresh'])) {
                     // The install type changed, so Giacom was asked again: start from its earliest date for this visit.

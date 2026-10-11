@@ -12,7 +12,8 @@ $me = (int)current_user()['id'];
   <div>
     <div class="crumbs"><a href="<?= h(url('customer_orders')) ?>">Orders</a> · <a href="<?= h(url('accounts', ['action' => 'view', 'id' => $account['id']])) ?>"><?= h($account['name']) ?></a></div>
     <h1><?= h($order['reference']) ?> <span class="badge badge-<?= h($order['status'] === 'completed' ? 'active' : ($order['status'] === 'cancelled' ? 'cancelled' : 'pending')) ?>"><?= h(order_status_label($order['status'])) ?></span></h1>
-    <p class="muted"><?= h($order['title']) ?> · <?= h(money($order['monthly_total'])) ?>/month, <?= h(money($order['setup_total'])) ?> one-off<?= $quote ? ' · from <a href="' . h(url('quotes', ['action' => 'view', 'id' => $quote['id']])) . '">' . h($quote['reference']) . '</a>' : '' ?></p>
+    <p class="muted"><?= h($order['title']) ?> · <?= h(money($order['monthly_total'])) ?>/month, <?= h(money($order['setup_total'])) ?> one-off<?= $quote ? ' · from <a href="' . h(url('quotes', ['action' => 'view', 'id' => $quote['id']])) . '">' . h($quote['reference']) . '</a>' : '' ?>
+      <?php if ($quote && account_dealer($account)): ?> · <b>Billed to: <?= h(bill_to_label($account, (bool)$quote['bill_to_dealer'])) ?></b><?php endif; ?></p>
   </div>
   <div class="actions">
     <?php if (can('audit.view')): ?><a class="btn btn-ghost" href="<?= h(url('audit', ['entity' => 'customer_orders', 'entity_id' => $id])) ?>">History</a><?php endif; ?>
