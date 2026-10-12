@@ -27,6 +27,8 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
         . '<td class="num">' . $in('dealer_price', $money($p['dealer_price'] ?? null), 'num', 'inputmode="decimal" data-bb="dealer" aria-label="Dealer price"') . '</td>'
         . ($canCost ? '<td class="num" data-bb-dealer-margin>' . ($dealerMargin === null ? '—' : number_format($dealerMargin * 100, 1) . '%') . '</td>' : '')
         . '<td class="num">' . $in('dealer_setup_fee', $money($p['dealer_setup_fee'] ?? null), 'num', 'inputmode="decimal" aria-label="Dealer setup fee"') . '</td>'
+        . '<td><select name="' . $n('visibility') . '" class="bb-vis" aria-label="Offered to" title="Both: direct customers and dealers. Direct: not on the partner portal. Dealers: only on the partner portal">'
+        . implode('', array_map(fn($k, $l) => '<option value="' . $k . '"' . (($p['visibility'] ?? 'both') === $k ? ' selected' : '') . '>' . h($l) . '</option>', array_keys(BB_VISIBILITY_WORDS), ['Both', 'Direct', 'Dealers'])) . '</select></td>'
         . '<td class="center"><input type="checkbox" name="' . $n('active') . '" value="1"' . (($p['active'] ?? 1) ? ' checked' : '') . ' aria-label="Active"></td>'
         . '<td>' . ($key !== 'new' ? '<a href="' . h(url('products', ['action' => 'view', 'id' => $p['id']])) . '" title="Open the product" aria-label="Open the product">↗</a>' : '') . '</td></tr>';
     return $html;
@@ -50,16 +52,16 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
       <?php if ($canCost): ?><th class="num">Buy</th><?php endif; ?>
       <th class="num">Sell</th><?php if ($canCost): ?><th class="num" title="(sell − buy) ÷ sell">Margin</th><?php endif; ?><th class="num">Setup</th>
       <th class="num">Dealer</th><?php if ($canCost): ?><th class="num" title="Our margin on the dealer price: (dealer − buy) ÷ dealer">Dlr margin</th><?php endif; ?><th class="num">Dlr setup</th>
-      <th class="center">Active</th><th></th>
+      <th title="Direct customers, dealers on the partner portal, or both">Offered to</th><th class="center">Active</th><th></th>
     </tr></thead>
     <tbody>
       <?php foreach ($products as $p): ?><?= $row((string)$p['id'], $p) ?><?php endforeach; ?>
-      <tr class="bb-new-label"><td colspan="14" class="small muted">Add a product: fill in the row below (SKU, name and sell price are needed).</td></tr>
+      <tr class="bb-new-label"><td colspan="15" class="small muted">Add a product: fill in the row below (SKU, name and sell price are needed).</td></tr>
       <?= $row('new', ['term_months' => 24, 'active' => 1]) ?>
     </tbody>
   </table></div>
   <div class="form-actions" style="margin-top:1rem"><button class="btn btn-primary">Save prices</button>
-    <span class="help">Margin is (price − buy) ÷ price.<?= $canCost ? '' : ' Buy prices are hidden: your role can\'t see costs.' ?> Products with a dealer price and supplier product IDs are offered on the partner portal.</span></div>
+    <span class="help">Margin is (price − buy) ÷ price.<?= $canCost ? '' : ' Buy prices are hidden: your role can\'t see costs.' ?> Products with a dealer price and supplier product IDs are offered on the partner portal, unless Offered to is Direct.</span></div>
 </form>
 
 <section class="card" style="margin-top:1.5rem">
@@ -73,7 +75,7 @@ $row = function (string $key, array $p) use ($money, $terms, $canCost, $canEditC
   <ul class="small muted">
     <li>Rows are matched to products by <b>SKU</b>. A new SKU adds a broadband product (it needs a product name and sell price).</li>
     <li>Columns: <?= h(implode(', ', array_map(fn($c) => $c[0], BB_PRICE_COLUMNS))) ?>. Any can be left out; a blank cell leaves that value as it is.</li>
-    <li>Prices are per month, ex VAT; £ signs and commas are fine. Active is Yes or No.</li>
+    <li>Prices are per month, ex VAT; £ signs and commas are fine. Active is Yes or No. Offered to is Both, Direct only or Dealers only.</li>
   </ul>
   <form method="post" action="<?= h(url('broadband_prices', ['action' => 'upload'])) ?>" enctype="multipart/form-data" class="filters">
     <?= csrf_field() ?>

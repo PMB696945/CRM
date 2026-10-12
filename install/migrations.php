@@ -1217,4 +1217,10 @@ return [
             db_exec('UPDATE accounts SET commission_plan_id = ? WHERE id = ?', [$plan, $d['id']]);
         }
     },
+    45 => function (): void {
+        // Who can be sold each product: direct customers, dealers (on the partner portal), or both.
+        if (!column_exists('products', 'visibility')) {
+            db()->exec("ALTER TABLE products ADD COLUMN visibility ENUM('both','direct','dealer') NOT NULL DEFAULT 'both' AFTER active");
+        }
+    },
 ];

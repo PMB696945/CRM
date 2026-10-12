@@ -184,7 +184,7 @@ function portal_product_ids(?string $list): array
 function portal_offers(array $check): array
 {
     $result = giacom_check_result($check);
-    $ours = db_all('SELECT * FROM products WHERE active = 1 AND dealer_price IS NOT NULL AND supplier_product_ids IS NOT NULL AND supplier_product_ids <> \'\'');
+    $ours = db_all('SELECT * FROM products WHERE active = 1 AND visibility <> \'direct\' AND dealer_price IS NOT NULL AND supplier_product_ids IS NOT NULL AND supplier_product_ids <> \'\'');
     $offers = [];
     foreach ($result['products'] ?? [] as $i => $sp) {
         foreach ($ours as $p) {

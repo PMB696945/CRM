@@ -17,8 +17,12 @@ const BB_PRICE_COLUMNS = [
     'setup_fee'            => ['Sell setup fee', 'money'],
     'dealer_price'         => ['Dealer (monthly)', 'money'],
     'dealer_setup_fee'     => ['Dealer setup fee', 'money'],
+    'visibility'           => ['Offered to', 'visibility'],
     'active'               => ['Active', 'bool'],
 ];
+
+/** "Offered to" as written in a file: Both, Direct only or Dealers only (and the full wording). */
+const BB_VISIBILITY_WORDS = ['both' => 'Both', 'direct' => 'Direct only', 'dealer' => 'Dealers only'];
 
 /** Header names a CSV may use for each column (as well as the labels above). */
 const BB_PRICE_ALIASES = [
@@ -26,6 +30,7 @@ const BB_PRICE_ALIASES = [
     'sell' => 'monthly_price', 'sell price' => 'monthly_price', 'price' => 'monthly_price', 'monthly price' => 'monthly_price',
     'dealer' => 'dealer_price', 'dealer price' => 'dealer_price', 'setup' => 'setup_fee', 'setup fee' => 'setup_fee',
     'product' => 'name', 'product name' => 'name', 'term' => 'term_months', 'giacom product ids' => 'supplier_product_ids',
+    'visibility' => 'visibility', 'seen by' => 'visibility', 'offered' => 'visibility',
 ];
 
 function bb_products(bool $withInactive = true): array
@@ -53,7 +58,25 @@ function bb_parse(string $column, string $raw): array
         'money' => $raw === '' ? [true, null] : (($v = price_parse_money($raw)) === null ? [false, null] : [true, $v]),
         'term'  => $raw === '' ? [true, null] : (ctype_digit($raw) && (int)$raw <= 120 ? [true, (int)$raw] : [false, null]),
         'bool'  => [true, in_array(strtolower($raw), ['1', 'yes', 'y', 'true', 'active', 'on'], true) ? 1 : 0],
+        'visibility' => $raw === '' ? [true, null] : (($v = bb_visibility_parse($raw)) === null ? [false, null] : [true, $v]),
         default => [true, $raw === '' ? null : mb_substr($raw, 0, $column === 'sku' ? 40 : ($column === 'name' ? 150 : 255))],
+    };
+}
+
+/** Read "Offered to" from a cell: both, direct or dealer, in a few wordings. */
+function bb_visibility_parse(string $raw): ?string
+{
+    $k = strtolower(trim($raw));
+    foreach (['both', 'direct', 'dealer'] as $v) {
+        if ($k === $v || $k === strtolower(BB_VISIBILITY_WORDS[$v]) || $k === strtolower(PRODUCT_VISIBILITY[$v])) {
+            return $v;
+        }
+    }
+    return match (true) {
+        str_starts_with($k, 'direct') => 'direct',
+        str_starts_with($k, 'dealer') => 'dealer',
+        str_contains($k, 'both') || str_contains($k, '&') || str_contains($k, ' and ') => 'both',
+        default => null,
     };
 }
 
@@ -119,7 +142,7 @@ function bb_plan(array $rows, bool $blankClears): array
                 if ($col === 'setup_fee' && $v === null) {
                     $v = 0.0; // no setup fee
                 }
-                if (in_array($col, ['sku', 'name', 'monthly_price', 'term_months'], true) && $v === null) {
+                if (in_array($col, ['sku', 'name', 'monthly_price', 'term_months', 'visibility'], true) && $v === null) {
                     continue; // required: blank leaves it as it is
                 }
                 if ($col === 'sku' && $v !== null && mb_strtolower($v) !== mb_strtolower((string)$product['sku']) && isset($bySku[mb_strtolower($v)])) {
@@ -196,6 +219,7 @@ function bb_export_rows(array $products): array
         $rows[] = array_map(fn($c) => match (BB_PRICE_COLUMNS[$c][1]) {
             'money' => $p[$c] === null ? '' : number_format((float)$p[$c], 2, '.', ''),
             'bool' => $p[$c] ? 'Yes' : 'No',
+            'visibility' => BB_VISIBILITY_WORDS[$p[$c] ?? 'both'] ?? 'Both',
             default => (string)($p[$c] ?? ''),
         }, $cols);
     }

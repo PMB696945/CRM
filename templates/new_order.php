@@ -56,7 +56,7 @@ $itemRows = function (string $prefix, array $options, string $what) use ($v, $it
         . '<div><button type="button" class="btn btn-sm btn-add" data-add-row="' . $prefix . '">+ Add another</button></div>' . $err($prefix) . '</div>';
     return $html;
 };
-$tariffs = $productOpts(order_products('mobile'));
+$tariffs = $productOpts(order_products('mobile', [], $account));
 $mobileRow = function (array $r = []) use ($sel, $tariffs): string {
     $g = fn($k) => (string)($r[$k] ?? '');
     $nets = array_combine(MOBILE_NETWORKS, MOBILE_NETWORKS);
@@ -119,7 +119,7 @@ $mobileRow = function (array $r = []) use ($sel, $tariffs): string {
     <div class="form-section wide"><h2>Leased line</h2></div>
     <?= $address('ll_addr', 'Installation address') ?>
     <div class="field wide"><label for="ll_product">Leased line</label>
-      <select id="ll_product" name="ll_product"><?= $sel($productOpts(order_products('leased_line')), $v('ll_product'), 'Choose…') ?></select><?= $err('ll_product') ?>
+      <select id="ll_product" name="ll_product"><?= $sel($productOpts(order_products('leased_line', [], $account)), $v('ll_product'), 'Choose…') ?></select><?= $err('ll_product') ?>
       <div class="help">Bandwidth, term and price come from the price list.</div></div>
     <div class="field"><label for="ll_crd">Required by (optional)</label><input id="ll_crd" type="date" name="ll_crd" min="<?= date('Y-m-d') ?>" value="<?= h($v('ll_crd')) ?>"><?= $err('ll_crd') ?></div>
     <div class="field"><label for="ll_ip">IP addresses</label><select id="ll_ip" name="ll_ip"><?= $sel(array_map(fn($o) => $o[0], GIACOM_IP_OPTIONS), $v('ll_ip', 'static')) ?></select></div>
@@ -183,14 +183,14 @@ $mobileRow = function (array $r = []) use ($sel, $tariffs): string {
       <?= $address('pbx_addr', 'Current installation address') ?>
     </fieldset>
     <div class="form-section wide"><h2>Handsets</h2><p class="help">From the price list. Leave the row empty if they don't need any.</p></div>
-    <?php $handsets = order_products('hardware', ['handset', 'headset', 'accessory']) ?: order_products('hardware'); ?>
+    <?php $handsets = order_products('hardware', ['handset', 'headset', 'accessory'], $account) ?: order_products('hardware', [], $account); ?>
     <?= $itemRows('pbx_handset', $productOpts($handsets), 'Handset') ?>
   </fieldset>
 
   <fieldset class="card form-grid" data-order-for="hardware" hidden>
     <div class="form-section wide"><h2>Hardware</h2></div>
     <?= $address('hw_addr', 'Delivery address') ?>
-    <?= $itemRows('hw_item', $productOpts(order_products('hardware')), 'Item') ?>
+    <?= $itemRows('hw_item', $productOpts(order_products('hardware', [], $account)), 'Item') ?>
   </fieldset>
 
   <fieldset class="card form-grid" data-order-for="leased_line mobile sip_trunk hosted_pbx hardware" hidden>

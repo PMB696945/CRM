@@ -2443,6 +2443,12 @@ test('portal: dealers add customers and check availability; only products with a
     ok(!str_contains($html, 'Business FTTC 80/20'), "the supplier's own product names aren't shown");
     portal_seen($html, 'availability');
     eq([(int)$portal['fttc']], array_map(fn($o) => (int)$o['product']['id'], portal_offers(db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']]))));
+    // "Direct customers only" products aren't offered to dealers, whatever their dealer price.
+    db_exec("UPDATE products SET visibility = 'direct' WHERE id = ?", [$portal['fttc']]);
+    eq([], portal_offers(db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']])), 'direct only: not on the portal');
+    db_exec("UPDATE products SET visibility = 'dealer' WHERE id = ?", [$portal['fttc']]);
+    eq(1, count(portal_offers(db_one('SELECT * FROM giacom_checks WHERE id = ?', [$portal['check']]))), 'dealers only: on the portal');
+    db_exec("UPDATE products SET visibility = 'both' WHERE id = ?", [$portal['fttc']]);
     eq('Sorry: our supplier couldn\'t book that.', portal_clean('Sorry: Giacom couldn\'t book that.'));
     eq('our supplier\'s systems are busy', portal_clean('Giacom\'s systems are busy'));
     eq('Cannot provision', portal_clean('Giacom said: Cannot provision'));
@@ -3786,6 +3792,26 @@ test('products: tick several to make inactive or delete; sales keep the product 
     ok($type === 'success' && str_contains($msg, '3 products deleted') && str_contains($msg, '1 had been sold'), $msg);
     eq([null, 'BULK-3', 'Sold tariff', '7.00', '4.00'], array_values(db_one('SELECT product_id, product_sku, product_name, monthly_price, cost_price FROM services WHERE id = ?', [$svc])), 'the service still says what was sold, and for how much');
     eq([null, 'BULK-3', 'Sold tariff', '7.00'], array_values(db_one('SELECT product_id, product_sku, product_name, monthly_price FROM quote_lines WHERE quote_id = ?', [$qid])));
+});
+
+test('products are offered to direct customers, dealers or both; the prices file and page set it too', function () {
+    as_role('admin');
+    $direct = db_one('SELECT * FROM accounts WHERE id = ?', [create('accounts', ['name' => 'Direct Visibility Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1'])]);
+    $dealerOnly = create('products', ['sku' => 'VIS-DLR', 'name' => 'Dealer-only router', 'category' => 'hardware', 'monthly_price' => '5', 'term_months' => '0', 'active' => '1', 'visibility' => 'dealer']);
+    $both = create('products', ['sku' => 'VIS-BOTH', 'name' => 'Everyone router', 'category' => 'hardware', 'monthly_price' => '6', 'term_months' => '0', 'active' => '1']);
+    eq('both', db_value('SELECT visibility FROM products WHERE id = ?', [$both]), 'both by default');
+    $ids = array_map('intval', array_column(order_products('hardware', [], $direct), 'id'));
+    ok(in_array($both, $ids, true) && !in_array($dealerOnly, $ids, true), 'a dealers-only product isn\'t offered for a direct customer');
+    ok(in_array($dealerOnly, array_map('intval', array_column(order_products('hardware'), 'id')), true));
+    eq(['direct', 'dealer', 'both', 'both', null], array_map('bb_visibility_parse', ['Direct only', 'Dealers only', 'Both', 'Direct customers & dealers', 'nonsense']));
+    $bb = create('products', ['sku' => 'VIS-BB', 'name' => 'Sky FTTP 80/20', 'category' => 'broadband', 'monthly_price' => '32.99', 'term_months' => '24', 'active' => '1']);
+    $plan = bb_plan([['line' => 'Row 2', 'id' => null, 'values' => ['sku' => 'VIS-BB', 'visibility' => 'Direct only']]], false);
+    eq(['visibility' => ['both', 'direct']], $plan['changes'][$bb] ?? null);
+    bb_apply($plan, 'test');
+    eq('direct', db_value('SELECT visibility FROM products WHERE id = ?', [$bb]));
+    $rows = bb_export_rows(bb_products());
+    $col = array_search('Offered to', $rows[0], true);
+    ok($col !== false && in_array('Direct only', array_column($rows, $col), true), 'exported as words');
 });
 
 echo "Costs recorded on sales\n";

@@ -86,7 +86,10 @@ function quotes_controller(): void
             $products = array_map(fn($p) => $p['billing_frequency'] === 'one_off'
                 ? ['monthly_price' => 0, 'setup_fee' => round((float)$p['monthly_price'] + (float)$p['setup_fee'], 2), 'term_months' => 0] + $p
                 : ['monthly_price' => monthly_equivalent($p['monthly_price'], $p['billing_frequency'])] + $p,
-                db_all('SELECT id, name, category, monthly_price, billing_frequency, setup_fee, term_months FROM products WHERE active = 1 ORDER BY name'));
+                db_all('SELECT id, name, category, monthly_price, billing_frequency, setup_fee, term_months FROM products WHERE active = 1'
+                    // "Dealers only" products aren't offered on a quote for a direct customer.
+                    . (($qa = !empty($values['account_id']) ? db_one('SELECT * FROM accounts WHERE id = ?', [$values['account_id']]) : null) && !account_dealer($qa) ? " AND visibility <> 'dealer'" : '')
+                    . ' ORDER BY name'));
             page('quote_form', compact('quote', 'values', 'lines', 'errors', 'products'), $quote ? 'Edit quote' : 'New quote');
             return;
 

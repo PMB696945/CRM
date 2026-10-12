@@ -126,6 +126,9 @@ const REF_LABELS = [
     'commission_plans'  => 'name',
 ];
 
+/** Who a product is offered to. Dealers order on the partner portal; staff order for direct customers. */
+const PRODUCT_VISIBILITY = ['both' => 'Direct customers & dealers', 'direct' => 'Direct customers only', 'dealer' => 'Dealers only'];
+
 const COMMISSION_BASES = ['gross_profit' => '% of gross profit (price − cost)', 'turnover' => '% of turnover (what the customer pays)'];
 const COMMISSION_APPLIES = ['direct' => 'Services we bill the customer for', 'dealer_billed' => 'Services billed to the dealer', 'all' => 'All their customers\' services'];
 
@@ -304,7 +307,9 @@ function entities(): array
                 'term_months'       => ['label' => 'Term', 'type' => 'term', 'required' => true, 'default' => 24],
                 'active'            => ['label' => 'Available to sell', 'type' => 'bool', 'default' => 1],
                 'description'       => ['label' => 'Description', 'type' => 'textarea'],
-                'dealer_price'      => ['label' => 'Dealer price', 'type' => 'money', 'section' => 'Dealer portal',
+                'visibility'        => ['label' => 'Offered to', 'type' => 'select', 'options' => PRODUCT_VISIBILITY, 'default' => 'both', 'section' => 'Dealer portal',
+                    'help' => 'Direct customers only: not on the partner portal. Dealers only: on the portal, but not offered when ordering for a direct customer'],
+                'dealer_price'      => ['label' => 'Dealer price', 'type' => 'money',
                     'section_help' => 'Products with a dealer price and supplier product IDs are offered to dealers on the partner portal, wherever one of those supplier products is available.',
                     'help' => 'Per month, excluding VAT. Blank: not on the portal'],
                 'dealer_setup_fee'  => ['label' => 'Dealer setup fee', 'type' => 'money', 'help' => 'One-off'],
@@ -328,7 +333,7 @@ function entities(): array
             ],
             'list'    => ['sku', 'name', 'category', 'billing_frequency', 'monthly_price', 'cost_price', '_margin', '_monthly', 'setup_fee', '_suppliers', 'active'],
             'search'  => ['sku', 'name', 'description'],
-            'filters' => ['category', 'item_type', 'carrier', 'billing_frequency', 'active'],
+            'filters' => ['category', 'item_type', 'carrier', 'billing_frequency', 'visibility', 'active'],
             'computed' => [
                 '_monthly' => ['label' => 'Per month', 'type' => 'money', 'sql' => billing_monthly_sql('t.monthly_price', 't.billing_frequency')],
                 '_suppliers' => ['label' => 'Suppliers', 'type' => 'int', 'sql' => '(SELECT COUNT(*) FROM supplier_products sp WHERE sp.product_id = t.id AND sp.active = 1)'],
@@ -922,6 +927,9 @@ function before_save(string $name, array $data, ?array $existing): array
             break;
 
         case 'products':
+            if (($existing === null || array_key_exists('visibility', $data)) && empty($data['visibility'])) {
+                $data['visibility'] = $existing['visibility'] ?? 'both';
+            }
             if ($existing === null || array_key_exists('setup_fee', $data)) {
                 $data['setup_fee'] ??= 0;
             }

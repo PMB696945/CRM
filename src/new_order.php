@@ -66,10 +66,14 @@ function bill_to_label(array $account, bool $toDealer): string
 }
 
 /** Products to choose from on the order form: a category and/or item types. */
-function order_products(?string $category, array $itemTypes = []): array
+function order_products(?string $category, array $itemTypes = [], ?array $account = null): array
 {
     $where = ['active = 1'];
     $params = [];
+    // "Dealers only" products aren't offered when ordering for a direct customer.
+    if ($account && !account_dealer($account)) {
+        $where[] = "visibility <> 'dealer'";
+    }
     if ($category) {
         $where[] = 'category = ?';
         $params[] = $category;
@@ -233,7 +237,7 @@ function new_order_parse(array $account, array $post, array $files = []): array
 
     switch ($type) {
         case 'mobile':
-            $tariffs = array_column(order_products('mobile'), null, 'id');
+            $tariffs = array_column(order_products('mobile', [], $account), null, 'id');
             $rows = [];
             $first = (array)($post['m_first'] ?? []);
             foreach ($first as $i => $_) {
@@ -355,7 +359,7 @@ function new_order_parse(array $account, array $post, array $files = []): array
                 $details['current_address'] = order_parse_address($account, $post, 'pbx_addr', 'current installation address', $errors);
                 $details['bill_needed'] = !order_has_upload($files, 'pbx_bill');
             }
-            $handsets = array_column(order_products('hardware', ['handset', 'headset', 'accessory']) ?: order_products('hardware'), null, 'id');
+            $handsets = array_column(order_products('hardware', ['handset', 'headset', 'accessory'], $account) ?: order_products('hardware', [], $account), null, 'id');
             $details['handsets'] = order_parse_item_rows($post, 'pbx_handset', $handsets, 'handset', $errors);
             $tier = PBX_LICENCES[$details['licence']] ?? '';
             if ($details['licence']) {
@@ -375,7 +379,7 @@ function new_order_parse(array $account, array $post, array $files = []): array
 
         case 'hardware':
             $details['address'] = order_parse_address($account, $post, 'hw_addr', 'delivery address', $errors);
-            $items = array_column(order_products('hardware'), null, 'id');
+            $items = array_column(order_products('hardware', [], $account), null, 'id');
             $details['items'] = order_parse_item_rows($post, 'hw_item', $items, 'item', $errors);
             if (!$details['items'] && !isset($errors['hw_item'])) {
                 $errors['hw_item'] = 'Add at least one item.';
@@ -388,7 +392,7 @@ function new_order_parse(array $account, array $post, array $files = []): array
 
         case 'leased_line':
             $details['address'] = order_parse_address($account, $post, 'll_addr', 'installation address', $errors);
-            $products = array_column(order_products('leased_line'), null, 'id');
+            $products = array_column(order_products('leased_line', [], $account), null, 'id');
             $pid = (int)($post['ll_product'] ?? 0);
             if (!isset($products[$pid])) {
                 $errors['ll_product'] = $products ? 'Choose the leased line.' : 'There are no leased line products in the price list yet. Add them under Products.';
