@@ -109,6 +109,10 @@ switch (true) {
             $out(409, ['Message' => 'Invalid Frequency Type']);
         }
         $tid = $id();
+        // Like aBILLity: a new quarterly charge type's price goes through a monthly figure rounded down (£60 → £59.97).
+        if (($body['FrequencyTypeId'] ?? 0) === 4 && isset($body['DefaultSalePrice'])) {
+            $body['DefaultSalePrice'] = round(floor((float)$body['DefaultSalePrice'] / 3 * 100 - 0.0001) / 100 * 3, 2);
+        }
         $state['types'][$tid] = ['Id' => $tid] + $body;
         $out(200, ['Id' => $tid]);
 
