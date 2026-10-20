@@ -22,6 +22,96 @@ final class AbillityException extends IntegrationException
 {
 }
 
+/*
+ * Live and sandbox. Giacom's sandbox is another aBILLity system on the same API, chosen by its system name.
+ * Only one is in use at a time; switching puts the current one's links to aBILLity records (and its login)
+ * aside and brings back the other's, so test records never mix with live billing. In the sandbox, customers
+ * aren't created in Xero.
+ */
+const ABILLITY_SANDBOX_SYSTEM = 'FIN03SAN';
+const ABILLITY_LINK_COLUMNS = [
+    'accounts' => ['abillity_company_id', 'abillity_site_id', 'abillity_pending', 'abillity_synced_at', 'abillity_error'],
+    'contacts' => ['abillity_contact_id'],
+    'products' => ['abillity_charge_type_id', 'abillity_synced_at', 'abillity_error'],
+    'services' => ['abillity_charge_id', 'abillity_setup_charge_id', 'abillity_site_id', 'abillity_first_payment', 'abillity_last_payment',
+        'abillity_provisional', 'abillity_pending', 'abillity_synced_at', 'abillity_error'],
+];
+const ABILLITY_ENV_SETTINGS = ['abillity_system', 'abillity_username', 'abillity_password', 'abillity_url', 'abillity_auto',
+    'abillity_connected_at', 'abillity_last_sync_at'];
+
+function abillity_env(): string
+{
+    return setting('abillity_env') === 'sandbox' ? 'sandbox' : 'live';
+}
+
+function abillity_sandbox(): bool
+{
+    return abillity_env() === 'sandbox';
+}
+
+/** Switch between live and sandbox. Returns how many records' links were put aside and brought back. */
+function abillity_switch_env(string $to): array
+{
+    $to = $to === 'sandbox' ? 'sandbox' : 'live';
+    $from = abillity_env();
+    if ($to === $from) {
+        return ['saved' => 0, 'restored' => 0];
+    }
+    $saved = $restored = 0;
+    db()->beginTransaction();
+    try {
+        db_exec('DELETE FROM abillity_env_links WHERE env = ?', [$from]);
+        foreach (ABILLITY_LINK_COLUMNS as $table => $cols) {
+            $nullable = [];
+            foreach (db_all('SELECT column_name AS c, is_nullable AS n FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?', [$table]) as $c) {
+                $nullable[$c['c']] = $c['n'] === 'YES';
+            }
+            $cols = array_values(array_filter($cols, fn($c) => isset($nullable[$c])));
+            if (!$cols) {
+                continue;
+            }
+            // Put this system's links aside...
+            $any = implode(' OR ', array_map(fn($c) => $nullable[$c] ? "$c IS NOT NULL" : "$c <> 0", $cols));
+            foreach (db_all('SELECT id, ' . implode(', ', $cols) . " FROM $table WHERE $any") as $r) {
+                $id = (int)$r['id'];
+                unset($r['id']);
+                db_exec('INSERT INTO abillity_env_links (env, table_name, row_id, data) VALUES (?, ?, ?, ?)', [$from, $table, $id, json_encode($r)]);
+                $saved++;
+            }
+            db_exec("UPDATE $table SET " . implode(', ', array_map(fn($c) => $nullable[$c] ? "$c = NULL" : "$c = 0", $cols)));
+            // ...and bring back the other's.
+            foreach (db_all('SELECT row_id, data FROM abillity_env_links WHERE env = ? AND table_name = ?', [$to, $table]) as $l) {
+                $data = array_intersect_key(json_decode($l['data'], true) ?: [], array_flip($cols));
+                if ($data) {
+                    $restored += db_exec("UPDATE $table SET " . implode(', ', array_map(fn($c) => "$c = ?", array_keys($data))) . ' WHERE id = ?',
+                        [...array_values($data), $l['row_id']]) > 0 ? 1 : 0;
+                }
+            }
+        }
+        db_exec('DELETE FROM abillity_env_links WHERE env = ?', [$to]);
+        // The login and connection dates go with the system (copied as stored, so the password stays encrypted).
+        $current = [];
+        foreach (db_all('SELECT name, value FROM settings WHERE name IN (' . implode(',', array_fill(0, count(ABILLITY_ENV_SETTINGS), '?')) . ')', ABILLITY_ENV_SETTINGS) as $r) {
+            $current[$r['name']] = $r['value'];
+        }
+        $other = json_decode((string)db_value('SELECT value FROM settings WHERE name = ?', ["abillity_env_settings_$to"]), true) ?: [];
+        db_exec('INSERT INTO settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', ["abillity_env_settings_$from", json_encode($current)]);
+        db_exec('DELETE FROM settings WHERE name IN (' . implode(',', array_fill(0, count(ABILLITY_ENV_SETTINGS), '?')) . ')', ABILLITY_ENV_SETTINGS);
+        foreach (array_intersect_key($other, array_flip(ABILLITY_ENV_SETTINGS)) as $name => $value) {
+            db_exec('INSERT INTO settings (name, value) VALUES (?, ?)', [$name, $value]);
+        }
+        db_exec("INSERT INTO settings (name, value) VALUES ('abillity_env', ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [$to]);
+        db_exec('DELETE FROM settings WHERE name = ?', ["abillity_env_settings_$to"]);
+        db()->commit();
+    } catch (Throwable $e) {
+        db()->rollBack();
+        throw $e;
+    }
+    settings_cache(true);
+    audit('settings', 'aBILLity switched to ' . ($to === 'sandbox' ? 'the sandbox' : 'live') . " ($saved links put aside, $restored brought back)");
+    return ['saved' => $saved, 'restored' => $restored];
+}
+
 function abillity_configured(): bool
 {
     return (bool)(setting('abillity_system') && setting('abillity_username') && setting('abillity_password'));
@@ -131,7 +221,8 @@ function abillity_push_customer(int $accountId): int
     $a = db_one('SELECT * FROM accounts WHERE id = ?', [$accountId]) ?? throw new AbillityException('Customer not found.');
     try {
         $notes = [];
-        if (!$a['xero_contact_id'] && xero_connected()) {
+        // Not in the sandbox: test customers don't belong in the real Xero.
+        if (!$a['xero_contact_id'] && xero_connected() && !abillity_sandbox()) {
             try {
                 xero_create_customer($accountId);
             } catch (IntegrationException $e) {
@@ -606,6 +697,13 @@ function abillity_controller(): void
                     }
                     audit('settings', 'aBILLity login removed');
                     flash('aBILLity login removed. Links to aBILLity records are kept.');
+                    break;
+                case 'env':
+                    $to = ($_POST['env'] ?? '') === 'sandbox' ? 'sandbox' : 'live';
+                    $r = abillity_switch_env($to);
+                    flash($to === 'sandbox'
+                        ? 'Switched to the aBILLity sandbox. Live links are kept aside until you switch back' . ($r['restored'] ? '; ' . $r['restored'] . ' sandbox links are back' : '') . '. Customers aren\'t created in Xero while in the sandbox.'
+                        : 'Switched back to live aBILLity: ' . $r['restored'] . ' live links are back. Sandbox links are kept aside for next time.');
                     break;
                 case 'sync':
                     $r = abillity_push_pending();

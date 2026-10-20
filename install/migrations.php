@@ -1223,4 +1223,14 @@ return [
             db()->exec("ALTER TABLE products ADD COLUMN visibility ENUM('both','direct','dealer') NOT NULL DEFAULT 'both' AFTER active");
         }
     },
+    46 => function (): void {
+        // aBILLity live and sandbox: the links (and login) of the system not in use are kept here.
+        db()->exec("CREATE TABLE IF NOT EXISTS abillity_env_links (
+            env VARCHAR(10) NOT NULL,
+            table_name VARCHAR(30) NOT NULL,
+            row_id INT UNSIGNED NOT NULL,
+            data TEXT NOT NULL,
+            PRIMARY KEY (env, table_name, row_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    },
 ];

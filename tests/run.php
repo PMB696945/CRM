@@ -1042,6 +1042,42 @@ test('dealer commission: plans on gross profit or turnover, for the services eac
     ok(isset($errors['rate']));
 });
 
+test('aBILLity live and sandbox: switching puts one system\'s links and login aside and brings the other\'s back', function () {
+    as_role('super_admin');
+    $acct = create('accounts', ['name' => 'Switch Ltd', 'type' => 'business', 'status' => 'active', 'billing_same' => '1']);
+    $svc = insert_row('services', ['account_id' => $acct, 'identifier' => 'SW-1', 'status' => 'active', 'monthly_price' => 10]);
+    db_exec('UPDATE accounts SET abillity_company_id = 501, abillity_site_id = 601 WHERE id = ?', [$acct]);
+    db_exec('UPDATE services SET abillity_charge_id = 701, abillity_site_id = 601, abillity_provisional = 1 WHERE id = ?', [$svc]);
+    set_setting('abillity_system', 'LIVESYS');
+    set_setting('abillity_password', 'live-pass');
+    $before = (int)db_value('SELECT COUNT(*) FROM accounts WHERE abillity_site_id IS NOT NULL');
+    eq('live', abillity_env());
+    $r = abillity_switch_env('sandbox');
+    ok(abillity_sandbox() && $r['saved'] >= $before + 1, json_encode($r));
+    eq([null, null], array_values(db_one('SELECT abillity_company_id, abillity_site_id FROM accounts WHERE id = ?', [$acct])), 'live links put aside');
+    eq([null, '0'], array_values(db_one('SELECT abillity_charge_id, abillity_provisional FROM services WHERE id = ?', [$svc])));
+    eq([null, null], [setting('abillity_system'), setting('abillity_password')], 'the sandbox has its own login');
+    eq(0, (int)db_value('SELECT COUNT(*) FROM accounts WHERE abillity_site_id IS NOT NULL'), 'nothing is linked in the sandbox yet');
+    // Work in the sandbox...
+    set_setting('abillity_system', ABILLITY_SANDBOX_SYSTEM);
+    set_setting('abillity_password', 'sandbox-pass');
+    db_exec('UPDATE accounts SET abillity_site_id = 9001 WHERE id = ?', [$acct]);
+    // ...and back to live: live links and login return exactly; the sandbox ones wait for next time.
+    abillity_switch_env('live');
+    ok(!abillity_sandbox());
+    eq(['501', '601'], array_values(db_one('SELECT abillity_company_id, abillity_site_id FROM accounts WHERE id = ?', [$acct])));
+    eq(['701', '601', '1'], array_values(db_one('SELECT abillity_charge_id, abillity_site_id, abillity_provisional FROM services WHERE id = ?', [$svc])));
+    eq(['LIVESYS', 'live-pass'], [setting('abillity_system'), setting('abillity_password')]);
+    ok(str_starts_with((string)db_value("SELECT value FROM settings WHERE name = 'abillity_password'"), 'enc:'), 'still encrypted');
+    eq($before, (int)db_value('SELECT COUNT(*) FROM accounts WHERE abillity_site_id IS NOT NULL'), 'all live links back');
+    abillity_switch_env('sandbox');
+    eq(['9001', ABILLITY_SANDBOX_SYSTEM], [db_value('SELECT abillity_site_id FROM accounts WHERE id = ?', [$acct]), setting('abillity_system')], 'sandbox links and login come back too');
+    abillity_switch_env('live');
+    foreach (['abillity_system' => 'TESTSYS', 'abillity_username' => 'api-user', 'abillity_password' => 'api-pass'] as $k => $v) {
+        set_setting($k, $v);
+    }
+});
+
 proc_terminate($mock);
 @unlink($mockState);
 proc_terminate($abProc);

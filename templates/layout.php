@@ -111,6 +111,9 @@ $flash = flash();
       <?php if (can('tickets.alerts') && ($overduePickup = count(tickets_overdue_pickup()))): ?>
         <div class="flash flash-warning" role="status"><?= $overduePickup ?> ticket<?= $overduePickup === 1 ? ' has' : 's have' ?> waited too long without being picked up. <a href="<?= h(url('queue')) ?>">See the queue</a></div>
       <?php endif; ?>
+      <?php if (abillity_sandbox()): ?>
+        <div class="flash flash-warning" role="status"><b>aBILLity sandbox:</b> billing is going to the test system, not live aBILLity, and new customers aren't created in Xero.<?= can('settings.manage') ? ' <a href="' . h(url('abillity')) . '">Switch back to live</a>' : '' ?></div>
+      <?php endif; ?>
       <?php if ($flash): ?>
         <div class="flash flash-<?= h($flash['type']) ?>" role="status"><?= h($flash['message']) ?></div>
       <?php endif; ?>

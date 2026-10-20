@@ -4,13 +4,30 @@
     <form method="post" action="<?= h(url('abillity', ['do' => 'sync'])) ?>" class="inline"><?= csrf_field() ?><button class="btn btn-primary">Send now</button></form></div><?php endif; ?></div>
 <p class="lead">Customers, products and services are set up here in the CRM and sent to aBILLity for billing. New customers are created in Xero at the same time.</p>
 
+<?php $sandbox = abillity_sandbox(); ?>
+<section class="card <?= $sandbox ? 'border-warning-500!' : '' ?>">
+  <div class="card-head"><h2>Live or sandbox <?= $sandbox ? '<span class="badge badge-pending">Sandbox</span>' : '<span class="badge badge-active">Live</span>' ?></h2></div>
+  <?php if ($sandbox): ?>
+    <p>The CRM is using the <b>aBILLity sandbox</b><?= setting('abillity_system') ? ' (system ' . h(setting('abillity_system')) . ')' : '' ?>: customers, products and services go there for testing, not to live billing.
+      Customers aren't created in Xero. Your live login and links to live aBILLity records are kept aside, untouched, until you switch back.</p>
+    <form method="post" action="<?= h(url('abillity', ['do' => 'env'])) ?>" data-confirm="Switch back to live aBILLity? Sandbox links are kept aside for next time, and live billing carries on where it left off."><?= csrf_field() ?>
+      <input type="hidden" name="env" value="live"><button class="btn btn-primary">Switch back to live</button></form>
+    <p class="help mt-3">Anything added while in the sandbox has no live aBILLity link. If it's real, send it with <b>Send to aBILLity</b> on its page after switching back.</p>
+  <?php else: ?>
+    <p>The CRM is sending to <b>live aBILLity</b>. To try things out without touching live billing, switch to Giacom's sandbox (system <?= h(ABILLITY_SANDBOX_SYSTEM) ?>):
+      your live login and the CRM's links to live aBILLity records are put aside and brought back when you switch back.</p>
+    <form method="post" action="<?= h(url('abillity', ['do' => 'env'])) ?>" data-confirm="Switch to the aBILLity sandbox? Until you switch back, everything sent to aBILLity goes to the sandbox, not live billing, and customers aren't created in Xero."><?= csrf_field() ?>
+      <input type="hidden" name="env" value="sandbox"><button class="btn">Switch to the sandbox</button></form>
+  <?php endif; ?>
+</section>
+
 <div class="grid-2">
   <section class="card">
     <div class="card-head"><h2><span class="step <?= $ok ? 'step-done' : '' ?>">1</span> API login</h2></div>
     <p class="help">Use an aBILLity portal user set up for the API. What it can do follows that user's permissions in aBILLity. The details are checked before they're saved, and the password is stored encrypted.</p>
     <form method="post" class="stack" action="<?= h(url('abillity')) ?>">
       <?= csrf_field() ?>
-      <label>System name<input name="system" value="<?= h(setting('abillity_system')) ?>" autocomplete="off" spellcheck="false"><span class="help">The "SystemInformation" (branding) name Giacom gave you.</span></label>
+      <label>System name<input name="system" value="<?= h(setting('abillity_system') ?: ($sandbox ? ABILLITY_SANDBOX_SYSTEM : '')) ?>" autocomplete="off" spellcheck="false"><span class="help">The "SystemInformation" name Giacom gave you: the part after billing.abillity.co.uk/ in the address you log in at<?= $sandbox ? ', ' . h(ABILLITY_SANDBOX_SYSTEM) . ' for the sandbox' : '' ?>.</span></label>
       <label>Username<input name="username" value="<?= h(setting('abillity_username')) ?>" autocomplete="off" spellcheck="false"></label>
       <label>Password<input type="password" name="password" autocomplete="new-password" <?= setting('abillity_password') ? 'placeholder="•••••••• saved (leave blank to keep)"' : '' ?>></label>
       <label class="check"><input type="checkbox" name="auto" value="1" <?= setting('abillity_auto', '1') === '1' ? 'checked' : '' ?>> Send changes as soon as they're saved</label>
@@ -18,7 +35,7 @@
       <label>Provisional start for services not yet live (days ahead)<input name="provisional_days" inputmode="numeric" value="<?= h((string)abillity_provisional_days()) ?>">
         <span class="help">A pending service goes into aBILLity with this start date, so it isn't billed before it's live. When it goes live, the real start date replaces it.</span></label>
       <details <?= setting('abillity_url') ? 'open' : '' ?>><summary>Advanced</summary>
-        <label>API address<input name="api_url" value="<?= h(setting('abillity_url')) ?>" placeholder="<?= h(ABILLITY_DEFAULT_URL) ?>"><span class="help">Only change this for a test (beta) system Giacom gives you.</span></label>
+        <label>API address<input name="api_url" value="<?= h(setting('abillity_url')) ?>" placeholder="<?= h(ABILLITY_DEFAULT_URL) ?>"><span class="help">Leave blank: live and the sandbox use the same API address, and the system name chooses between them.</span></label>
       </details>
       <button class="btn btn-primary">Save and test</button>
     </form>
