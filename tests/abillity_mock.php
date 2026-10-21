@@ -40,7 +40,9 @@ $siteRow = function (array $site) use (&$state): array {
 switch (true) {
     case $method === 'GET' && $path === 'common/frequencytype':
         $out(200, [['Id' => 1, 'Description' => 'Annual', 'Months' => 12], ['Id' => 2, 'Description' => 'Monthly', 'Months' => 1],
-            ['Id' => 3, 'Description' => 'One off', 'Months' => 0], ['Id' => 4, 'Description' => 'Quarterly', 'Months' => 3]]);
+            ['Id' => 3, 'Description' => 'One off', 'Months' => 0], ['Id' => 4, 'Description' => 'Quarterly', 'Months' => 3],
+            ['Id' => 5, 'Description' => 'Every 3 Years', 'Months' => 36], ['Id' => 6, 'Description' => 'Every 2 Years', 'Months' => 24],
+            ['Id' => 7, 'Description' => '6 Monthly', 'Months' => 6]]);
 
     case $method === 'GET' && $path === 'company/MyCompany':
         $out(200, ['Id' => 1, 'Name' => 'Netcomm UK (test)']);

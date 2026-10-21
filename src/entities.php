@@ -66,11 +66,13 @@ const STAGE_PROBABILITY = ['lead' => 10, 'qualified' => 25, 'proposal' => 50, 'n
 
 /** Billing cycles, and how many of each make a month (for MRR). */
 const BILLING_FREQUENCIES = [
-    'weekly' => 'Weekly', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'biannually' => 'Bi-annually', 'yearly' => 'Yearly',
-    'one_off' => 'One-off',
+    'weekly' => 'Weekly', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'biannually' => 'Every 6 months', 'yearly' => 'Yearly',
+    'two_yearly' => 'Every 2 years', 'three_yearly' => 'Every 3 years', 'one_off' => 'One-off',
 ];
+/** Months in each billing cycle (0: one-off). */
+const BILLING_CYCLE_MONTHS = ['monthly' => 1, 'quarterly' => 3, 'biannually' => 6, 'yearly' => 12, 'two_yearly' => 24, 'three_yearly' => 36, 'one_off' => 0];
 // A one-off charge (e.g. installation, hardware bought outright) adds nothing per month.
-const BILLING_PER_MONTH = ['weekly' => 52 / 12, 'monthly' => 1, 'quarterly' => 1 / 3, 'biannually' => 1 / 6, 'yearly' => 1 / 12, 'one_off' => 0];
+const BILLING_PER_MONTH = ['weekly' => 52 / 12, 'monthly' => 1, 'quarterly' => 1 / 3, 'biannually' => 1 / 6, 'yearly' => 1 / 12, 'two_yearly' => 1 / 24, 'three_yearly' => 1 / 36, 'one_off' => 0];
 
 /** A price per billing cycle as a monthly amount (services and quotes work in monthly amounts). */
 function monthly_equivalent(mixed $price, ?string $frequency): float
@@ -80,7 +82,7 @@ function monthly_equivalent(mixed $price, ?string $frequency): float
 
 function billing_monthly_sql(string $price, string $frequency): string
 {
-    return "ROUND($price * CASE $frequency WHEN 'weekly' THEN 52/12 WHEN 'quarterly' THEN 1/3 WHEN 'biannually' THEN 1/6 WHEN 'yearly' THEN 1/12 WHEN 'one_off' THEN 0 ELSE 1 END, 2)";
+    return "ROUND($price * CASE $frequency WHEN 'weekly' THEN 52/12 WHEN 'quarterly' THEN 1/3 WHEN 'biannually' THEN 1/6 WHEN 'yearly' THEN 1/12 WHEN 'two_yearly' THEN 1/24 WHEN 'three_yearly' THEN 1/36 WHEN 'one_off' THEN 0 ELSE 1 END, 2)";
 }
 
 const MARKETING_SOURCES = [
@@ -306,7 +308,11 @@ function entities(): array
                 'setup_fee'         => ['label' => 'Setup fee', 'type' => 'money', 'help' => 'One-off'],
                 'term_months'       => ['label' => 'Term', 'type' => 'term', 'required' => true, 'default' => 24],
                 'active'            => ['label' => 'Available to sell', 'type' => 'bool', 'default' => 1],
-                'description'       => ['label' => 'Description', 'type' => 'textarea'],
+                'description'       => ['label' => 'Description', 'type' => 'textarea', 'help' => 'Its first line is the billing description in aBILLity (the name is used when blank)'],
+                'rental'            => ['label' => 'Rental', 'type' => 'bool', 'default' => 1, 'section' => 'Billing (aBILLity)',
+                    'section_help' => 'How the product is set up as a charge type in aBILLity: the SKU is the charge type, the sale price is the default RRP, the cost price the default cost and the sales nominal code the nominal code.',
+                    'help' => 'An ongoing rental, such as broadband or a line. One-off products are never rentals'],
+                'termination_charge' => ['label' => 'Termination charge', 'type' => 'bool', 'help' => 'Termination charges are payable if it\'s cancelled early'],
                 'visibility'        => ['label' => 'Offered to', 'type' => 'select', 'options' => PRODUCT_VISIBILITY, 'default' => 'both', 'section' => 'Dealer portal',
                     'help' => 'Direct customers only: not on the partner portal. Dealers only: on the portal, but not offered when ordering for a direct customer'],
                 'dealer_price'      => ['label' => 'Dealer price', 'type' => 'money',

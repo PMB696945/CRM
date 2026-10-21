@@ -16,7 +16,6 @@ declare(strict_types=1);
 const ABILLITY_DEFAULT_URL = 'https://api-billing.abillity.co.uk/api';
 // FrequencyTypeId values in aBILLity.
 const ABILLITY_FREQUENCY = ['yearly' => 1, 'monthly' => 2, 'one_off' => 3, 'quarterly' => 4];
-const ABILLITY_FREQUENCY_MONTHS = [1 => 12, 2 => 1, 3 => 0, 4 => 3];
 
 final class AbillityException extends IntegrationException
 {
@@ -37,7 +36,7 @@ const ABILLITY_LINK_COLUMNS = [
         'abillity_provisional', 'abillity_pending', 'abillity_synced_at', 'abillity_error'],
 ];
 const ABILLITY_ENV_SETTINGS = ['abillity_system', 'abillity_username', 'abillity_password', 'abillity_url', 'abillity_auto',
-    'abillity_connected_at', 'abillity_last_sync_at'];
+    'abillity_connected_at', 'abillity_last_sync_at', 'abillity_frequency_types'];
 
 function abillity_env(): string
 {
@@ -365,9 +364,54 @@ function abillity_push_billing_contact(array $a, int $siteId): void
 /* -------------------------------------------------------------- Products --- */
 
 /** aBILLity frequency for a product's billing cycle (cycles aBILLity doesn't have are billed monthly). */
+/** aBILLity's frequency types (Id, Description, Months), read from aBILLity and kept for a day. */
+function abillity_frequency_types(): array
+{
+    $cached = json_decode((string)setting('abillity_frequency_types'), true);
+    if (is_array($cached) && !empty($cached['types']) && ($cached['at'] ?? 0) > time() - 86400) {
+        return $cached['types'];
+    }
+    try {
+        $types = [];
+        foreach ((array)abillity_api('GET', 'common/frequencytype') as $t) {
+            if (isset($t['Id'])) {
+                $types[] = ['Id' => (int)$t['Id'], 'Description' => (string)($t['Description'] ?? ''), 'Months' => (int)($t['Months'] ?? 0)];
+            }
+        }
+        if ($types) {
+            set_setting('abillity_frequency_types', json_encode(['at' => time(), 'types' => $types]));
+            return $types;
+        }
+    } catch (IntegrationException) {
+        // Use what was read before, or the standard ones.
+    }
+    return $cached['types'] ?? [['Id' => 1, 'Description' => 'Annual', 'Months' => 12], ['Id' => 2, 'Description' => 'Monthly', 'Months' => 1],
+        ['Id' => 3, 'Description' => 'One off', 'Months' => 0], ['Id' => 4, 'Description' => 'Quarterly', 'Months' => 3]];
+}
+
+/**
+ * aBILLity's frequency for one of our billing cycles, matched by how many months it covers: [Id, months],
+ * or null when aBILLity has none (weekly).
+ */
+function abillity_frequency_for(?string $billingFrequency): ?array
+{
+    $months = BILLING_CYCLE_MONTHS[$billingFrequency ?? 'monthly'] ?? null;
+    if ($months === null) {
+        return null;
+    }
+    foreach (abillity_frequency_types() as $t) {
+        $oneOff = $t['Months'] === 0 || stripos($t['Description'], 'one') !== false;
+        if ($months === 0 ? $oneOff : (!$oneOff && $t['Months'] === $months)) {
+            return [$t['Id'], $months];
+        }
+    }
+    return null;
+}
+
+/** aBILLity's frequency ID for a billing cycle; one it doesn't have (weekly) is billed monthly. */
 function abillity_frequency(?string $billingFrequency): int
 {
-    return ABILLITY_FREQUENCY[$billingFrequency ?? 'monthly'] ?? ABILLITY_FREQUENCY['monthly'];
+    return (abillity_frequency_for($billingFrequency) ?? abillity_frequency_for('monthly') ?? [ABILLITY_FREQUENCY['monthly']])[0];
 }
 
 /** Create or update a product as an aBILLity service charge type. Returns its ID. */
@@ -375,21 +419,29 @@ function abillity_push_product(int $productId): int
 {
     $p = db_one('SELECT * FROM products WHERE id = ?', [$productId]) ?? throw new AbillityException('Product not found.');
     $frequency = abillity_frequency($p['billing_frequency']);
-    // Prices on products are per billing cycle. A cycle aBILLity doesn't have (weekly, bi-annually) is sent as monthly.
-    $native = isset(ABILLITY_FREQUENCY[$p['billing_frequency'] ?? 'monthly']);
+    // One price per billing cycle, as set on the product. Only a cycle aBILLity doesn't have (weekly) is sent as monthly.
+    $native = abillity_frequency_for($p['billing_frequency']) !== null;
     $perCycle = fn($price) => $price === null ? null : ($native ? round((float)$price, 2) : monthly_equivalent($price, $p['billing_frequency']));
+    $oneOff = ($p['billing_frequency'] ?? '') === 'one_off';
+    $description = trim((string)strtok(str_replace("\r", '', (string)$p['description']), "\n")) ?: $p['name'];
     $body = array_filter([
-        'RecurringChargeType' => mb_substr($p['name'], 0, 50),
-        'DefaultDescription'  => mb_substr($p['name'], 0, 100),
+        'RecurringChargeType' => mb_substr($p['sku'] ?: $p['name'], 0, 50), // the charge type is our product code
+        'DefaultDescription'  => mb_substr($description, 0, 100),           // what the customer's bill says
         'FrequencyTypeId'     => $frequency,
         'DefaultSalePrice'    => $perCycle($p['monthly_price']),
         'DefaultCost'         => $perCycle($p['cost_price']),
-        'Rental'              => $frequency !== ABILLITY_FREQUENCY['one_off'],
+        'Rental'              => !$oneOff && (bool)($p['rental'] ?? 1), // aBILLity won't take a one-off rental
+        'TerminationCharge'   => (bool)($p['termination_charge'] ?? 0),
         'Nominal'             => $p['sales_account_code'] ? mb_substr($p['sales_account_code'], 0, 50) : null,
     ], fn($v) => $v !== null);
     try {
         $id = (int)$p['abillity_charge_type_id'];
         $update = (bool)$id;
+        if (!$id && ($found = abillity_find_charge_type($body['RecurringChargeType']) ?? ($p['sku'] ? abillity_find_charge_type($p['name']) : null))) {
+            // Already in aBILLity (by our product code, or by name from before): link to it and bring it up to date.
+            $id = $found;
+            $update = true;
+        }
         if (!$id) {
             try {
                 $id = (int)abillity_new_id(abillity_api('POST', 'servicechargetype', $body));
@@ -404,8 +456,8 @@ function abillity_push_product(int $productId): int
             }
         }
         if (!$id) {
-            $id = abillity_find_charge_type($p['name'])
-                ?? throw new AbillityException('aBILLity has a charge type called "' . $p['name'] . '" but it couldn\'t be matched. Enter its ID on the product.');
+            $id = abillity_find_charge_type($body['RecurringChargeType'])
+                ?? throw new AbillityException('aBILLity has a charge type called "' . $body['RecurringChargeType'] . '" but it couldn\'t be matched. Enter its ID on the product.');
         }
         if ($update) {
             abillity_api('PATCH', "servicechargetype/$id", $body);
@@ -491,8 +543,8 @@ function abillity_push_service(int $serviceId): void
             }
         }
 
-        $frequency = abillity_frequency($s['billing_frequency'] === 'one_off' ? 'monthly' : $s['billing_frequency']);
-        $months = ABILLITY_FREQUENCY_MONTHS[$frequency];
+        [$frequency, $months] = abillity_frequency_for($s['billing_frequency'] === 'one_off' ? 'monthly' : $s['billing_frequency'])
+            ?? [abillity_frequency('monthly'), 1];
         // aBILLity takes one price per billing cycle. Services keep monthly amounts (the price and the cost when it was
         // sold), so a quarterly or yearly one is sent at the product's own price when it matches, rather than the
         // monthly figure multiplied back up (which can be a penny or two out).
@@ -559,7 +611,7 @@ function abillity_push_service(int $serviceId): void
         if ((float)$s['setup_fee'] > 0 && !$sent($s['abillity_setup_charge_id'])) {
             $setupDescription = mb_substr("Setup – $name – {$s['identifier']}", 0, 100);
             $setup = array_filter([
-                'SiteId' => $siteId, 'Description' => $setupDescription, 'FrequencyTypeId' => ABILLITY_FREQUENCY['one_off'], 'SalesPrice' => round((float)$s['setup_fee'], 2),
+                'SiteId' => $siteId, 'Description' => $setupDescription, 'FrequencyTypeId' => abillity_frequency('one_off'), 'SalesPrice' => round((float)$s['setup_fee'], 2),
                 'FirstPayment' => abillity_date($first), 'SerialNo' => mb_substr($s['identifier'], 0, 40), 'Notes' => "CRM service #{$s['id']} setup",
             ]) + ['Quantity' => 1, 'Rental' => false, 'BackDatable' => true];
             $id = abillity_new_id(abillity_api('POST', 'servicecharge/v2', $setup)) ?? abillity_find_service_charge($siteId, $setupDescription, "CRM service #{$s['id']} setup");

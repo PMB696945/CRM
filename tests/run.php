@@ -703,6 +703,7 @@ test('aBILLity: customers go to aBILLity and Xero together; products and service
     as_role('super_admin');
     $cfg = &config_ref();
     $cfg['abillity_url'] = "http://127.0.0.1:$abPort/api";
+    set_setting('abillity_frequency_types', null); // read afresh from this aBILLity
     ok(!abillity_configured());
     try { abillity_api('GET', 'common/frequencytype', null, [], ['system' => 'TESTSYS', 'username' => 'api-user', 'password' => 'wrong']); throw new Exception('expected failure'); }
     catch (AbillityException $e) { ok(str_contains($e->getMessage(), '(401)') && str_contains($e->getMessage(), 'Admin → aBILLity'), $e->getMessage()); }
@@ -767,11 +768,20 @@ test('aBILLity: customers go to aBILLity and Xero together; products and service
     ab_set(['no_cp' => false]);
 
     // Products become service charge types; one already there with that name is linked.
-    $broadband = create('products', ['sku' => 'AB-FTTP', 'name' => 'Business Fibre 500', 'category' => 'broadband', 'monthly_price' => '120', 'cost_price' => '75',
+    $broadband = create('products', ['sku' => 'AB-FTTP', 'name' => 'Business Fibre 500', 'category' => 'broadband', 'monthly_price' => '120', 'cost_price' => '75', 'rental' => '1',
         'billing_frequency' => 'quarterly', 'term_months' => '24', 'sales_account_code' => '200']);
     $typeId = abillity_push_product($broadband);
     $t = ab_state()['types'][$typeId];
-    eq(['Business Fibre 500', 4, 120, 75, true, '200'], [$t['RecurringChargeType'], $t['FrequencyTypeId'], $t['DefaultSalePrice'], $t['DefaultCost'], $t['Rental'], $t['Nominal']], 'price per quarter');
+    eq(['AB-FTTP', 'Business Fibre 500', 4, 120, 75, true, false, '200'], [$t['RecurringChargeType'], $t['DefaultDescription'], $t['FrequencyTypeId'], $t['DefaultSalePrice'], $t['DefaultCost'], $t['Rental'], $t['TerminationCharge'], $t['Nominal']],
+        'charge type = product code, billing description = name, price per quarter');
+    // aBILLity's other cycles, matched by months: every 6 months, 2 and 3 years; the rental and termination charge flags.
+    foreach (['biannually' => 7, 'two_yearly' => 6, 'three_yearly' => 5] as $freq => $fid) {
+        $pid = create('products', ['sku' => "AB-$freq", 'name' => "Support $freq", 'description' => "Remote support ($freq)\nInternal notes", 'category' => 'other',
+            'billing_frequency' => $freq, 'monthly_price' => '240', 'term_months' => '24', 'rental' => '0', 'termination_charge' => '1']);
+        $tid = abillity_push_product($pid);
+        $t = ab_state()['types'][$tid];
+        eq([$fid, 240.0, false, true, "Remote support ($freq)"], [$t['FrequencyTypeId'], (float)$t['DefaultSalePrice'], $t['Rental'], $t['TerminationCharge'], $t['DefaultDescription']], $freq);
+    }
     $install = create('products', ['sku' => 'AB-INST', 'name' => 'Engineer installation', 'category' => 'other', 'monthly_price' => '150', 'billing_frequency' => 'one_off', 'term_months' => '0']);
     $iid = abillity_push_product($install);
     $t = ab_state()['types'][$iid];

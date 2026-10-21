@@ -1233,4 +1233,12 @@ return [
             PRIMARY KEY (env, table_name, row_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     },
+    47 => function (): void {
+        // aBILLity charge type settings on products: rental (broadband, lines...) and whether termination charges apply.
+        if (!column_exists('products', 'rental')) {
+            db()->exec('ALTER TABLE products ADD COLUMN rental TINYINT(1) NOT NULL DEFAULT 1 AFTER visibility,
+                ADD COLUMN termination_charge TINYINT(1) NOT NULL DEFAULT 0 AFTER rental');
+            db()->exec("UPDATE products SET rental = 0 WHERE billing_frequency = 'one_off'");
+        }
+    },
 ];
