@@ -467,7 +467,7 @@ function abillity_provisional_days(): int
  */
 function abillity_push_service(int $serviceId): void
 {
-    $s = db_one('SELECT s.*, p.name AS product_name, p.billing_frequency, p.monthly_price AS product_price, p.cost_price, p.abillity_charge_type_id
+    $s = db_one('SELECT s.*, p.name AS product_name, p.billing_frequency, p.monthly_price AS product_price, p.cost_price AS product_cost, p.abillity_charge_type_id
         FROM services s LEFT JOIN products p ON p.id = s.product_id WHERE s.id = ?', [$serviceId]) ?? throw new AbillityException('Service not found.');
     try {
         $customer = db_one('SELECT * FROM accounts WHERE id = ?', [$s['account_id']]);
@@ -493,8 +493,21 @@ function abillity_push_service(int $serviceId): void
 
         $frequency = abillity_frequency($s['billing_frequency'] === 'one_off' ? 'monthly' : $s['billing_frequency']);
         $months = ABILLITY_FREQUENCY_MONTHS[$frequency];
+        // aBILLity takes one price per billing cycle. Services keep monthly amounts (the price and the cost when it was
+        // sold), so a quarterly or yearly one is sent at the product's own price when it matches, rather than the
+        // monthly figure multiplied back up (which can be a penny or two out).
+        $native = $months > 1 && $s['billing_frequency'] !== 'one_off';
+        $perCycle = function (?float $monthly, mixed $productPrice) use ($months, $native, $s): ?float {
+            if ($monthly === null) {
+                return null;
+            }
+            if ($native && $productPrice !== null && abs(monthly_equivalent($productPrice, $s['billing_frequency']) - $monthly) < 0.005) {
+                return round((float)$productPrice, 2);
+            }
+            return round($monthly * $months, 2);
+        };
         $monthly = $s['monthly_price'] !== null ? (float)$s['monthly_price'] : monthly_equivalent($s['product_price'], $s['billing_frequency']);
-        $cost = $s['cost_price'] !== null ? monthly_equivalent($s['cost_price'], $s['billing_frequency']) : null;
+        $cost = $s['cost_price'] !== null ? (float)$s['cost_price'] : ($s['product_cost'] !== null ? monthly_equivalent($s['product_cost'], $s['billing_frequency']) : null);
         // Live (active, suspended or ceased): billed from its start date, or from today if none was entered.
         $live = in_array($s['status'], ['active', 'suspended', 'ceased'], true);
         $first = $live
@@ -522,7 +535,7 @@ function abillity_push_service(int $serviceId): void
 
         $charge = array_filter([
             'Description' => $description, 'ChargeId' => $s['abillity_charge_type_id'] ? (int)$s['abillity_charge_type_id'] : null,
-            'FrequencyTypeId' => $frequency, 'SalesPrice' => round($monthly * $months, 2), 'CostPrice' => $cost !== null ? round($cost * $months, 2) : null,
+            'FrequencyTypeId' => $frequency, 'SalesPrice' => $perCycle($monthly, $s['product_price']), 'CostPrice' => $perCycle($cost, $s['product_cost']),
             'FirstPayment' => abillity_date($first), 'LastPayment' => abillity_date($last),
             'SerialNo' => mb_substr($s['identifier'], 0, 40), 'Notes' => $notes,
         ], fn($v) => $v !== null) + ['Quantity' => 1, 'Rental' => true, 'BackDatable' => true];

@@ -1078,6 +1078,32 @@ test('aBILLity live and sandbox: switching puts one system\'s links and login as
     }
 });
 
+test('aBILLity: services are charged one price per billing cycle, exactly; one-off products are charged once', function () {
+    as_role('super_admin');
+    foreach (['abillity_system' => 'TESTSYS', 'abillity_username' => 'api-user', 'abillity_password' => 'api-pass'] as $k => $v) {
+        set_setting($k, $v);
+    }
+    $acct = create('accounts', ['name' => 'Cycle Price Ltd', 'account_number' => 'CYCL001', 'type' => 'business', 'status' => 'active', 'address' => '1 Road', 'city' => 'Leeds', 'postcode' => 'LS1 1AA']);
+    $c = create('contacts', ['account_id' => $acct, 'name' => 'Cy Cle', 'email' => 'cy@cycle.example', 'is_billing' => '1']);
+    db_exec('UPDATE accounts SET billing_contact_id = ?, main_contact_id = ? WHERE id = ?', [$c, $c, $acct]);
+    $q = create('products', ['sku' => 'CYC-Q', 'name' => 'Quarterly support', 'category' => 'other', 'billing_frequency' => 'quarterly', 'monthly_price' => '59.99', 'cost_price' => '30.01', 'term_months' => '12']);
+    $svc = insert_row('services', ['account_id' => $acct, 'product_id' => $q, 'identifier' => 'CYC-1', 'status' => 'active', 'start_date' => date('Y-m-d')]);
+    eq(['20.00', '10.00'], array_values(db_one('SELECT monthly_price, cost_price FROM services WHERE id = ?', [$svc])), 'kept monthly on the service');
+    db_exec('UPDATE products SET cost_price = 45 WHERE id = ?', [$q]); // the supplier puts the cost up later
+    abillity_push_service($svc);
+    $charge = ab_state()['charges'][db_value('SELECT abillity_charge_id FROM services WHERE id = ?', [$svc])];
+    eq([4, 59.99, 30.0], [$charge['FrequencyTypeId'], (float)$charge['SalesPrice'], (float)$charge['CostPrice']], 'the quarterly price as it is (not £20 × 3), and the cost when it was sold');
+    // A one-off product on a service: charged once at its price (plus any setup fee), not as a rental.
+    $kit = create('products', ['sku' => 'CYC-KIT', 'name' => 'Router bought outright', 'category' => 'hardware', 'billing_frequency' => 'one_off', 'monthly_price' => '60', 'setup_fee' => '5', 'term_months' => '0']);
+    $one = insert_row('services', ['account_id' => $acct, 'product_id' => $kit, 'identifier' => 'CYC-KIT-1', 'status' => 'active', 'start_date' => date('Y-m-d')]);
+    eq(['0.00', '65.00'], array_values(db_one('SELECT monthly_price, setup_fee FROM services WHERE id = ?', [$one])));
+    abillity_push_service($one);
+    $s = db_one('SELECT * FROM services WHERE id = ?', [$one]);
+    ok($s['abillity_charge_id'] === null && $s['abillity_setup_charge_id'], 'no rental, one one-off charge');
+    $setup = ab_state()['charges'][$s['abillity_setup_charge_id']];
+    eq([3, 65.0], [$setup['FrequencyTypeId'], (float)$setup['SalesPrice']]);
+});
+
 proc_terminate($mock);
 @unlink($mockState);
 proc_terminate($abProc);

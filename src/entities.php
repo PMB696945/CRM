@@ -823,7 +823,9 @@ function before_save(string $name, array $data, ?array $existing): array
                     $data['service_type'] = $data['service_type'] ?: $product['category'];
                     $data['carrier'] = $data['carrier'] ?: $product['carrier'];
                     $data['monthly_price'] ??= monthly_equivalent($product['monthly_price'], $product['billing_frequency'] ?? 'monthly');
-                    $data['setup_fee'] ??= $product['setup_fee'];
+                    // A one-off product (e.g. hardware bought outright) is charged once: its price is the setup charge.
+                    $data['setup_fee'] ??= ($product['billing_frequency'] ?? '') === 'one_off'
+                        ? round((float)$product['monthly_price'] + (float)$product['setup_fee'], 2) : $product['setup_fee'];
                     $data['term_months'] ??= $product['term_months'];
                     // The cost when it was ordered: kept, whatever the product's cost does later.
                     if ($existing === null && ($data['cost_price'] ?? null) === null && $product['cost_price'] !== null) {
