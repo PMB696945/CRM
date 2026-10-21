@@ -775,7 +775,7 @@ test('aBILLity: customers go to aBILLity and Xero together; products and service
     $install = create('products', ['sku' => 'AB-INST', 'name' => 'Engineer installation', 'category' => 'other', 'monthly_price' => '150', 'billing_frequency' => 'one_off', 'term_months' => '0']);
     $iid = abillity_push_product($install);
     $t = ab_state()['types'][$iid];
-    eq([3, false], [$t['FrequencyTypeId'], $t['Rental']], 'one-off, not a rental');
+    eq([3, false, 150.0], [$t['FrequencyTypeId'], $t['Rental'], (float)$t['DefaultSalePrice']], 'one-off, not a rental, at its exact price');
     $weekly = create('products', ['sku' => 'AB-WK', 'name' => 'Weekly thing', 'category' => 'other', 'monthly_price' => '12', 'billing_frequency' => 'weekly', 'term_months' => '1']);
     $wid = abillity_push_product($weekly);
     $t = ab_state()['types'][$wid];

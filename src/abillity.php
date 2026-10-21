@@ -393,8 +393,8 @@ function abillity_push_product(int $productId): int
         if (!$id) {
             try {
                 $id = (int)abillity_new_id(abillity_api('POST', 'servicechargetype', $body));
-                // aBILLity can store a new charge type's price rounded through a monthly figure (a £60 quarterly
-                // price showing as £59.97); sending it again as an update sets the exact price.
+                // aBILLity can store a slightly different price on a newly created charge type (a £60 one-off
+                // showing as £59.97); sending it again as an update sets the exact price.
                 $update = true;
             } catch (AbillityException $e) {
                 if (!str_contains($e->getMessage(), '(409)')) {
