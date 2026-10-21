@@ -38,7 +38,7 @@ $cancel = $return ?: ($existing ? url($name, ['action' => 'view', 'id' => $exist
           <?php break;
           case 'select': ?>
             <select id="<?= h($id) ?>" name="<?= h($field) ?>" <?= !empty($def['required']) ? 'required' : '' ?>>
-              <option value="">—</option>
+              <?php if (empty($def['no_blank'])): ?><option value="">—</option><?php endif; ?>
               <?php foreach ($def['options'] as $k => $label): ?>
                 <option value="<?= h($k) ?>" <?= (string)$value === (string)$k ? 'selected' : '' ?>><?= h($label) ?></option>
               <?php endforeach; ?>

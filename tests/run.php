@@ -772,15 +772,15 @@ test('aBILLity: customers go to aBILLity and Xero together; products and service
         'billing_frequency' => 'quarterly', 'term_months' => '24', 'sales_account_code' => '200']);
     $typeId = abillity_push_product($broadband);
     $t = ab_state()['types'][$typeId];
-    eq(['AB-FTTP', 'Business Fibre 500', 4, 120, 75, true, false, '200'], [$t['RecurringChargeType'], $t['DefaultDescription'], $t['FrequencyTypeId'], $t['DefaultSalePrice'], $t['DefaultCost'], $t['Rental'], $t['TerminationCharge'], $t['Nominal']],
+    eq(['AB-FTTP', 'Business Fibre 500', 4, 120, 75, true, false, false, '200'], [$t['RecurringChargeType'], $t['DefaultDescription'], $t['FrequencyTypeId'], $t['DefaultSalePrice'], $t['DefaultCost'], $t['Rental'], $t['TerminationCharge'], $t['SetImportTypeAsPassThrough'], $t['Nominal']],
         'charge type = product code, billing description = name, price per quarter');
     // aBILLity's other cycles, matched by months: every 6 months, 2 and 3 years; the rental and termination charge flags.
     foreach (['biannually' => 7, 'two_yearly' => 6, 'three_yearly' => 5] as $freq => $fid) {
         $pid = create('products', ['sku' => "AB-$freq", 'name' => "Support $freq", 'description' => "Remote support ($freq)\nInternal notes", 'category' => 'other',
-            'billing_frequency' => $freq, 'monthly_price' => '240', 'term_months' => '24', 'rental' => '0', 'termination_charge' => '1']);
+            'billing_frequency' => $freq, 'monthly_price' => '240', 'term_months' => '24', 'rental' => '0', 'termination_charge' => '1', 'supplier_import' => '1']);
         $tid = abillity_push_product($pid);
         $t = ab_state()['types'][$tid];
-        eq([$fid, 240.0, false, true, "Remote support ($freq)"], [$t['FrequencyTypeId'], (float)$t['DefaultSalePrice'], $t['Rental'], $t['TerminationCharge'], $t['DefaultDescription']], $freq);
+        eq([$fid, 240.0, false, true, true, "Remote support ($freq)"], [$t['FrequencyTypeId'], (float)$t['DefaultSalePrice'], $t['Rental'], $t['TerminationCharge'], $t['SetImportTypeAsPassThrough'], $t['DefaultDescription']], $freq);
     }
     $install = create('products', ['sku' => 'AB-INST', 'name' => 'Engineer installation', 'category' => 'other', 'monthly_price' => '150', 'billing_frequency' => 'one_off', 'term_months' => '0']);
     $iid = abillity_push_product($install);

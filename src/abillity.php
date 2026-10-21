@@ -432,6 +432,7 @@ function abillity_push_product(int $productId): int
         'DefaultCost'         => $perCycle($p['cost_price']),
         'Rental'              => !$oneOff && (bool)($p['rental'] ?? 1), // aBILLity won't take a one-off rental
         'TerminationCharge'   => (bool)($p['termination_charge'] ?? 0),
+        'SetImportTypeAsPassThrough' => (bool)($p['supplier_import'] ?? 0), // "Import": expected in a supplier's file
         'Nominal'             => $p['sales_account_code'] ? mb_substr($p['sales_account_code'], 0, 50) : null,
     ], fn($v) => $v !== null);
     try {

@@ -1241,4 +1241,10 @@ return [
             db()->exec("UPDATE products SET rental = 0 WHERE billing_frequency = 'one_off'");
         }
     },
+    48 => function (): void {
+        // Whether a product is expected in a supplier's file imported into aBILLity.
+        if (!column_exists('products', 'supplier_import')) {
+            db()->exec('ALTER TABLE products ADD COLUMN supplier_import TINYINT(1) NOT NULL DEFAULT 0 AFTER termination_charge');
+        }
+    },
 ];

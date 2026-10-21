@@ -313,6 +313,8 @@ function entities(): array
                     'section_help' => 'How the product is set up as a charge type in aBILLity: the SKU is the charge type, the sale price is the default RRP, the cost price the default cost and the sales nominal code the nominal code.',
                     'help' => 'An ongoing rental, such as broadband or a line. One-off products are never rentals'],
                 'termination_charge' => ['label' => 'Termination charge', 'type' => 'bool', 'help' => 'Termination charges are payable if it\'s cancelled early'],
+                'supplier_import'   => ['label' => 'Import', 'type' => 'select', 'options' => ['0' => 'No', '1' => 'Yes'], 'default' => '0', 'no_blank' => true,
+                    'help' => 'Yes: a pass-through charge, expected to come through in a supplier\'s file imported into aBILLity'],
                 'visibility'        => ['label' => 'Offered to', 'type' => 'select', 'options' => PRODUCT_VISIBILITY, 'default' => 'both', 'section' => 'Dealer portal',
                     'help' => 'Direct customers only: not on the partner portal. Dealers only: on the portal, but not offered when ordering for a direct customer'],
                 'dealer_price'      => ['label' => 'Dealer price', 'type' => 'money',
@@ -935,6 +937,9 @@ function before_save(string $name, array $data, ?array $existing): array
             break;
 
         case 'products':
+            if (($existing === null || array_key_exists('supplier_import', $data)) && ($data['supplier_import'] ?? '') === '') {
+                $data['supplier_import'] = $existing['supplier_import'] ?? 0;
+            }
             if (($existing === null || array_key_exists('visibility', $data)) && empty($data['visibility'])) {
                 $data['visibility'] = $existing['visibility'] ?? 'both';
             }
