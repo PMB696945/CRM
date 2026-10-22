@@ -228,9 +228,9 @@ function billing_diary_controller(): void
         $out = fopen('php://output', 'w');
         fputcsv($out, ['Date', 'Customer', 'Account no.', 'Service', 'Change', 'From', 'To', 'Monthly change', 'One-off', 'Effective', 'By', 'Checked', 'Checked by', 'Note', 'aBILLity charge']);
         foreach ($rows as $r) {
-            fputcsv($out, [substr($r['created_at'], 0, 16), $r['account_name'], $r['account_number'], $r['summary'], SERVICE_CHANGE_TYPES[$r['change_type']] ?? $r['change_type'],
+            fputcsv($out, array_map(fn($v) => csv_safe((string)$v), [substr($r['created_at'], 0, 16), $r['account_name'], $r['account_number'], $r['summary'], SERVICE_CHANGE_TYPES[$r['change_type']] ?? $r['change_type'],
                 $r['from_value'], $r['to_value'], $r['monthly_change'], $r['one_off'], $r['effective_date'], $r['user_name'] ?: 'System',
-                $r['checked_at'] ? substr($r['checked_at'], 0, 16) : '', $r['checked_by_name'], $r['check_note'], $r['abillity_charge_id']]);
+                $r['checked_at'] ? substr($r['checked_at'], 0, 16) : '', $r['checked_by_name'], $r['check_note'], $r['abillity_charge_id']]), escape: '');
         }
         exit;
     }
