@@ -340,3 +340,40 @@ function security_headers(): void
         header('Strict-Transport-Security: max-age=31536000');
     }
 }
+
+/*
+ * PHP2Shell (CVE-2026-109618 / CVE-2026-109619): bugs in PHP itself, reached by any multipart form post
+ * before the CRM's code runs, so only updating PHP fixes them. Fixed in 8.2.35, 8.3.36, 8.4.27 and 8.5.12.
+ * PHP 8.1 and older only get fixes from the host (e.g. cPanel's ea-php81 8.1.34-5), which keep the same
+ * version number, so for those an admin confirms the host has patched it.
+ */
+const PHP2SHELL_FIXED = [80200 => 80235, 80300 => 80336, 80400 => 80427, 80500 => 80512];
+
+/** 'patched', 'vulnerable' (a known unpatched version) or 'unknown' (8.1 or older: ask the host). */
+function php2shell_status(?int $versionId = null): string
+{
+    $versionId ??= PHP_VERSION_ID;
+    $branch = intdiv($versionId, 100) * 100;
+    if (isset(PHP2SHELL_FIXED[$branch])) {
+        return $versionId >= PHP2SHELL_FIXED[$branch] ? 'patched' : 'vulnerable';
+    }
+    return $branch > 80500 ? 'patched' : 'unknown';
+}
+
+/** The warning for admins, or null when there's nothing to do. */
+function php2shell_warning(): ?string
+{
+    $status = php2shell_status();
+    if ($status === 'patched' || ($status === 'unknown' && setting('php2shell_confirmed') === PHP_VERSION . '|' . PHP_SAPI)) {
+        return null;
+    }
+    $mitigated = !ini_get('session.upload_progress.enabled') ? ' The interim protection (upload progress switched off) is in place, but it doesn\'t cover every case.' : '';
+    if ($status === 'vulnerable') {
+        return 'This server runs PHP ' . PHP_VERSION . ', which has the critical "PHP2Shell" flaws (CVE-2026-109618 / CVE-2026-109619) that let attackers take over web servers. '
+            . 'Update PHP to ' . vsprintf('%d.%d.%d', [intdiv($fixed = PHP2SHELL_FIXED[intdiv(PHP_VERSION_ID, 100) * 100], 10000), intdiv($fixed % 10000, 100), $fixed % 100])
+            . ' or newer now (cPanel: WHM → EasyApache 4, or ask your host), then restart PHP.' . $mitigated;
+    }
+    return 'This server runs PHP ' . PHP_VERSION . '. PHP 8.1 and older only get the fix for the critical "PHP2Shell" flaws (CVE-2026-109618 / CVE-2026-109619) from the hosting company, '
+        . 'and the version number doesn\'t change, so check with your host (or in WHM) that it\'s patched — on cPanel the ea-php81 package must be 8.1.34-5 or newer — and that PHP has been restarted. '
+        . 'Better still, move the CRM to PHP 8.3 or 8.4.' . $mitigated;
+}

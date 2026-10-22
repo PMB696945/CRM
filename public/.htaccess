@@ -8,6 +8,22 @@
 Options -Indexes
 DirectoryIndex index.php
 
-<FilesMatch "(\.log|^error_log|^php-handler\.json)$">
+<FilesMatch "(\.log|^error_log|^php-handler\.json|^\.user\.ini)$">
     Require all denied
 </FilesMatch>
+
+# PHP2Shell (CVE-2026-109618 / CVE-2026-109619) interim protection: switch off upload progress
+# tracking. The real fix is updating PHP. Each block only applies where that PHP handler is in use
+# (PHP-FPM and CGI read .user.ini instead), so it can't break the site on other setups.
+<IfModule mod_php.c>
+    php_flag session.upload_progress.enabled off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag session.upload_progress.enabled off
+</IfModule>
+<IfModule lsapi_module>
+    php_flag session.upload_progress.enabled off
+</IfModule>
+<IfModule Litespeed>
+    php_flag session.upload_progress.enabled off
+</IfModule>

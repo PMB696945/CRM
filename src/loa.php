@@ -170,7 +170,8 @@ function loa_save_settings(array $post, ?array $signature): void
         }
         $name = 'loa-signature-' . bin2hex(random_bytes(4)) . ($info[2] === IMAGETYPE_PNG ? '.png' : '.jpg');
         $dest = storage_path('branding') . '/' . $name;
-        if (!(is_uploaded_file($signature['tmp_name']) ? move_uploaded_file($signature['tmp_name'], $dest) : copy($signature['tmp_name'], $dest))) {
+        // Only files PHP received in this request (copying a local file is for the command-line tests).
+        if (!(is_uploaded_file($signature['tmp_name']) ? move_uploaded_file($signature['tmp_name'], $dest) : PHP_SAPI === 'cli' && copy($signature['tmp_name'], $dest))) {
             throw new IntegrationException('Couldn\'t save the signature. Check the storage folder is writable.');
         }
         set_setting('loa_signature', $name);

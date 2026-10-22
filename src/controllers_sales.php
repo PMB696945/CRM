@@ -476,6 +476,11 @@ function settings_controller(): void
     $before = array_combine($keys, array_map(fn($k) => (string)setting($k), $keys));
     if (is_post()) {
         verify_csrf();
+        if (query('action') === 'php_patched') {
+            set_setting('php2shell_confirmed', PHP_VERSION . '|' . PHP_SAPI);
+            audit('settings', 'Confirmed the host has patched PHP ' . PHP_VERSION . ' against PHP2Shell (CVE-2026-109618 / CVE-2026-109619)');
+            redirect(safe_return($_SERVER['HTTP_REFERER'] ?? null, url('dashboard')));
+        }
         if (query('action') === 'branding') {
             if (!empty($_POST['remove_logo'])) {
                 foreach (glob(storage_path('branding') . '/logo.*') ?: [] as $old) {

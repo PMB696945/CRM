@@ -85,6 +85,17 @@ test('contract end date is day before anniversary', function () {
     eq('2025-12-31', contract_end_date('2025-01-01', 12));
 });
 test('escaping helper', fn() => eq('&lt;script&gt;&quot;x&quot;', h('<script>"x"')));
+test('PHP2Shell: patched and unpatched PHP versions', function () {
+    eq('vulnerable', php2shell_status(80335));
+    eq('patched', php2shell_status(80336));
+    eq('vulnerable', php2shell_status(80426));
+    eq('patched', php2shell_status(80427));
+    eq('vulnerable', php2shell_status(80234));
+    eq('patched', php2shell_status(80512));
+    eq('patched', php2shell_status(80600));
+    eq('unknown', php2shell_status(80134));
+    eq('unknown', php2shell_status(70433));
+});
 test('csv formula injection neutralised', function () {
     eq("'=HYPERLINK(1)", csv_safe('=HYPERLINK(1)'));
     eq('-12.50', csv_safe('-12.50'));
