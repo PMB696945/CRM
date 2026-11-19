@@ -12,6 +12,16 @@
 Options -Indexes
 DirectoryIndex index.php
 
+# Don't reveal the server's software and versions: no PHP version header, and plain
+# error pages instead of Apache's, which name the server. (Hide the "Server" header
+# itself in WHM: Apache Configuration → Global Configuration → Server Tokens.)
+<IfModule mod_headers.c>
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
+</IfModule>
+ErrorDocument 403 "Forbidden"
+ErrorDocument 404 "Not found"
+
 <FilesMatch "^(app\.key|config(\.sample)?\.php|README\.md|\.gitignore|.*\.sql|.*\.log|error_log|package(-lock)?\.json)$">
     Require all denied
 </FilesMatch>

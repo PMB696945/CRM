@@ -8,6 +8,10 @@
  */
 
 ini_set('display_errors', '0');
+// Don't tell visitors which PHP version runs the site (it helps attackers pick an exploit).
+if (function_exists('header_remove')) {
+    header_remove('X-Powered-By');
+}
 $crmLog = dirname(__FILE__) . '/crm-error.log';
 if (is_writable(dirname(__FILE__)) || is_writable($crmLog)) {
     ini_set('error_log', $crmLog);

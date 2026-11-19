@@ -8,9 +8,27 @@
 Options -Indexes
 DirectoryIndex index.php
 
+# Don't reveal the server's software and versions: no PHP version header, and plain
+# error pages instead of Apache's, which name the server. (Hide the "Server" header
+# itself in WHM: Apache Configuration → Global Configuration → Server Tokens.)
+<IfModule mod_headers.c>
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
+</IfModule>
+ErrorDocument 403 "Forbidden"
+ErrorDocument 404 "Not found"
+
 <FilesMatch "(\.log|^error_log|^php-handler\.json|^\.user\.ini)$">
     Require all denied
 </FilesMatch>
+
+# security.txt (RFC 9116) is made by the CRM so its contact and expiry date stay current.
+# Other /.well-known/ files (e.g. SSL certificate checks) are left alone.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} ^(.*?/)(\.well-known/)?security\.txt$
+    RewriteRule ^(\.well-known/)?security\.txt$ %1security-txt.php [L]
+</IfModule>
 
 # PHP2Shell (CVE-2026-109618 / CVE-2026-109619) interim protection: switch off upload progress
 # tracking. The real fix is updating PHP. Each block only applies where that PHP handler is in use

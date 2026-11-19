@@ -32,6 +32,8 @@
       <div class="field wide"><label for="s_ca">Address</label><textarea id="s_ca" name="company_address" rows="3"><?= $v('company_address') ?></textarea></div>
       <div class="field"><label for="s_cp">Phone</label><input id="s_cp" name="company_phone" value="<?= $v('company_phone') ?>"></div>
       <div class="field"><label for="s_ce">Email</label><input id="s_ce" type="email" name="company_email" value="<?= $v('company_email') ?>"></div>
+      <div class="field"><label for="s_sec">Security contact</label><input id="s_sec" name="security_contact" value="<?= $v('security_contact') ?>" placeholder="<?= h(company('email') ?: 'security@yourcompany.co.uk') ?>">
+        <div class="help">Where people should report a security problem with the CRM. Published at <a href="<?= h(security_txt_url()) ?>" target="_blank" rel="noopener">/.well-known/security.txt</a>. Leave blank to use the company email.</div></div>
       <div class="field wide"><label for="s_url">CRM web address</label><input id="s_url" name="app_url" value="<?= $v('app_url') ?>" placeholder="<?= h($detectedUrl) ?>">
         <div class="help">Used for links in emails, such as the customer's quote link. Leave blank to use the address you're using now, <?= h($detectedUrl) ?>. Only set it if emails sent by the cron job have the wrong link.</div>
         <?php if ($warn = app_url_mismatch()): ?><div class="error"><?= h($warn) ?></div><?php endif; ?></div>

@@ -466,7 +466,7 @@ function contract_merge_field_help(): array
 function settings_controller(): void
 {
     require_permission('settings.manage');
-    $keys = ['ip_restrict', 'allowed_ips', 'company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'app_url',
+    $keys = ['ip_restrict', 'allowed_ips', 'company_name', 'company_address', 'company_number', 'company_phone', 'company_email', 'security_contact', 'app_url',
         'mail_from_email', 'mail_from_name', 'mail_reply_to', 'mail_transport', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
         'quote_validity_days', 'quote_terms', 'contracts_auto_on_accept', 'contracts_auto_send', 'esign_remind_days',
         'contract_summary_for', 'quote_acceptance_statement', 'esign_summary_statement', 'esign_sign_statement', 'session_idle_minutes', 'require_2fa', 'force_https',
@@ -550,6 +550,10 @@ function settings_controller(): void
             if ($key === 'require_2fa' && $value === '1' && !current_user()['totp_enabled']) {
                 $value = '0'; // set it up yourself first
                 flash('Set up two-factor sign-in on your own profile before requiring it for everyone.', 'error');
+            }
+            if ($key === 'security_contact' && $value !== '' && security_contact_uri($value) === null) {
+                flash('The security contact should be an email address or a web address starting https://.', 'error');
+                $value = (string)setting('security_contact');
             }
             if ($key === 'contract_summary_for' && !in_array($value, ['all', 'protected'], true)) {
                 $value = 'all';

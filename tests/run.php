@@ -85,6 +85,22 @@ test('contract end date is day before anniversary', function () {
     eq('2025-12-31', contract_end_date('2025-01-01', 12));
 });
 test('escaping helper', fn() => eq('&lt;script&gt;&quot;x&quot;', h('<script>"x"')));
+test('security.txt: contact, rolling expiry, and nothing without a contact', function () {
+    set_setting('security_contact', null);
+    set_setting('company_email', null);
+    eq(null, security_txt());
+    set_setting('company_email', 'hello@example.com');
+    $txt = security_txt(strtotime('2026-11-19 12:00:00 UTC'));
+    eq(true, str_contains($txt, "Contact: mailto:hello@example.com\n"));
+    eq(true, str_contains($txt, "Expires: 2027-05-18T12:00:00Z\n"));
+    set_setting('security_contact', 'https://example.com/report');
+    eq(true, str_contains(security_txt(), "Contact: https://example.com/report\n"));
+    eq(null, security_contact_uri('javascript:alert(1)'));
+    eq(null, security_contact_uri('not an address'));
+    set_setting('security_contact', null);
+    set_setting('company_email', null);
+});
+
 test('PHP2Shell: patched and unpatched PHP versions', function () {
     eq('vulnerable', php2shell_status(80335));
     eq('patched', php2shell_status(80336));

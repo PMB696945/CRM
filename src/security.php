@@ -329,6 +329,7 @@ function security_headers(): void
         header('Location: https://' . ($_SERVER['HTTP_HOST'] ?? '') . ($_SERVER['REQUEST_URI'] ?? '/'), true, 301);
         exit;
     }
+    header_remove('X-Powered-By');
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: same-origin');
@@ -376,4 +377,37 @@ function php2shell_warning(): ?string
     return 'This server runs PHP ' . PHP_VERSION . '. PHP 8.1 and older only get the fix for the critical "PHP2Shell" flaws (CVE-2026-109618 / CVE-2026-109619) from the hosting company, '
         . 'and the version number doesn\'t change, so check with your host (or in WHM) that it\'s patched — on cPanel the ea-php81 package must be 8.1.34-5 or newer — and that PHP has been restarted. '
         . 'Better still, move the CRM to PHP 8.3 or 8.4.' . $mitigated;
+}
+
+/* security.txt (RFC 9116): tells people who find a security problem how to report it. */
+
+/** An email address or https:// address as a security.txt Contact, or null if it's neither. */
+function security_contact_uri(string $contact): ?string
+{
+    $contact = trim($contact);
+    if (filter_var(preg_replace('/^mailto:/i', '', $contact), FILTER_VALIDATE_EMAIL)) {
+        return 'mailto:' . preg_replace('/^mailto:/i', '', $contact);
+    }
+    return preg_match('#^https://[^\s/]+\.[^\s/]+#i', $contact) && filter_var($contact, FILTER_VALIDATE_URL) ? $contact : null;
+}
+
+/** Where security.txt is published: the root of the CRM's domain. */
+function security_txt_url(): string
+{
+    $p = parse_url(app_url());
+    return ($p['scheme'] ?? 'https') . '://' . ($p['host'] ?? 'localhost') . (isset($p['port']) ? ':' . $p['port'] : '') . '/.well-known/security.txt';
+}
+
+/** The file's contents, or null when there's no contact to publish. Expires rolls forward so it never goes stale. */
+function security_txt(?int $now = null): ?string
+{
+    $now ??= time();
+    $contact = security_contact_uri((string)setting('security_contact')) ?? security_contact_uri(company('email'));
+    if ($contact === null) {
+        return null;
+    }
+    return "Contact: $contact\n"
+        . 'Expires: ' . gmdate('Y-m-d\TH:i:s\Z', $now + 180 * 86400) . "\n"
+        . "Preferred-Languages: en\n"
+        . 'Canonical: ' . security_txt_url() . "\n";
 }
