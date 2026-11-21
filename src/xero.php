@@ -571,6 +571,11 @@ function xero_apply_customer_values(int $accountId, array $values, string $why):
         $columns['postcode'] = strtoupper($columns['postcode']);
     }
     if ($columns) {
+        foreach (array_keys($columns) as $k) {
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) {
+                throw new \InvalidArgumentException('Invalid input');
+            }
+        }
         db_exec('UPDATE accounts SET ' . implode(', ', array_map(fn($k) => "$k = ?", array_keys($columns))) . ' WHERE id = ?', [...array_values($columns), $accountId]);
         company_sync('accounts', $accountId);
     }
