@@ -168,6 +168,9 @@ function select_parts(array $entity): array
 
 function find(string $name, int $id): ?array
 {
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+        throw new InvalidArgumentException('Invalid input');
+    }
     $entity = entity($name);
     [$cols, $joins] = select_parts($entity);
     return db_one("SELECT $cols FROM $name t $joins WHERE t.id = ?", [$id]);
@@ -180,6 +183,9 @@ function find(string $name, int $id): ?array
  */
 function list_rows(string $name, array $opts = []): array
 {
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+        throw new InvalidArgumentException('Invalid input');
+    }
     $entity = entity($name);
     [$cols, $joins] = select_parts($entity);
     $where = [];
@@ -256,6 +262,11 @@ function insert_row(string $name, array $data): int
     $virtual = array_intersect_key($data, virtual_fields($name));
     $data = before_save($name, array_diff_key($data, $virtual), null);
     $cols = array_keys($data);
+    foreach (array_merge([$name], $cols) as $identifier) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$identifier)) {
+            throw new InvalidArgumentException('Invalid input');
+        }
+    }
     $sql = sprintf('INSERT INTO %s (%s) VALUES (%s)', $name,
         implode(', ', $cols), implode(', ', array_map(fn($c) => ":$c", $cols)));
     db_exec($sql, $data);
@@ -267,12 +278,20 @@ function insert_row(string $name, array $data): int
 
 function update_row(string $name, int $id, array $data): void
 {
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+        throw new InvalidArgumentException('Invalid input');
+    }
     $existing = db_one("SELECT * FROM $name WHERE id = ?", [$id]);
     if (!$existing) {
         throw new RuntimeException('Record not found');
     }
     $virtual = array_intersect_key($data, virtual_fields($name));
     $data = before_save($name, array_diff_key($data, $virtual), $existing);
+    foreach (array_keys($data) as $column) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$column)) {
+            throw new InvalidArgumentException('Invalid input');
+        }
+    }
     $sets = implode(', ', array_map(fn($c) => "$c = :$c", array_keys($data)));
     db_exec("UPDATE $name SET $sets WHERE id = :_id", $data + ['_id' => $id]);
     after_save($name, $id, $data + $virtual, $existing);
@@ -280,12 +299,18 @@ function update_row(string $name, int $id, array $data): void
 
 function delete_row(string $name, int $id): void
 {
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $name)) {
+        throw new InvalidArgumentException('Invalid input');
+    }
     db_exec("DELETE FROM $name WHERE id = ?", [$id]);
 }
 
 /** Options for a ref <select>, optionally limited to one customer. */
 function ref_options(string $ref, ?int $accountId = null, ?string $extraWhere = null): array
 {
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $ref)) {
+        throw new InvalidArgumentException('Invalid input');
+    }
     $label = REF_LABELS[$ref];
     $where = [];
     $params = [];
